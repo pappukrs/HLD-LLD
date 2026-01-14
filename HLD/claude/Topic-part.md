@@ -1055,4 +1055,129 @@ export default HLDSyllabus;Topics: "Base62, Distributed ID generation, Read-heav
             "Understand when to use 2PC",
             "Read papers: Raft, Dynamo, Bigtable"
           ],
-          key
+         
+          keyTakeaway: "Distributed systems require careful handling of failures, consensus, and consistency trade-offs. Understanding these fundamentals is crucial for designing reliable large-scale systems."
+        },
+        {
+          name: "Module 8.2: Advanced Caching Strategies",
+          depth: "Very Deep",
+          topics: [
+            "Cache invalidation patterns (TTL, Event-based, Write-through)",
+            "Cache warming strategies",
+            "Distributed cache coordination",
+            "Cache aside vs Read-through vs Write-through",
+            "Cache stampede prevention",
+            "Multi-level caching hierarchies"
+          ],
+          practice: [
+            "Design cache invalidation for e-commerce product catalog",
+            "Implement cache-aside pattern with Redis",
+            "Solve cache stampede with locks/probabilistic early expiration",
+            "Design 3-tier cache: Browser → CDN → Redis"
+          ],
+          keyTakeaway: "Effective caching can reduce latency by 10-100x, but requires careful invalidation strategies to maintain data consistency."
+        },
+        {
+          name: "Module 8.3: Advanced Database Patterns",
+          depth: "Very Deep",
+          topics: [
+            "Event Sourcing architecture",
+            "CQRS (Command Query Responsibility Segregation)",
+            "Change Data Capture (CDC)",
+            "Database migration strategies (dual writes, shadow mode)",
+            "Polyglot persistence patterns",
+            "Time-series database optimization"
+          ],
+          practice: [
+            "Design event-sourced order management system",
+            "Implement CQRS for read-heavy analytics dashboard",
+            "Plan zero-downtime migration from MySQL to PostgreSQL",
+            "Design schema for time-series IoT data"
+          ],
+          keyTakeaway: "Advanced database patterns enable scalability and flexibility but add complexity. Use them when specific problems justify the trade-offs."
+        },
+        {
+          name: "Module 8.4: Performance Optimization Deep Dive",
+          depth: "Very Deep",
+          topics: [
+            "Performance profiling techniques",
+            "Database query optimization (EXPLAIN plans, indexes)",
+            "Network optimization (connection pooling, HTTP/2, compression)",
+            "Async processing patterns (job queues, streaming)",
+            "Resource contention handling",
+            "Capacity planning and forecasting"
+          ],
+          practice: [
+            "Optimize slow query from 5s to <100ms using indexes",
+            "Reduce API latency with connection pooling",
+            "Design async email sending with job queue",
+            "Calculate capacity needed for 10x traffic growth"
+          ],
+          keyTakeaway: "Performance optimization is data-driven. Measure first, optimize bottlenecks, then measure again. Premature optimization wastes time."
+        },
+        {
+          name: "Module 8.5: Security Architecture",
+          depth: "Very Deep",
+          topics: [
+            "Defense in depth strategy",
+            "Authentication vs Authorization patterns",
+            "OAuth2 and JWT deep dive",
+            "API security (rate limiting, API keys, encryption)",
+            "Data encryption (at rest, in transit, key management)",
+            "Security threat modeling"
+          ],
+          practice: [
+            "Design OAuth2 flow for third-party integrations",
+            "Implement JWT with proper expiration and refresh",
+            "Design API rate limiting (token bucket algorithm)",
+            "Perform threat modeling for payment system"
+          ],
+          keyTakeaway: "Security must be designed into systems from the start. Every layer should have security controls, and sensitive data requires encryption and access controls."
+        },
+        {
+          name: "Module 8.6: Observability & Monitoring",
+          depth: "Very Deep",
+          topics: [
+            "Three pillars: Metrics, Logs, Traces",
+            "Distributed tracing (OpenTelemetry, Jaeger)",
+            "SLIs, SLOs, and SLAs",
+            "Alerting strategy (what, when, who)",
+            "Error budgets and incident response",
+            "Performance dashboards design"
+          ],
+          practice: [
+            "Define SLOs for API (99.9% uptime, p95 latency <200ms)",
+            "Set up distributed tracing for microservices",
+            "Design alerting rules to avoid alert fatigue",
+            "Create incident runbook for database failover"
+          ],
+          keyTakeaway: "You can't fix what you can't see. Comprehensive observability enables quick problem detection and resolution in production systems."
+        }
+      ],
+      milestoneProject: {
+        name: "Design Complete E-commerce Platform",
+        description: "Apply all advanced concepts to design a production-ready e-commerce system",
+        requirements: [
+          "Handle 10M daily active users with 100K concurrent shoppers",
+          "Design product catalog with 50M products and real-time inventory",
+          "Implement event-sourced order processing with CQRS",
+          "Design payment processing with strong consistency guarantees",
+          "Add distributed tracing and comprehensive monitoring",
+          "Plan for multi-region deployment with low latency worldwide",
+          "Include security, caching, database optimization strategies",
+          "Design disaster recovery and incident response procedures"
+        ],
+        deliverables: [
+          "Complete HLD diagram with all components",
+          "Database schema with sharding/partitioning strategy",
+          "API documentation with security and rate limiting",
+          "Deployment architecture (multi-region, CDN, caching layers)",
+          "Observability plan (metrics, logs, traces, SLOs)",
+          "Disaster recovery and backup strategy",
+          "Capacity planning spreadsheet",
+          "Trade-off analysis document"
+        ],
+        estimatedTime: "15-20 hours",
+        successCriteria: "System design can handle peak Black Friday traffic (10x normal), has <200ms p95 latency globally, 99.95% uptime SLO, and graceful degradation under failure"
+      }
+    }
