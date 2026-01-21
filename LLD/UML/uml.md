@@ -362,10 +362,6 @@ If you say this confidently → **interviewer is satisfied**.
 
 ---
 
-## 🚀 What You Can Do Next
 
-* Print this as **1-page PDF**
-* Read once before interviews
-* Practice 2–3 diagrams daily
 
 
