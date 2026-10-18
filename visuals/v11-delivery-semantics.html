@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Delivery Semantics and Idempotency</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Messaging</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Delivery Semantics and Idempotency</h1>
+    <p class="lede">A consumer can crash between doing the work and sending the ack. Ack first and you may lose a message (at-most-once). Ack after and you may process it twice (at-least-once). An idempotency key turns "twice" into "once in effect".</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A producer, a broker queue, a payment worker, a wallet database and a dedupe table"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Message</span>
+        <span><i style="background: var(--ok)"></i>Ack / commit</span>
+        <span><i style="background: var(--accent)"></i>DB write</span>
+        <span><i style="background: var(--bad)"></i>Lost / duplicate / crash</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The queue gives at-least-once delivery, so duplicates will happen. Every message carries an idempotency key, like the order id. The consumer inserts that key into a processed table with a unique constraint and applies the charge in the same DB transaction. A duplicate fails the insert, so we skip it and ack. That gives an exactly-once effect without needing exactly-once delivery."</p>
+    </div>
+    <div class="note">
+      <h3>Why exactly-once delivery is not on the menu</h3>
+      <p>The ack can be lost on the network. Then the sender cannot know whether the work happened, so it must either retry (risk a duplicate) or give up (risk a loss). No protocol removes this choice.</p>
+      <p>Kafka's "exactly-once" covers read → process → write <b>inside Kafka</b> (idempotent producer + transactions). Side effects outside Kafka, like a card charge or an email, still need idempotency.</p>
+    </div>
+    <div class="note wide">
+      <h3>The three guarantees</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>At-most-once</th><th>At-least-once</th><th>Exactly-once effect</th></tr></thead>
+          <tbody>
+            <tr><td>How</td><td>Ack (or commit offset) before processing; no retries</td><td>Process, then ack; retry on timeout</td><td>At-least-once + idempotent consumer (dedupe key, upsert, conditional write)</td></tr>
+            <tr><td>On a crash</td><td>Message lost</td><td>Message processed again</td><td>Duplicate detected and skipped</td></tr>
+            <tr><td>Cost</td><td>Cheapest</td><td>Cheap</td><td>A dedupe store and a transaction per message</td></tr>
+            <tr><td>Good for</td><td>Metrics, logs, live location pings</td><td>Anything whose handler is naturally idempotent (set status = shipped)</td><td>Payments, wallet updates, sending emails, inventory</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Is "UPDATE balance = balance − 100" idempotent?</summary><div>No: running it twice subtracts 200. "SET status = 'PAID' WHERE id = 42" is idempotent: running it again changes nothing. Make non-idempotent writes safe with a dedupe key in the same transaction.</div></details>
+      <details class="qa"><summary>Why must the dedupe insert and the charge be in one transaction?</summary><div>If you insert the key, then crash before the charge, the retry is skipped and the charge never happens. If you charge, then crash before the insert, the retry charges again. One transaction makes both happen or neither.</div></details>
+      <details class="qa"><summary>How long do you keep processed keys?</summary><div>At least as long as a duplicate can still arrive: the broker retention plus the client retry window, often 24 hours to 7 days. Then delete them with a TTL or a cleanup job.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept cards: <a href="../hld/concepts/19-idempotency-delivery-semantics.md">19 · Idempotency and delivery semantics</a>, <a href="../hld/concepts/20-distributed-transactions.md">20 · Distributed transactions</a></li>
+        <li>API side: <a href="../hld/concepts/04-api-design.md">04 · API design</a> (Idempotency-Key header)</li>
+        <li>Used in: <a href="../hld/problems/08-payment-system/README.md">Payment system</a>, <a href="../hld/problems/05-notification-system/README.md">Notification system</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v10-kafka-consumer-groups.html">← Kafka consumer groups</a>
+    <a href="v12-saga-outbox.html">Saga and transactional outbox →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var PRD = { x: 16, y: 40, w: 160, h: 60 };
+  var BRK = { x: 16, y: 150, w: 176, h: 160 };
+  var WRK = { x: 262, y: 160, w: 170, h: 96 };
+  var DB = { x: 520, y: 50, w: 224, h: 150 };
+  var DD = { x: 520, y: 250, w: 224, h: 150 };
+  var P = {
+    publish: function () { return [[96, PRD.y + PRD.h], [96, BRK.y]]; },
+    deliver: function () { return [[BRK.x + BRK.w, 190], [WRK.x, 190]]; },
+    ack: function () { return [[WRK.x, 232], [BRK.x + BRK.w, 232]]; },
+    db: function () { return [[WRK.x + WRK.w, 190], [476, 190], [476, 125], [DB.x, 125]]; },
+    dd: function () { return [[WRK.x + WRK.w, 226], [476, 226], [476, 325], [DD.x, 325]]; },
+  };
+  function rev(p) { return p.slice().reverse(); }
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+  function clear(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  function render(ctx) {
+    var S = ctx.state;
+    // broker
+    clear(S.brkG);
+    S.queue.slice(-5).forEach(function (m, i) {
+      var y = BRK.y + 50 + i * 20;
+      ctx.el('text', { x: BRK.x + 12, y: y, class: 'mono small', text: m.id + ' ' + m.key }, S.brkG);
+      ctx.el('text', { x: BRK.x + BRK.w - 10, y: y, 'text-anchor': 'end', class: 'mono small ' + (m.cls || 'muted'), text: m.st }, S.brkG);
+    });
+    // worker
+    S.wrkSt.textContent = S.worker.st;
+    S.wrkSt.setAttribute('class', 'mono small ' + (S.worker.down ? 'fill-bad' : 'muted'));
+    S.wrkRect.setAttribute('class', 'box ' + (S.worker.down ? 'bad' : 'accent'));
+    // db
+    S.bal.textContent = 'balance: ' + S.balance;
+    S.bal.setAttribute('class', 'mono ' + (S.balance < S.expected ? 'fill-bad' : ''));
+    clear(S.dbG);
+    S.charges.slice(-4).forEach(function (c, i) {
+      ctx.el('text', { x: DB.x + 14, y: DB.y + 74 + i * 18, class: 'mono small ' + (c.dup ? 'fill-bad' : ''), text: c.key + '  −100' + (c.dup ? '  (duplicate!)' : '') }, S.dbG);
+    });
+    // dedupe
+    clear(S.ddG);
+    if (!S.dedupeOn) ctx.el('text', { x: DD.x + 14, y: DD.y + 70, class: 'mono small muted', text: '(not used yet)' }, S.ddG);
+    S.processed.forEach(function (k, i) {
+      ctx.el('text', { x: DD.x + 14, y: DD.y + 70 + i * 18, class: 'mono small fill-ok', text: k }, S.ddG);
+    });
+  }
+  function setMode(ctx, t) { ctx.state.mode.textContent = t; }
+  function msg(ctx, id) { return ctx.state.queue.filter(function (m) { return m.id === id; })[0]; }
+  function setMsg(ctx, id, st, cls) { var m = msg(ctx, id); m.st = st; m.cls = cls; render(ctx); }
+  function worker(ctx, st, down) { ctx.state.worker = { st: st, down: !!down }; render(ctx); if (down) ctx.flash(ctx.state.wrkG); }
+
+  function enqueue(ctx, id, key) {
+    var S = ctx.state;
+    return ctx.packet(P.publish(), { ms: 400, label: id }).then(function () {
+      if (ctx.state !== S) return;
+      S.queue.push({ id: id, key: key, st: 'ready' });
+      render(ctx);
+    });
+  }
+  function deliver(ctx, id, again) {
+    setMsg(ctx, id, again ? 'redelivered' : 'in flight', again ? 'fill-signal' : 'muted');
+    return ctx.packet(P.deliver(), { ms: 450, label: id }).then(function () { worker(ctx, 'got ' + id); });
+  }
+  function charge(ctx, key, dup) {
+    var S = ctx.state;
+    return ctx.packet(P.db(), { ms: 450, cls: 'accent', label: '−100' }).then(function () {
+      if (ctx.state !== S) return;
+      S.balance -= 100;
+      S.charges.push({ key: key, dup: !!dup });
+      render(ctx);
+      ctx.flash(S.dbBox);
+    });
+  }
+  function ack(ctx, id) {
+    var S = ctx.state;
+    return ctx.packet(P.ack(), { ms: 400, cls: 'ok', label: 'ack' }).then(function () {
+      if (ctx.state !== S) return;
+      setMsg(ctx, id, 'acked', 'fill-ok');
+    });
+  }
+  function crash(ctx, text) {
+    worker(ctx, 'CRASHED', true);
+    ctx.log(text, 'bad');
+    return ctx.wait(500);
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A payment worker reads a queue',
+      say: 'Each message means "charge 100 for this order". The worker charges the wallet and then acks, so the broker can forget the message. Watch what one crash does in three setups. The wallet starts at 1000.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.queue = []; S.charges = []; S.processed = [];
+      S.balance = 1000; S.expected = 1000; S.dedupeOn = false;
+      S.worker = { st: 'idle', down: false };
+      S.mode = ctx.el('text', { x: 214, y: 30, class: 'title', text: 'Normal flow' });
+      Object.keys(P).forEach(function (k) { ctx.el('polyline', { points: P[k]().join(' '), class: 'wire' + (k === 'ack' ? ' dashed' : '') }); });
+      ctx.el('text', { x: 200, y: 182, class: 'mono small muted', text: 'deliver' });
+      ctx.el('text', { x: 200, y: 250, class: 'mono small muted', text: 'ack' });
+      ctx.el('rect', { x: PRD.x, y: PRD.y, width: PRD.w, height: PRD.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: PRD.x + 14, y: PRD.y + 26, class: 'title', text: 'Checkout service' });
+      ctx.el('text', { x: PRD.x + 14, y: PRD.y + 46, class: 'mono small muted', text: 'producer' });
+      ctx.el('rect', { x: BRK.x, y: BRK.y, width: BRK.w, height: BRK.h, rx: 10, class: 'box' });
+      ctx.el('text', { x: BRK.x + 12, y: BRK.y + 24, class: 'title', text: 'Queue' });
+      ctx.el('text', { x: BRK.x + BRK.w - 10, y: BRK.y + 24, 'text-anchor': 'end', class: 'mono small muted', text: 'SQS / Kafka' });
+      S.brkG = ctx.group();
+      S.wrkG = ctx.group();
+      S.wrkRect = ctx.el('rect', { x: WRK.x, y: WRK.y, width: WRK.w, height: WRK.h, rx: 10, class: 'box accent' }, S.wrkG);
+      ctx.el('text', { x: WRK.x + WRK.w / 2, y: WRK.y + 36, 'text-anchor': 'middle', class: 'title', text: 'Payment worker' }, S.wrkG);
+      S.wrkSt = ctx.el('text', { x: WRK.x + WRK.w / 2, y: WRK.y + 60, 'text-anchor': 'middle', class: 'mono small muted', text: '' }, S.wrkG);
+      S.dbBox = ctx.group();
+      ctx.el('rect', { x: DB.x, y: DB.y, width: DB.w, height: DB.h, rx: 10, class: 'box' }, S.dbBox);
+      ctx.el('text', { x: DB.x + 14, y: DB.y + 24, class: 'title', text: 'Wallet DB' }, S.dbBox);
+      S.bal = ctx.el('text', { x: DB.x + 14, y: DB.y + 48, class: 'mono', text: '' }, S.dbBox);
+      S.dbG = ctx.group();
+      ctx.el('rect', { x: DD.x, y: DD.y, width: DD.w, height: DD.h, rx: 10, class: 'box' });
+      ctx.el('text', { x: DD.x + 14, y: DD.y + 24, class: 'title', text: 'processed_ids' });
+      ctx.el('text', { x: DD.x + 14, y: DD.y + 44, class: 'mono small muted', text: 'same DB · UNIQUE(key)' });
+      S.ddG = ctx.group();
+      render(ctx);
+    },
+    steps: [
+      {
+        title: 'Normal: deliver, charge, ack',
+        say: 'Message m1 asks to charge order-41. The worker charges the wallet (1000 → 900) and then acks. The broker marks m1 done and will not send it again. With no crash, every guarantee looks the same.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return enqueue(ctx, 'm1', 'order-41'); },
+            function () { return deliver(ctx, 'm1'); },
+            function () { S.expected -= 100; worker(ctx, 'charging order-41'); return charge(ctx, 'order-41'); },
+            function () { return ack(ctx, 'm1'); },
+            function () { worker(ctx, 'idle'); ctx.log('m1: charged once, acked', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'At-most-once: ack first, then crash',
+        say: 'Now the worker acks <b>as soon as it receives</b> m2, before doing the work. Then it crashes. The broker thinks m2 is done and never sends it again. Order-42 is never charged: the message is <b>lost</b>. OK for metrics, not for money.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setMode(ctx, 'At-most-once: ack before work');
+          return seq(ctx, [
+            function () { return enqueue(ctx, 'm2', 'order-42'); },
+            function () { return deliver(ctx, 'm2'); },
+            function () { return ack(ctx, 'm2'); },
+            function () { return crash(ctx, 'Worker crashed after ack, before charging'); },
+            function () { setMsg(ctx, 'm2', 'LOST', 'fill-bad'); worker(ctx, 'restarted'); ctx.log('order-42 never charged. m2 will not come back', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'At-least-once: work first, crash before the ack',
+        say: 'Switch the order: charge first, ack after. The worker charges order-43 (900 → 800) and then crashes <b>before</b> its ack. The broker never got the ack, so after the visibility timeout (or a rebalance) it will deliver m3 again.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setMode(ctx, 'At-least-once: ack after work');
+          return seq(ctx, [
+            function () { return enqueue(ctx, 'm3', 'order-43'); },
+            function () { return deliver(ctx, 'm3'); },
+            function () { S.expected -= 100; return charge(ctx, 'order-43'); },
+            function () { return crash(ctx, 'Worker charged order-43, crashed before ack'); },
+            function () { setMsg(ctx, 'm3', 'no ack', 'fill-signal'); worker(ctx, 'restarted'); ctx.log('Broker: no ack for m3 → will redeliver', 'warn'); },
+          ]);
+        },
+      },
+      {
+        title: 'The redelivery charges twice',
+        say: 'm3 comes back. The new worker has no memory of the first attempt, so it charges order-43 <b>again</b> (800 → 700). Nothing was lost, but the customer paid twice. At-least-once is only safe if the handler is idempotent.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return deliver(ctx, 'm3', true); },
+            function () { return charge(ctx, 'order-43', true); },
+            function () { return ack(ctx, 'm3'); },
+            function () { worker(ctx, 'idle'); ctx.log('order-43 charged twice! balance 700, should be 800', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'Fix: a dedupe key in the same transaction',
+        say: 'Each message carries an idempotency key (the order id). In <b>one DB transaction</b> the worker inserts the key into <code>processed_ids</code> (UNIQUE) and applies the charge. For order-44 the insert succeeds, so the charge runs (700 → 600). Then the worker crashes before the ack.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setMode(ctx, 'Exactly-once effect: idempotent consumer');
+          S.dedupeOn = true;
+          S.expected = S.balance;
+          render(ctx);
+          return seq(ctx, [
+            function () { return enqueue(ctx, 'm4', 'order-44'); },
+            function () { return deliver(ctx, 'm4'); },
+            function () { worker(ctx, 'BEGIN'); return ctx.packet(P.dd(), { ms: 450, cls: 'accent', label: 'INSERT' }); },
+            function () { S.processed.push('order-44'); render(ctx); ctx.log('INSERT order-44 into processed_ids: ok', 'ok'); S.expected -= 100; return charge(ctx, 'order-44'); },
+            function () { worker(ctx, 'COMMIT'); ctx.log('COMMIT: key + charge saved together', 'ok'); return crash(ctx, 'Worker crashed before ack (again)'); },
+            function () { setMsg(ctx, 'm4', 'no ack', 'fill-signal'); worker(ctx, 'restarted'); },
+          ]);
+        },
+      },
+      {
+        title: 'The duplicate is detected and skipped',
+        say: 'm4 is delivered again. The worker starts the same transaction, but the INSERT of order-44 fails on the unique key. So it rolls back, skips the charge and just acks. The balance stays 600. Delivered twice, applied once: an <b>exactly-once effect</b>.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return deliver(ctx, 'm4', true); },
+            function () { worker(ctx, 'BEGIN'); return ctx.packet(P.dd(), { ms: 450, cls: 'accent', label: 'INSERT' }); },
+            function () { ctx.flash(S.ddG); return ctx.packet(rev(P.dd()), { ms: 400, cls: 'bad', label: 'dup key' }); },
+            function () { worker(ctx, 'ROLLBACK, skip'); ctx.log('order-44 already processed → skip charge', 'ok'); return ack(ctx, 'm4'); },
+            function () { worker(ctx, 'idle'); ctx.log('Balance unchanged: 600', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'Producer retries make duplicates too',
+        say: 'Duplicates also start upstream. Checkout publishes m5 for order-45, but the broker\'s ack is lost, so checkout publishes it again. The queue now holds two copies with the <b>same key</b>. (Kafka\'s idempotent producer removes this case using sequence numbers.)',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return enqueue(ctx, 'm5', 'order-45'); },
+            function () { return ctx.packet(rev(P.publish()), { ms: 350, cls: 'bad', label: 'ack lost' }); },
+            function () { ctx.log('Publish ack lost → checkout retries', 'warn'); return enqueue(ctx, 'm5b', 'order-45'); },
+            function () { ctx.log('Queue holds m5 and m5b, both order-45', 'warn'); },
+          ]);
+        },
+      },
+      {
+        title: 'The same key protects both copies',
+        say: 'm5 is processed normally (600 → 500). m5b fails the unique insert and is skipped. The key, not the message id, is what matters: it must come from the business action (order id, or a client-sent <code>Idempotency-Key</code> header), so every retry carries the same one.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return deliver(ctx, 'm5'); },
+            function () { return ctx.packet(P.dd(), { ms: 400, cls: 'accent', label: 'INSERT' }); },
+            function () { S.processed.push('order-45'); render(ctx); S.expected -= 100; return charge(ctx, 'order-45'); },
+            function () { return ack(ctx, 'm5'); },
+            function () { return deliver(ctx, 'm5b'); },
+            function () { return ctx.packet(P.dd(), { ms: 400, cls: 'accent', label: 'INSERT' }); },
+            function () { return ctx.packet(rev(P.dd()), { ms: 380, cls: 'bad', label: 'dup key' }); },
+            function () { return ack(ctx, 'm5b'); },
+            function () { worker(ctx, 'idle'); ctx.log('m5b skipped. order-45 charged once. Balance 500', 'ok'); },
+          ]);
+        },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>

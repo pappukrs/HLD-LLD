@@ -1,0 +1,11 @@
+// Rename to <name>.test.ts when you copy this folder.
+import * as starter from './starter';
+import * as reference from './reference';
+
+const { Example } = (process.env.REF ? reference : starter) as typeof reference;
+
+describe('NN · Problem name', () => {
+  it('does the main thing', () => {
+    expect(new Example().doSomething('a')).toBe('A');
+  });
+});

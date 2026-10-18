@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>CAP Under a Partition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage .cut { stroke: var(--bad); stroke-width: 2; stroke-dasharray: 8 6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Consistency</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>CAP Under a Network Partition</h1>
+    <p class="lede">Networks do break. When nodes cannot talk, a replicated system must choose: refuse some requests to stay correct (CP), or answer every request and fix differences later (AP). Without a partition you get both.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Three replicas split by a network partition, with two clients"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Write / replication</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Rejected / cut link</span>
+        <span><i style="background: var(--signal)"></i>Diverged data</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Partitions will happen, so the real choice is what to do during one. For payments and inventory I choose CP: the minority side rejects writes, and users retry. For a shopping cart, likes or a feed I choose AP: every side accepts writes and we merge later with version vectors or CRDTs. Even with no partition there is a trade-off between latency and consistency: that is PACELC."</p>
+    </div>
+    <div class="note">
+      <h3>Common misreadings</h3>
+      <ul>
+        <li>"Pick 2 of 3" is wrong: you cannot give up P. You pick C or A <b>while</b> partitioned.</li>
+        <li>CAP's C is linearizability, not the C in ACID.</li>
+        <li>CAP's A means every non-failed node answers. A CP system is still usually up; only the minority side refuses.</li>
+        <li>Many systems are tunable per request (Cassandra consistency levels, DynamoDB strongly consistent reads).</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>CP vs AP during a partition</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>CP</th><th>AP</th></tr></thead>
+          <tbody>
+            <tr><td>Majority side</td><td>Keeps reading and writing</td><td>Keeps reading and writing</td></tr>
+            <tr><td>Minority side</td><td>Rejects writes (and strong reads)</td><td>Accepts writes locally</td></tr>
+            <tr><td>Reads</td><td>Always the latest committed value</td><td>May be stale or differ by side</td></tr>
+            <tr><td>After healing</td><td>Minority catches up from the log; nothing to merge</td><td>Detect conflicts (version vectors), then merge: LWW, CRDT or app logic</td></tr>
+            <tr><td>Examples</td><td>etcd, ZooKeeper, Spanner, HBase, MongoDB with majority writes</td><td>Cassandra, DynamoDB (default), Riak, CouchDB, DNS</td></tr>
+            <tr><td>Good for</td><td>Payments, inventory, locks, leader election, unique usernames</td><td>Carts, likes, presence, feeds, metrics</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why can't a 2-node cluster stay CP if the link breaks?</summary><div>Neither side has a majority (2 of 2 needed), so a CP system must stop writes on both sides. That is why consensus clusters use 3 or 5 nodes: one side always can have a majority.</div></details>
+      <details class="qa"><summary>What does last-write-wins lose?</summary><div>Concurrent updates. If two sides add different items to a cart, LWW keeps one write and silently drops the other. Clock skew can even make an older write "win". Merging (union, CRDT) keeps both.</div></details>
+      <details class="qa"><summary>What is PACELC?</summary><div>If Partition: choose Availability or Consistency. Else (normal operation): choose Latency or Consistency. Waiting for remote replicas makes reads correct but slower. DynamoDB and Cassandra are PA/EL; Spanner is PC/EC.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept cards: <a href="../hld/concepts/15-cap-pacelc-consistency.md">15 · CAP, PACELC and consistency models</a>, <a href="../hld/concepts/16-quorum-leaderless.md">16 · Quorums and leaderless replication</a></li>
+        <li>Majority voting: <a href="../hld/concepts/30-consensus-coordination.md">30 · Consensus and coordination</a></li>
+        <li>Used in: <a href="../hld/problems/04-key-value-store/README.md">Key-value store</a>, <a href="../hld/problems/09-ticket-booking/README.md">Ticket booking</a> (CP for seats)</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v06-sharding.html">← Sharding strategies</a>
+    <a href="v08-quorum.html">Quorum reads and writes →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var NW = 170, NH = 118;
+  var N = { A: { x: 170, y: 46, side: 'west' }, C: { x: 170, y: 262, side: 'west' }, B: { x: 448, y: 150, side: 'east' } };
+  var C1 = { x: 16, y: 176, w: 112, h: 64 }, C2 = { x: 652, y: 176, w: 92, h: 64 };
+  var P = {
+    c1A: function () { return [[C1.x + C1.w, 208], [148, 208], [148, 105], [N.A.x, 105]]; },
+    c1C: function () { return [[C1.x + C1.w, 208], [148, 208], [148, 321], [N.C.x, 321]]; },
+    c2B: function () { return [[C2.x, 208], [N.B.x + NW, 208]]; },
+    AC: function () { return [[255, N.A.y + NH], [255, N.C.y]]; },
+    AB: function () { return [[N.A.x + NW, 105], [N.B.x, 190]]; },
+    CB: function () { return [[N.C.x + NW, 321], [N.B.x, 228]]; },
+  };
+  function rev(p) { return p.slice().reverse(); }
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+
+  function drawNode(ctx, id) {
+    var p = N[id], g = ctx.group(), v = { g: g };
+    v.rect = ctx.el('rect', { x: p.x, y: p.y, width: NW, height: NH, rx: 10, class: 'box' }, g);
+    ctx.el('text', { x: p.x + 14, y: p.y + 24, class: 'title', text: 'Node ' + id }, g);
+    ctx.el('text', { x: p.x + NW - 12, y: p.y + 24, 'text-anchor': 'end', class: 'mono small muted', text: p.side }, g);
+    v.val = ctx.el('text', { x: p.x + 14, y: p.y + 46, class: 'mono', text: '' }, g);
+    v.val2 = ctx.el('text', { x: p.x + 54, y: p.y + 62, class: 'mono', text: '' }, g);
+    v.meta = ctx.el('text', { x: p.x + 14, y: p.y + 84, class: 'mono small muted', text: '' }, g);
+    v.status = ctx.el('text', { x: p.x + 14, y: p.y + 104, class: 'mono small', text: '' }, g);
+    ctx.state.v[id] = v;
+  }
+  function render(ctx, id) {
+    var S = ctx.state, n = S.n[id], v = S.v[id];
+    v.val.textContent = 'cart: ' + n.cart.slice(0, 3).join(', ');
+    v.val2.textContent = n.cart.length > 3 ? n.cart.slice(3).join(', ') : '';
+    v.meta.textContent = n.meta || '';
+    v.status.textContent = n.status || '';
+    v.status.setAttribute('class', 'mono small ' + (n.sCls || 'fill-ok'));
+    v.rect.setAttribute('class', 'box ' + (n.box || ''));
+  }
+  function upd(ctx, id, o) {
+    var n = ctx.state.n[id];
+    Object.keys(o).forEach(function (k) { n[k] = o[k]; });
+    render(ctx, id);
+    ctx.flash(ctx.state.v[id].g);
+  }
+  function setMode(ctx, t) { ctx.state.mode.textContent = t; }
+  function partition(ctx, on) {
+    var S = ctx.state;
+    S.w.AB.setAttribute('class', on ? 'wire bad' : 'wire');
+    S.w.CB.setAttribute('class', on ? 'wire bad' : 'wire');
+    return ctx.fade(S.cut, on ? 1 : 0, 400);
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three replicas, two regions',
+      say: 'Nodes A and C are in the west region, node B is in the east. Every node has a copy of a shopping cart. We cut the network between the regions, and play it twice: once as a <b>CP</b> system and once as an <b>AP</b> system.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.v = {}; S.w = {};
+      S.n = {
+        A: { cart: ['book'], meta: 'log index 1', status: 'ok' },
+        B: { cart: ['book'], meta: 'log index 1', status: 'ok' },
+        C: { cart: ['book'], meta: 'log index 1', status: 'ok' },
+      };
+      S.mode = ctx.el('text', { x: 16, y: 26, class: 'title', text: 'Normal operation' });
+      Object.keys(P).forEach(function (k) { S.w[k] = ctx.el('polyline', { points: P[k]().join(' '), class: 'wire' }); });
+      S.cut = ctx.group({ opacity: 0 });
+      ctx.el('line', { x1: 398, y1: 40, x2: 398, y2: 420, class: 'cut' }, S.cut);
+      ctx.el('text', { x: 406, y: 52, class: 'mono small fill-bad', text: 'network partition' }, S.cut);
+      ctx.el('rect', { x: C1.x, y: C1.y, width: C1.w, height: C1.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: C1.x + C1.w / 2, y: C1.y + 27, 'text-anchor': 'middle', class: 'title', text: 'Client 1' });
+      ctx.el('text', { x: C1.x + C1.w / 2, y: C1.y + 46, 'text-anchor': 'middle', class: 'mono small muted', text: 'west user' });
+      ctx.el('rect', { x: C2.x, y: C2.y, width: C2.w, height: C2.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: C2.x + C2.w / 2, y: C2.y + 27, 'text-anchor': 'middle', class: 'title', text: 'Client 2' });
+      ctx.el('text', { x: C2.x + C2.w / 2, y: C2.y + 46, 'text-anchor': 'middle', class: 'mono small muted', text: 'east user' });
+      ['A', 'B', 'C'].forEach(function (id) { drawNode(ctx, id); render(ctx, id); });
+      S.result = ctx.el('text', { x: 16, y: 426, class: 'mono small muted', text: '' });
+    },
+    steps: [
+      {
+        title: 'Normal: every write reaches every node',
+        say: 'Client 1 adds a pen. Node A replicates it, and the write commits when a majority (2 of 3) has it. B gets it too. Any client reading any node sees the same cart: consistent <b>and</b> available.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return ctx.packet(P.c1A(), { ms: 500, cls: 'accent', label: '+pen' }); },
+            function () { upd(ctx, 'A', { cart: ['book', 'pen'], meta: 'log index 2' }); return Promise.all([ctx.packet(P.AC(), { ms: 450, cls: 'accent', r: 5 }), ctx.packet(P.AB(), { ms: 550, cls: 'accent', r: 5 })]); },
+            function () {
+              upd(ctx, 'C', { cart: ['book', 'pen'], meta: 'log index 2' });
+              upd(ctx, 'B', { cart: ['book', 'pen'], meta: 'log index 2' });
+              ctx.log('+pen committed on A, C, B', 'ok');
+              return ctx.packet(rev(P.c1A()), { ms: 400, cls: 'ok', label: 'ok' });
+            },
+          ]);
+        },
+      },
+      {
+        title: 'The link between regions breaks',
+        say: 'A network partition: all nodes are still running, and each client can still reach its local node. But west and east cannot talk. Now the system must choose for requests on each side: stay <b>consistent</b> or stay <b>available</b>.',
+        run: function (ctx) {
+          setMode(ctx, 'Partition: west {A, C} | east {B}');
+          ctx.log('Partition: A,C cannot reach B', 'bad');
+          return seq(ctx, [
+            function () { return partition(ctx, true); },
+            function () { return ctx.packet([P.AB()[0], [398, 140]], { ms: 400, cls: 'bad', r: 5 }); },
+            function () { upd(ctx, 'B', { status: 'cannot reach A, C', sCls: 'fill-bad' }); },
+          ]);
+        },
+      },
+      {
+        title: 'CP: the majority side keeps working',
+        say: 'Choose <b>CP</b>. A and C are 2 of 3 nodes, a majority, so they can still commit. Client 1 adds a mug: A and C agree, the write commits, and Client 1 gets success. Users in the west notice nothing.',
+        run: function (ctx) {
+          setMode(ctx, 'CP choice: only the majority commits');
+          upd(ctx, 'A', { status: 'majority (2/3)', sCls: 'fill-ok' });
+          upd(ctx, 'C', { status: 'majority (2/3)', sCls: 'fill-ok' });
+          return seq(ctx, [
+            function () { return ctx.packet(P.c1A(), { ms: 500, cls: 'accent', label: '+mug' }); },
+            function () { return ctx.packet(P.AC(), { ms: 450, cls: 'accent', r: 5 }); },
+            function () {
+              upd(ctx, 'A', { cart: ['book', 'pen', 'mug'], meta: 'log index 3' });
+              upd(ctx, 'C', { cart: ['book', 'pen', 'mug'], meta: 'log index 3' });
+              ctx.log('+mug committed by A + C (2 of 3)', 'ok');
+              return ctx.packet(rev(P.c1A()), { ms: 400, cls: 'ok', label: 'ok' });
+            },
+          ]);
+        },
+      },
+      {
+        title: 'CP: the minority side refuses',
+        say: 'Client 2 tries to add a lamp on node B. B is alone, 1 of 3, and cannot get a majority. It <b>rejects</b> the write and also refuses a strong read, because its data may be old. Correct, but not available for east users.',
+        run: function (ctx) {
+          upd(ctx, 'B', { status: 'minority: rejects', sCls: 'fill-bad', box: 'bad' });
+          return seq(ctx, [
+            function () { return ctx.packet(P.c2B(), { ms: 450, cls: 'accent', label: '+lamp' }); },
+            function () { ctx.log('B: +lamp rejected (no majority) → 503', 'bad'); return ctx.packet(rev(P.c2B()), { ms: 400, cls: 'bad', label: '503' }); },
+            function () { return ctx.packet(P.c2B(), { ms: 400, label: 'read' }); },
+            function () { ctx.log('B: strong read rejected (may be stale)', 'bad'); return ctx.packet(rev(P.c2B()), { ms: 400, cls: 'bad', label: '503' }); },
+          ]);
+        },
+      },
+      {
+        title: 'CP: heal and catch up',
+        say: 'The network heals. B learns it missed log index 3 and copies it from the leader. There is nothing to merge, because only one side accepted writes. Client 2 just has to retry the lamp. Now reset the story and try AP.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setMode(ctx, 'CP: healed, no conflicts');
+          return seq(ctx, [
+            function () { return partition(ctx, false); },
+            function () { return ctx.packet(P.AB(), { ms: 600, cls: 'accent', r: 5, label: 'log 3' }); },
+            function () {
+              upd(ctx, 'B', { cart: ['book', 'pen', 'mug'], meta: 'log index 3', status: 'ok', sCls: 'fill-ok', box: '' });
+              upd(ctx, 'A', { status: 'ok' }); upd(ctx, 'C', { status: 'ok' });
+              ctx.log('B caught up from the log. No merge needed', 'ok');
+              S.result.textContent = 'CP result: never inconsistent, but east users got errors during the partition.';
+            },
+          ]);
+        },
+      },
+      {
+        title: 'AP: same partition, both sides accept',
+        say: 'Same start, but now we choose <b>AP</b>. The link breaks again. Client 1 adds a lamp on A (and C gets it). Client 2 adds a fan on B. Both writes succeed at once. Every user is served.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setMode(ctx, 'AP choice: every side accepts writes');
+          S.result.textContent = '';
+          ['A', 'B', 'C'].forEach(function (id) { upd(ctx, id, { cart: ['book', 'pen', 'mug'], meta: 'clock {A:3}', status: 'ok', sCls: 'fill-ok', box: '' }); });
+          ctx.log('AP mode: partition again', 'warn');
+          return seq(ctx, [
+            function () { return partition(ctx, true); },
+            function () { return Promise.all([ctx.packet(P.c1A(), { ms: 500, cls: 'accent', label: '+lamp' }), ctx.packet(P.c2B(), { ms: 500, cls: 'accent', label: '+fan' })]); },
+            function () {
+              upd(ctx, 'A', { cart: ['book', 'pen', 'mug', 'lamp'], meta: 'clock {A:4}', box: 'signal' });
+              upd(ctx, 'B', { cart: ['book', 'pen', 'mug', 'fan'], meta: 'clock {A:3, B:1}', box: 'signal', status: 'accepting alone', sCls: 'fill-signal' });
+              return ctx.packet(P.AC(), { ms: 450, cls: 'accent', r: 5 });
+            },
+            function () {
+              upd(ctx, 'C', { cart: ['book', 'pen', 'mug', 'lamp'], meta: 'clock {A:4}', box: 'signal' });
+              ctx.log('A: +lamp ok. B: +fan ok. Both sides available', 'ok');
+              return Promise.all([ctx.packet(rev(P.c1A()), { ms: 400, cls: 'ok', label: 'ok' }), ctx.packet(rev(P.c2B()), { ms: 400, cls: 'ok', label: 'ok' })]);
+            },
+          ]);
+        },
+      },
+      {
+        title: 'AP: the two sides now disagree',
+        say: 'Client 1 reads a cart with a lamp. Client 2 reads the same cart with a fan. Same key, two answers: the system is available but <b>not consistent</b>. Each node keeps a version vector, so it can tell later that the writes were concurrent.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return Promise.all([ctx.packet(P.c1C(), { ms: 500, label: 'read' }), ctx.packet(P.c2B(), { ms: 500, label: 'read' })]); },
+            function () {
+              ctx.log('Client 1 sees …, lamp', 'warn');
+              ctx.log('Client 2 sees …, fan', 'warn');
+              return Promise.all([ctx.packet(rev(P.c1C()), { ms: 450, cls: 'signal', label: 'lamp' }), ctx.packet(rev(P.c2B()), { ms: 450, cls: 'signal', label: 'fan' })]);
+            },
+            function () { ctx.log('{A:4} vs {A:3, B:1}: neither is newer → conflict', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'AP: heal and reconcile',
+        say: 'The link heals. The nodes swap versions (anti-entropy or read repair) and find concurrent writes. For a cart, the merge is a union: book, pen, mug, lamp, fan. Last-write-wins would be simpler but would silently drop the lamp or the fan.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var all = ['book', 'pen', 'mug', 'lamp', 'fan'];
+          setMode(ctx, 'AP: healed and merged');
+          return seq(ctx, [
+            function () { return partition(ctx, false); },
+            function () { return Promise.all([ctx.packet(P.AB(), { ms: 600, cls: 'accent', r: 5 }), ctx.packet(rev(P.CB()), { ms: 600, cls: 'accent', r: 5 })]); },
+            function () {
+              ['A', 'B', 'C'].forEach(function (id) { upd(ctx, id, { cart: all, meta: 'clock {A:4, B:1}', status: 'merged', sCls: 'fill-ok', box: 'ok' }); });
+              ctx.log('Merged by union: all 5 items kept', 'ok');
+              S.result.textContent = 'AP result: always answered, but users saw different data until the merge.';
+            },
+          ]);
+        },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>

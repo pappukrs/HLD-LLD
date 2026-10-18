@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Quorum Reads and Writes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage .ring-w { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 7 4; }
+  .stage .ring-r { fill: none; stroke: var(--signal); stroke-width: 2.5; }
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Consistency</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Quorum Reads and Writes</h1>
+    <p class="lede">In a leaderless store, each key lives on N replicas. A write succeeds when W replicas ack it; a read asks R replicas and keeps the newest version. If R + W &gt; N, every read set overlaps every write set, so a read always sees the latest successful write.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A coordinator and three replicas, with the write set and read set marked"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="selW">W <select id="selW"><option>1</option><option selected>2</option><option>3</option></select></label>
+        <label for="selR">R <select id="selR"><option>1</option><option selected>2</option><option>3</option></select></label>
+        <button class="btn" type="button" id="doWrite">Write</button>
+        <button class="btn" type="button" id="doRead">Read</button>
+        <button class="btn" type="button" id="toggleR3">R3 down</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Write set (dashed)</span>
+        <span><i style="background: var(--signal)"></i>Read set (solid)</span>
+        <span><i style="background: var(--ok)"></i>Newest version</span>
+        <span><i style="background: var(--bad)"></i>Stale / down</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each key is stored on N = 3 replicas. I use W = 2 and R = 2, so R + W &gt; N and every read overlaps the last write; the coordinator returns the highest version and repairs stale replicas. With one node down, both reads and writes still succeed. For write-heavy keys I could pick W = 1, R = 3, but then a single lost node can lose acked writes. During bigger outages a sloppy quorum with hinted handoff keeps writes available, but it gives up the overlap guarantee."</p>
+    </div>
+    <div class="note">
+      <h3>What the overlap does not give you</h3>
+      <ul>
+        <li>Concurrent writes still conflict: you need versions (vector clocks) or last-write-wins.</li>
+        <li>A write that failed (fewer than W acks) may still sit on some replicas; it is not rolled back.</li>
+        <li>Sloppy quorums break the R + W &gt; N guarantee until hints are handed off.</li>
+        <li>It is not linearizable on its own; that needs extra steps (e.g. read repair before returning).</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Common settings for N = 3</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>W</th><th>R</th><th>R + W &gt; N?</th><th>Good at</th><th>Cost</th></tr></thead>
+          <tbody>
+            <tr><td>2</td><td>2</td><td>Yes (4)</td><td>Balanced; survives 1 node down for both reads and writes</td><td>2 round trips worth of waiting on each side</td></tr>
+            <tr><td>3</td><td>1</td><td>Yes (4)</td><td>Fastest reads</td><td>Any node down → writes fail</td></tr>
+            <tr><td>1</td><td>3</td><td>Yes (4)</td><td>Fastest writes</td><td>Any node down → reads fail; a crash after 1 ack loses the write</td></tr>
+            <tr><td>1</td><td>1</td><td>No (2)</td><td>Lowest latency, highest availability</td><td>Stale reads are normal (eventual consistency)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>N = 5. Which R and W give fresh reads and survive 2 nodes down?</summary><div>W = 3 and R = 3. R + W = 6 &gt; 5, and both need only 3 of 5 nodes, so up to 2 can be down.</div></details>
+      <details class="qa"><summary>Cassandra QUORUM vs LOCAL_QUORUM?</summary><div>QUORUM counts replicas across all data centres, so it pays cross-region latency. LOCAL_QUORUM counts only the local DC: fast, and fresh within that DC, but another DC can be behind.</div></details>
+      <details class="qa"><summary>How do stale replicas get fixed?</summary><div>Read repair: the coordinator writes the newest version back to stale replicas it read. Hinted handoff: a stand-in node replays writes when the owner returns. Anti-entropy: background Merkle-tree comparison finds and fixes the rest.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../hld/concepts/16-quorum-leaderless.md">16 · Quorums and leaderless replication</a></li>
+        <li>Code it: <a href="../hld/code/08-quorum-kv/README.md">hld/code/08-quorum-kv</a></li>
+        <li>Used in: <a href="../hld/problems/04-key-value-store/README.md">Key-value store</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v07-cap-partition.html">← CAP under a partition</a>
+    <a href="v09-rate-limiting.html">Rate limiting algorithms →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var NW = 150, NH = 104, NY = 196;
+  var NX = [24, 206, 388, 584];
+  var CO = { x: 300, y: 28, w: 170, h: 66 };
+  var CL = { x: 16, y: 34, w: 110, h: 54 };
+  var COLORS = ['green', 'blue', 'red', 'gold', 'teal', 'pink', 'grey', 'lime'];
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+  function toNode(i) { var cx = NX[i] + NW / 2; return [[CO.x + CO.w / 2, CO.y + CO.h], [CO.x + CO.w / 2, 150], [cx, 150], [cx, NY]]; }
+  function fromNode(i) { return toNode(i).slice().reverse(); }
+  function clientCo() { return [[CL.x + CL.w, 61], [CO.x, 61]]; }
+
+  function render(ctx) {
+    var S = ctx.state;
+    var newest = Math.max.apply(null, S.nodes.slice(0, 3).map(function (n) { return n.ver; }));
+    S.nodes.forEach(function (n, i) {
+      var v = n.v;
+      v.val.textContent = n.ver ? 'value: ' + n.val : 'value: -';
+      v.ver.textContent = 'version: ' + (n.ver || '-');
+      v.ver.setAttribute('class', 'mono small ' + (i < 3 && n.ver === newest ? 'fill-ok' : i < 3 ? 'fill-bad' : 'muted'));
+      v.status.textContent = n.down ? 'DOWN' : n.hint ? 'hint for R3: v' + n.hint.ver : i === 3 ? 'stand-in node' : 'up';
+      v.status.setAttribute('class', 'mono small ' + (n.down ? 'fill-bad' : n.hint ? 'fill-signal' : 'muted'));
+      v.rect.setAttribute('class', 'box ' + (n.down ? 'bad dim' : ''));
+    });
+    S.formula.textContent = 'N = 3   W = ' + S.W + '   R = ' + S.R + '   →   R + W = ' + (S.R + S.W) + (S.R + S.W > 3 ? ' > 3: read and write sets always overlap' : ' ≤ 3: a read can miss the last write');
+    S.formula.setAttribute('class', 'mono ' + (S.R + S.W > 3 ? 'fill-ok' : 'fill-bad'));
+    var b = document.getElementById('toggleR3');
+    if (b) b.textContent = S.nodes[2].down ? 'R3 up' : 'R3 down';
+    var sw = document.getElementById('selW'), sr = document.getElementById('selR');
+    if (sw) sw.value = String(S.W);
+    if (sr) sr.value = String(S.R);
+  }
+  function setRW(ctx, W, R) { ctx.state.W = W; ctx.state.R = R; render(ctx); }
+
+  function sets(ctx, w, r) {
+    var g = ctx.state.setsG;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    (w || []).forEach(function (i) { ctx.el('rect', { x: NX[i] - 6, y: NY - 6, width: NW + 12, height: NH + 12, rx: 13, class: 'ring-w' }, g); });
+    (r || []).forEach(function (i) { ctx.el('rect', { x: NX[i] - 11, y: NY - 11, width: NW + 22, height: NH + 22, rx: 16, class: 'ring-r' }, g); });
+    [0, 1, 2, 3].forEach(function (i) {
+      var tags = [];
+      if ((w || []).indexOf(i) >= 0) tags.push('in W');
+      if ((r || []).indexOf(i) >= 0) tags.push('in R');
+      if (tags.length) ctx.el('text', { x: NX[i] + NW / 2, y: NY + NH + 30, 'text-anchor': 'middle', class: 'mono small ' + (tags.length === 2 ? 'fill-ok' : 'muted'), text: tags.join(' + ') + (tags.length === 2 ? ' = overlap' : '') }, g);
+    });
+  }
+
+  // Write: send to all up home nodes; `reach` lists who gets it. ok if reach.length >= W.
+  function doWrite(ctx, reach, opts) {
+    opts = opts || {};
+    var S = ctx.state;
+    S.ver++;
+    var ver = S.ver, val = COLORS[ver % COLORS.length];
+    var targets = opts.targets || [0, 1, 2];
+    var ok = reach.length >= S.W;
+    ctx.log('PUT color=' + val + ' (v' + ver + '), W=' + S.W, 'info');
+    return seq(ctx, [
+      function () { return ctx.packet(clientCo(), { ms: 400, cls: 'accent', label: 'v' + ver }); },
+      function () {
+        return Promise.all(targets.map(function (i) {
+          var got = reach.indexOf(i) >= 0;
+          var path = S.nodes[i].down || !got ? toNode(i).slice(0, 3) : toNode(i);
+          return ctx.packet(path, { ms: 550, cls: got ? 'accent' : 'bad', r: 6 }).then(function () {
+            if (ctx.state !== S || !got) return;
+            if (opts.hintFor !== undefined && i === 3) S.nodes[3].hint = { ver: ver, val: val };
+            else { S.nodes[i].ver = ver; S.nodes[i].val = val; }
+            render(ctx);
+            return ctx.packet(fromNode(i), { ms: 450, cls: 'ok', r: 5 });
+          });
+        }));
+      },
+      function () {
+        sets(ctx, reach, []);
+        if (ok) ctx.log('Write v' + ver + ': ' + reach.length + ' acks ≥ W=' + S.W + ' → success', 'ok');
+        else ctx.log('Write v' + ver + ': ' + reach.length + ' acks < W=' + S.W + ' → error to client', 'bad');
+        return ctx.packet(clientCo().reverse(), { ms: 400, cls: ok ? 'ok' : 'bad', label: ok ? 'ok' : 'fail' });
+      },
+    ]);
+  }
+
+  // Read from the given replicas; newest version wins.
+  function doRead(ctx, from, repair) {
+    var S = ctx.state;
+    var latest = S.ver;
+    if (from.length < S.R) {
+      ctx.log('Read: only ' + from.length + ' replicas up < R=' + S.R + ' → error', 'bad');
+      return ctx.packet(clientCo(), { ms: 400, cls: 'bad', label: 'read' });
+    }
+    ctx.log('GET color, R=' + S.R + ' from ' + from.map(function (i) { return 'R' + (i + 1); }).join(', '), 'info');
+    var best = null;
+    return seq(ctx, [
+      function () { return ctx.packet(clientCo(), { ms: 400, label: 'GET' }); },
+      function () {
+        return Promise.all(from.map(function (i) {
+          return ctx.packet(toNode(i), { ms: 500 }).then(function () {
+            if (ctx.state !== S) return;
+            var n = S.nodes[i];
+            if (!best || n.ver > best.ver) best = { ver: n.ver, val: n.val };
+            return ctx.packet(fromNode(i), { ms: 450, cls: n.ver === latest ? 'ok' : 'bad', label: 'v' + n.ver });
+          });
+        }));
+      },
+      function () {
+        sets(ctx, S.lastWrite || [], from);
+        var fresh = best.ver === latest;
+        ctx.log('Newest seen: v' + best.ver + ' (' + best.val + ')' + (fresh ? ' = latest' : ', but latest is v' + latest + ': STALE'), fresh ? 'ok' : 'bad');
+        return ctx.packet(clientCo().reverse(), { ms: 400, cls: fresh ? 'ok' : 'bad', label: best.val });
+      },
+      function () {
+        if (!repair) return;
+        var stale = from.filter(function (i) { return S.nodes[i].ver < best.ver; });
+        return Promise.all(stale.map(function (i) {
+          return ctx.packet(toNode(i), { ms: 550, cls: 'accent', label: 'repair' }).then(function () {
+            if (ctx.state !== S) return;
+            S.nodes[i].ver = best.ver; S.nodes[i].val = best.val; render(ctx);
+            ctx.log('Read repair: R' + (i + 1) + ' → v' + best.ver, 'ok');
+          });
+        }));
+      },
+    ]);
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'N = 3 replicas, no leader',
+      say: 'The key <code>color</code> lives on R1, R2 and R3, all at version 1. Any node can coordinate a request. We change W and R and watch which replicas are in the <b>write set</b> and the <b>read set</b>. You can also use the "Try it" row.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.W = 2; S.R = 2; S.ver = 1; S.lastWrite = [0, 1, 2];
+      S.nodes = [0, 1, 2, 3].map(function (i) { return { id: 'R' + (i + 1), ver: i < 3 ? 1 : 0, val: 'green', down: false }; });
+      ctx.el('polyline', { points: clientCo().join(' '), class: 'wire' });
+      [0, 1, 2].forEach(function (i) { ctx.el('polyline', { points: toNode(i).join(' '), class: 'wire' }); });
+      S.r4wire = ctx.el('polyline', { points: toNode(3).join(' '), class: 'wire dashed', opacity: 0 });
+      ctx.el('rect', { x: CL.x, y: CL.y, width: CL.w, height: CL.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: CL.x + CL.w / 2, y: CL.y + 33, 'text-anchor': 'middle', class: 'title', text: 'Client' });
+      ctx.el('rect', { x: CO.x, y: CO.y, width: CO.w, height: CO.h, rx: 10, class: 'box accent' });
+      ctx.el('text', { x: CO.x + CO.w / 2, y: CO.y + 28, 'text-anchor': 'middle', class: 'title', text: 'Coordinator' });
+      ctx.el('text', { x: CO.x + CO.w / 2, y: CO.y + 48, 'text-anchor': 'middle', class: 'mono small muted', text: 'any node can do this' });
+      ctx.el('text', { x: NX[0], y: 138, class: 'mono small muted', text: 'home replicas of key "color" (N = 3)' });
+      S.setsG = ctx.group();
+      S.nodes.forEach(function (n, i) {
+        var g = ctx.group({ opacity: i === 3 ? 0 : 1 });
+        var v = { g: g };
+        v.rect = ctx.el('rect', { x: NX[i], y: NY, width: NW, height: NH, rx: 10, class: 'box' }, g);
+        ctx.el('text', { x: NX[i] + 14, y: NY + 24, class: 'title', text: i === 3 ? 'R4' : n.id }, g);
+        v.val = ctx.el('text', { x: NX[i] + 14, y: NY + 48, class: 'mono', text: '' }, g);
+        v.ver = ctx.el('text', { x: NX[i] + 14, y: NY + 70, class: 'mono small', text: '' }, g);
+        v.status = ctx.el('text', { x: NX[i] + 14, y: NY + 90, class: 'mono small muted', text: '' }, g);
+        n.v = v;
+      });
+      S.formula = ctx.el('text', { x: 16, y: 420, class: 'mono', text: '' });
+      render(ctx);
+    },
+    steps: [
+      {
+        title: 'Write with W = 2: one replica misses it',
+        say: 'The client writes version 2. The coordinator sends it to all 3 replicas and answers "ok" after <b>2 acks</b>. The message to R3 is lost (R3 was busy). The write still succeeds, but R3 keeps the old version 1.',
+        run: function (ctx) {
+          setRW(ctx, 2, 2);
+          ctx.state.lastWrite = [0, 1];
+          return doWrite(ctx, [0, 1]);
+        },
+      },
+      {
+        title: 'Read with R = 1: a stale answer',
+        say: 'Set R = 1. Now R + W = 3, not more than N. The read asks one replica, and in the worst case it is R3, the one that missed the write. The client gets version 1: a <b>stale read</b>. The read set and the write set did not overlap.',
+        run: function (ctx) {
+          setRW(ctx, 2, 1);
+          return doRead(ctx, [2], false);
+        },
+      },
+      {
+        title: 'Read with R = 2: the sets must overlap',
+        say: 'Set R = 2, so R + W = 4 &gt; 3. Any 2 replicas you read must include at least one of the 2 that took the write. Here R2 and R3 answer with v2 and v1. The coordinator returns the highest version, v2. Fresh, even in the worst case.',
+        run: function (ctx) {
+          setRW(ctx, 2, 2);
+          return doRead(ctx, [1, 2], false);
+        },
+      },
+      {
+        title: 'Read repair fixes the stale replica',
+        say: 'The coordinator noticed R3 answered with an old version. It writes v2 back to R3 in the background. Hot keys get repaired quickly this way. Cold keys are fixed by background anti-entropy (Merkle trees).',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return ctx.packet(toNode(2), { ms: 600, cls: 'accent', label: 'repair' }); },
+            function () { S.nodes[2].ver = S.nodes[1].ver; S.nodes[2].val = S.nodes[1].val; S.lastWrite = [0, 1, 2]; render(ctx); sets(ctx, [0, 1, 2], []); ctx.log('Read repair: R3 → v2. All replicas equal', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'W = 3 with one node down: writes fail',
+        say: 'R3 crashes. With W = 3 (and R = 1 for fast reads), a write needs all three acks. Only 2 arrive, so the client gets an error. R1 and R2 may still keep v3, because a failed quorum write is not rolled back. High W costs availability.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.nodes[2].down = true;
+          setRW(ctx, 3, 1);
+          ctx.log('R3 is down', 'bad');
+          S.lastWrite = [0, 1];
+          return doWrite(ctx, [0, 1]);
+        },
+      },
+      {
+        title: 'W = 2, R = 2 survives one node down',
+        say: 'Back to W = 2 and R = 2. With R3 still down, a write gets 2 acks and succeeds, and a read gets 2 answers and is fresh. This is why W = R = 2 with N = 3 is the common default: it tolerates one failure for both.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setRW(ctx, 2, 2);
+          S.lastWrite = [0, 1];
+          return seq(ctx, [
+            function () { return doWrite(ctx, [0, 1]); },
+            function () { return doRead(ctx, [0, 1], false); },
+          ]);
+        },
+      },
+      {
+        title: 'Two nodes down: sloppy quorum',
+        say: 'Now R2 also fails. A strict quorum cannot reach W = 2 home replicas. With a <b>sloppy quorum</b>, the coordinator writes to a healthy stand-in node, R4, which stores the write plus a <b>hint</b>: "this belongs to R3". The write succeeds, but a read of the home nodes may not see it.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.nodes[1].down = true;
+          render(ctx);
+          ctx.log('R2 is down too: only R1 is a home replica that is up', 'bad');
+          return seq(ctx, [
+            function () { return Promise.all([ctx.fade(S.nodes[3].v.g, 1, 400), ctx.fade(S.r4wire, 1, 400)]); },
+            function () { S.lastWrite = [0, 3]; return doWrite(ctx, [0, 3], { targets: [0, 1, 2, 3], hintFor: 2 }); },
+            function () { ctx.log('Sloppy: R1 + stand-in R4 = 2 acks. R + W > N no longer guarantees fresh reads', 'warn'); },
+          ]);
+        },
+      },
+      {
+        title: 'Hinted handoff when R3 returns',
+        say: 'R3 comes back. R4 sees it is up and replays the hinted write to R3, then deletes the hint. R2 is still down; when it returns, read repair or anti-entropy brings it up to date. Sloppy quorums trade a short window of staleness for write availability.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.nodes[2].down = false;
+          render(ctx);
+          ctx.log('R3 is back', 'ok');
+          var a = [NX[3], NY + 52], b = [NX[2] + NW, NY + 52];
+          return seq(ctx, [
+            function () { return ctx.packet([a, b], { ms: 700, cls: 'signal', label: 'hint' }); },
+            function () {
+              var h = S.nodes[3].hint;
+              S.nodes[2].ver = h.ver; S.nodes[2].val = h.val; S.nodes[3].hint = null;
+              S.lastWrite = [0, 2];
+              render(ctx);
+              sets(ctx, [0, 2], []);
+              ctx.log('Hinted handoff: R4 → R3 v' + h.ver + ', hint deleted', 'ok');
+            },
+          ]);
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: strict quorum on the home replicas, worst-case read set ----
+  var ctx = lab.ctx;
+  function upHome(S) { return [0, 1, 2].filter(function (i) { return !S.nodes[i].down; }); }
+  document.getElementById('selW').addEventListener('change', function (e) { ctx.state.W = +e.target.value; render(ctx); });
+  document.getElementById('selR').addEventListener('change', function (e) { ctx.state.R = +e.target.value; render(ctx); });
+  document.getElementById('doWrite').addEventListener('click', function () {
+    var S = ctx.state;
+    var up = upHome(S);
+    // The write reaches exactly W replicas (the rest are slow or lost), or all up ones if fewer.
+    var reach = up.slice(0, Math.min(S.W, up.length));
+    S.lastWrite = reach;
+    doWrite(ctx, reach, { targets: [0, 1, 2] });
+  });
+  document.getElementById('doRead').addEventListener('click', function () {
+    var S = ctx.state;
+    // Worst case: the R replicas that answer first are the most stale ones.
+    var up = upHome(S).sort(function (a, b) { return S.nodes[a].ver - S.nodes[b].ver || b - a; });
+    doRead(ctx, up.length >= S.R ? up.slice(0, S.R) : up, true);
+  });
+  document.getElementById('toggleR3').addEventListener('click', function () {
+    var S = ctx.state;
+    S.nodes[2].down = !S.nodes[2].down;
+    render(ctx);
+    ctx.log(S.nodes[2].down ? 'R3 is down' : 'R3 is up (may be stale)', S.nodes[2].down ? 'bad' : 'ok');
+  });
+})();
+</script>
+</body>
+</html>

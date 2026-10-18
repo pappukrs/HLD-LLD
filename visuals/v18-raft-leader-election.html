@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Raft Leader Election</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Consensus</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Raft Leader Election</h1>
+    <p class="lede">Raft keeps one log the same on every server. One leader takes all writes. An entry is committed when a majority stores it. When the leader dies, a node with an up-to-date log wins a new term.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Five Raft servers electing a leader and replicating a log"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--muted)"></i>Follower</span>
+        <span><i style="background: var(--signal)"></i>Candidate / vote request</span>
+        <span><i style="background: var(--accent)"></i>Leader / AppendEntries</span>
+        <span><i style="background: var(--ok)"></i>Vote yes / ack / committed</span>
+        <span><i style="background: var(--bad)"></i>Vote no / lost</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I'd use a Raft group of 3 or 5 nodes, for example etcd or ZooKeeper, to elect one leader. Followers start an election when heartbeats stop for a random 150–300 ms. A node wins with votes from a majority, and nodes only vote for a candidate whose log is at least as new as theirs. Writes go through the leader and commit once a majority has them, so a committed write survives any minority failure."</p>
+    </div>
+    <div class="note">
+      <h3>Why a majority matters</h3>
+      <ul>
+        <li>Any two majorities share at least one node. So a new leader always meets a node that has every committed entry.</li>
+        <li>5 nodes tolerate 2 failures; 3 nodes tolerate 1. 4 nodes still tolerate only 1, so use odd sizes.</li>
+        <li>A minority side of a network split cannot elect a leader or commit writes. This is how Raft avoids split brain.</li>
+        <li>Terms act as a logical clock: any message with a higher term makes an old leader step down.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Raft messages</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Message</th><th>Sent by</th><th>Carries</th><th>Receiver rule</th></tr></thead>
+          <tbody>
+            <tr><td>RequestVote</td><td>Candidate</td><td>term, lastLogIndex, lastLogTerm</td><td>Grant if it has not voted this term and the candidate's log is at least as up to date (higher last term, or same term and same or longer log)</td></tr>
+            <tr><td>AppendEntries (empty)</td><td>Leader</td><td>term, commitIndex</td><td>Heartbeat: reset the election timer, stay follower</td></tr>
+            <tr><td>AppendEntries (entries)</td><td>Leader</td><td>term, prevLogIndex, prevLogTerm, entries, commitIndex</td><td>Accept only if the entry at prevLogIndex matches; else reject and the leader retries one entry earlier</td></tr>
+            <tr><td>Any reply with higher term</td><td>Anyone</td><td>term</td><td>Update own term and become a follower</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why are election timeouts random?</summary><div>If all followers timed out together, they would all become candidates, split the votes, and nobody would win. A random timeout means one node usually starts first and wins before the others wake up.</div></details>
+      <details class="qa"><summary>Can a node with a stale log become leader?</summary><div>No. Voters refuse a candidate whose log is older than theirs. Since a committed entry is on a majority, every possible winner's majority includes at least one node that would refuse a stale candidate.</div></details>
+      <details class="qa"><summary>The old leader comes back after a network split. What happens?</summary><div>It still thinks it is leader of the old term. Its first message or reply shows a higher term, so it steps down. Its uncommitted entries that conflict with the new leader's log are overwritten.</div></details>
+      <details class="qa"><summary>Raft vs a Redis lock for leader election?</summary><div>A Redis lock with a TTL can give two leaders during a GC pause or clock jump. Raft (or a ZooKeeper/etcd lease plus a fencing token) gives a safe single leader. Use fencing tokens whenever the leader writes to an outside system.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../hld/concepts/30-consensus-coordination.md">30 · Consensus, leader election, distributed locks</a></li>
+        <li>Related: <a href="../hld/concepts/12-replication.md">12 · Replication</a>, <a href="../hld/concepts/15-cap-pacelc-consistency.md">15 · CAP and consistency</a></li>
+        <li>Used in: <a href="../hld/problems/04-key-value-store/README.md">Key-value store</a>, <a href="../hld/problems/24-job-scheduler/README.md">Distributed job scheduler</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v17-geohash-quadtree.html">← Geohash and quadtree</a>
+    <a href="v19-estimation-calculator.html">Estimation calculator →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var NODES = [
+    { id: 'S1', x: 210, y: 92 },
+    { id: 'S2', x: 338, y: 185 },
+    { id: 'S3', x: 289, y: 330 },
+    { id: 'S4', x: 131, y: 330 },
+    { id: 'S5', x: 82, y: 185 },
+  ];
+  var BYID = {};
+  NODES.forEach(function (n) { BYID[n.id] = n; });
+  var LX = 430;   // log panel left edge
+  var CELL_W = 88, CELL_X = LX + 36;
+
+  function node(ctx, id) { return ctx.state.nodes[id]; }
+
+  function setRole(ctx, id, role) {
+    var n = node(ctx, id);
+    n.role = role;
+    var cls = { follower: 'box', candidate: 'box signal', leader: 'box accent', down: 'box dim' }[role];
+    n.circle.setAttribute('class', cls);
+    n.circle.setAttribute('style', role === 'candidate' || role === 'leader' ? 'stroke-width: 3' : '');
+    n.roleT.textContent = role === 'down' ? 'crashed' : role;
+    n.roleT.setAttribute('class', 'mono small' + (role === 'down' ? ' fill-bad' : role === 'leader' ? ' fill-accent' : role === 'candidate' ? ' fill-signal' : ' muted'));
+    n.g.setAttribute('opacity', role === 'down' ? 0.45 : 1);
+  }
+
+  function setTerm(ctx, id, term) {
+    var n = node(ctx, id);
+    n.term = term;
+    n.termT.textContent = 'term ' + term;
+  }
+
+  function header(ctx, term, leader) {
+    ctx.state.head.textContent = 'Cluster term ' + term + ' · leader: ' + (leader || 'none');
+  }
+
+  function addCell(ctx, id, index, term, cmd, status) {
+    var n = node(ctx, id);
+    var row = NODES.indexOf(BYID[id]);
+    var y = 70 + row * 42;
+    var g = ctx.group({ opacity: 0 });
+    var r = ctx.el('rect', { x: CELL_X + (index - 1) * (CELL_W + 6), y: y, width: CELL_W, height: 28, rx: 5 }, g);
+    ctx.el('text', { x: CELL_X + (index - 1) * (CELL_W + 6) + CELL_W / 2, y: y + 18, 'text-anchor': 'middle', class: 'mono small', text: index + ': t' + term + ' ' + cmd }, g);
+    n.cells[index] = { g: g, rect: r };
+    setCell(ctx, id, index, status);
+    return ctx.fade(g, 1, 300);
+  }
+
+  function setCell(ctx, id, index, status) {
+    var c = node(ctx, id).cells[index];
+    c.rect.setAttribute('class', status === 'committed' ? 'box ok' : 'box signal');
+    c.rect.setAttribute('style', status === 'committed' ? '' : 'stroke-dasharray: 5 4');
+  }
+
+  function line(a, b) { return [[BYID[a].x, BYID[a].y], [BYID[b].x, BYID[b].y]]; }
+  function half(a, b) {
+    var A = BYID[a], B = BYID[b];
+    return [[A.x, A.y], [(A.x + B.x) / 2, (A.y + B.y) / 2]];
+  }
+
+  function send(ctx, from, tos, cls, ms) {
+    return Promise.all(tos.map(function (to) { return ctx.packet(line(from, to), { cls: cls, ms: ms || 700, r: 6 }); }));
+  }
+
+  // Election timers: every bar empties at its own speed; the winner reaches 0 first.
+  function runTimers(ctx, timeouts, winner, ms) {
+    var ids = Object.keys(timeouts);
+    ids.forEach(function (id) { node(ctx, id).bar.setAttribute('width', 60); });
+    var T = timeouts[winner];
+    return ctx.tween(ms || 1400, function (t) {
+      ids.forEach(function (id) {
+        var w = 60 * Math.max(0, 1 - (t * T) / timeouts[id]);
+        node(ctx, id).bar.setAttribute('width', w);
+      });
+    });
+  }
+
+  function refill(ctx, ids) {
+    return Promise.all(ids.map(function (id) { return ctx.animate(node(ctx, id).bar, { width: 60 }, 300); }));
+  }
+
+  function votes(ctx, text, cls) {
+    ctx.state.votesT.textContent = text;
+    ctx.state.votesT.setAttribute('class', 'mono ' + (cls || ''));
+  }
+
+  function commit(ctx, text) { ctx.state.commitT.textContent = text; }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Five servers, one log',
+      say: 'Every server starts as a follower in term 1. Each has an election timer (the bar under it). Every log already holds one committed entry, <code>x=1</code>.',
+    },
+    setup: function (ctx) {
+      ctx.state.nodes = {};
+      ctx.state.head = ctx.el('text', { x: 16, y: 26, class: 'title', text: '' });
+      header(ctx, 1, null);
+      // faint majority links
+      NODES.forEach(function (a, i) {
+        NODES.slice(i + 1).forEach(function (b) {
+          ctx.el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'wire', opacity: 0.35 });
+        });
+      });
+      NODES.forEach(function (n) {
+        var g = ctx.group();
+        var circle = ctx.el('circle', { r: 30, class: 'box' }, g);
+        ctx.el('text', { y: -2, 'text-anchor': 'middle', class: 'title', text: n.id }, g);
+        var termT = ctx.el('text', { y: 15, 'text-anchor': 'middle', class: 'mono small muted', text: 'term 1' }, g);
+        var roleT = ctx.el('text', { y: 47, 'text-anchor': 'middle', class: 'mono small muted', text: 'follower' }, g);
+        ctx.el('rect', { x: -30, y: 54, width: 60, height: 5, rx: 2, class: 'fill-muted', opacity: 0.25 }, g);
+        var bar = ctx.el('rect', { x: -30, y: 54, width: 60, height: 5, rx: 2, class: 'fill-accent' }, g);
+        ctx.place(g, n.x, n.y);
+        ctx.state.nodes[n.id] = { g: g, circle: circle, termT: termT, roleT: roleT, bar: bar, term: 1, role: 'follower', cells: {} };
+      });
+
+      // Log panel
+      ctx.el('text', { x: LX, y: 40, class: 'title', text: 'Logs' });
+      ctx.el('text', { x: LX + 44, y: 40, class: 'mono small muted', text: 'index: term + command' });
+      NODES.forEach(function (n, i) {
+        ctx.el('text', { x: LX, y: 70 + i * 42 + 18, class: 'mono', text: n.id });
+      });
+      NODES.forEach(function (n) {
+        // draw entry 1 instantly (setup must be synchronous)
+        var row = NODES.indexOf(n), y = 70 + row * 42;
+        var g = ctx.group();
+        var r = ctx.el('rect', { x: CELL_X, y: y, width: CELL_W, height: 28, rx: 5, class: 'box ok' }, g);
+        ctx.el('text', { x: CELL_X + CELL_W / 2, y: y + 18, 'text-anchor': 'middle', class: 'mono small', text: '1: t1 x=1' }, g);
+        ctx.state.nodes[n.id].cells[1] = { g: g, rect: r };
+      });
+      ctx.state.commitT = ctx.el('text', { x: LX, y: 300, class: 'mono', text: 'commitIndex = 1' });
+      ctx.state.votesT = ctx.el('text', { x: LX, y: 322, class: 'mono', text: '' });
+      ctx.el('rect', { x: LX - 6, y: 338, width: 322, height: 92, rx: 8, class: 'box' });
+      ctx.el('text', { x: LX + 6, y: 358, class: 'mono small muted', text: 'Rules' });
+      ctx.el('text', { x: LX + 6, y: 378, class: 'small', text: 'One vote per node per term.' });
+      ctx.el('text', { x: LX + 6, y: 398, class: 'small', text: 'Vote only for a log at least as new as yours.' });
+      ctx.el('text', { x: LX + 6, y: 418, class: 'small', text: 'Commit when a majority (3 of 5) stores it.' });
+    },
+    steps: [
+      {
+        title: 'Followers wait with random timeouts',
+        say: 'No heartbeats arrive, so every timer runs down. Each node picks a random timeout (150–300 ms). S3 picked the shortest, so it wakes up first. Random timeouts stop everyone from starting an election at once.',
+        run: function (ctx) {
+          ctx.log('No leader. Timers: S3 160ms, S5 200, S2 230, S1 260, S4 280', 'info');
+          return runTimers(ctx, { S1: 260, S2: 230, S3: 160, S4: 280, S5: 200 }, 'S3', 1500);
+        },
+      },
+      {
+        title: 'S3 becomes a candidate for term 2',
+        say: 'S3 increases its term to 2, becomes a candidate and votes for itself. A new term means a new election; each node can give only one vote per term.',
+        run: function (ctx) {
+          setTerm(ctx, 'S3', 2);
+          setRole(ctx, 'S3', 'candidate');
+          header(ctx, 2, null);
+          votes(ctx, 'Votes for S3: 1 of 5 (need 3)');
+          ctx.flash(node(ctx, 'S3').g);
+          ctx.log('S3 timeout → candidate, term 2, votes for itself', 'warn');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'RequestVote: a majority says yes',
+        say: 'S3 sends <code>RequestVote(term 2, last log t1 #1)</code> to everyone. Each follower has not voted in term 2 and S3\'s log is as new as theirs, so all say yes. 3 votes is a majority, so S3 is the leader.',
+        run: function (ctx) {
+          var others = ['S1', 'S2', 'S4', 'S5'];
+          return send(ctx, 'S3', others, '', 700).then(function () {
+            others.forEach(function (id) { setTerm(ctx, id, 2); });
+            ctx.log('S1, S2, S4, S5 move to term 2 and vote for S3', 'info');
+            return Promise.all(others.map(function (id) { return ctx.packet(line(id, 'S3'), { cls: 'ok', ms: 700, r: 6 }); }));
+          }).then(function () {
+            votes(ctx, 'Votes for S3: 5 of 5 (need 3) → leader', 'fill-ok');
+            setRole(ctx, 'S3', 'leader');
+            node(ctx, 'S3').bar.setAttribute('width', 0);
+            header(ctx, 2, 'S3');
+            ctx.flash(node(ctx, 'S3').g);
+            ctx.log('S3 has a majority → leader of term 2', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Heartbeats keep followers quiet',
+        say: 'The leader sends empty <code>AppendEntries</code> messages every ~50 ms. Each heartbeat resets the follower\'s timer, so no new election starts while the leader is alive.',
+        run: function (ctx) {
+          var others = ['S1', 'S2', 'S4', 'S5'];
+          var round = function () {
+            return runTimers(ctx, { S1: 260, S2: 230, S4: 280, S5: 200 }, 'S5', 500)
+              .then(function () { return send(ctx, 'S3', others, 'accent', 600); })
+              .then(function () { return refill(ctx, others); });
+          };
+          votes(ctx, '');
+          ctx.log('S3 → heartbeat to all followers', 'info');
+          return round().then(round).then(function () { ctx.log('Timers reset, followers stay followers', 'ok'); });
+        },
+      },
+      {
+        title: 'A client write goes to the leader',
+        say: 'A client sends <code>x=5</code>. Only the leader accepts writes. S3 appends it as entry #2 in term 2. It is not committed yet (dashed), so the client does not get an answer yet.',
+        run: function (ctx) {
+          var cg = ctx.group({ opacity: 0 });
+          ctx.el('rect', { x: 330, y: 392, width: 76, height: 26, rx: 5, class: 'box' }, cg);
+          ctx.el('text', { x: 368, y: 409, 'text-anchor': 'middle', class: 'mono small', text: 'client' }, cg);
+          ctx.state.client = cg;
+          return ctx.fade(cg, 1, 300)
+            .then(function () { return ctx.packet([[350, 392], [300, 360]], { ms: 600, label: 'x=5' }); })
+            .then(function () {
+              ctx.log('Client → S3: set x=5', 'info');
+              return addCell(ctx, 'S3', 2, 2, 'x=5', 'pending');
+            })
+            .then(function () { ctx.log('S3 appends #2 (t2 x=5), not committed', 'warn'); });
+        },
+      },
+      {
+        title: 'Replicate; commit at a majority',
+        say: 'S3 sends the entry to all followers. S1 and S2 store it and ack; the links to S4 and S5 are slow and the messages are lost. S3 + S1 + S2 = 3 of 5, a majority, so entry #2 is committed and the client gets OK.',
+        run: function (ctx) {
+          return Promise.all([
+            send(ctx, 'S3', ['S1', 'S2'], 'accent', 700),
+            ctx.packet(half('S3', 'S4'), { cls: 'bad', ms: 500, r: 6 }),
+            ctx.packet(half('S3', 'S5'), { cls: 'bad', ms: 600, r: 6 }),
+          ]).then(function () {
+            ctx.log('S4, S5: message lost (slow network)', 'bad');
+            return Promise.all([addCell(ctx, 'S1', 2, 2, 'x=5', 'pending'), addCell(ctx, 'S2', 2, 2, 'x=5', 'pending')]);
+          }).then(function () {
+            return Promise.all([ctx.packet(line('S1', 'S3'), { cls: 'ok', ms: 600, r: 6 }), ctx.packet(line('S2', 'S3'), { cls: 'ok', ms: 600, r: 6 })]);
+          }).then(function () {
+            ['S3', 'S1', 'S2'].forEach(function (id) { setCell(ctx, id, 2, 'committed'); });
+            commit(ctx, 'commitIndex = 2 (stored on S1, S2, S3)');
+            ctx.log('3 of 5 have #2 → committed, client gets OK', 'ok');
+            return ctx.packet([[300, 360], [350, 392]], { cls: 'ok', ms: 500, label: 'OK' });
+          });
+        },
+      },
+      {
+        title: 'The leader crashes',
+        say: 'S3 dies. Heartbeats stop, so every follower timer runs down again. S5 has the shortest timer this time. The cluster has no leader for a few hundred ms and cannot accept writes.',
+        run: function (ctx) {
+          setRole(ctx, 'S3', 'down');
+          node(ctx, 'S3').bar.setAttribute('width', 0);
+          header(ctx, 2, 'none (S3 down)');
+          ctx.log('S3 crashed. No heartbeats.', 'bad');
+          if (ctx.state.client) ctx.fade(ctx.state.client, 0, 300);
+          return runTimers(ctx, { S1: 260, S2: 230, S4: 280, S5: 200 }, 'S5', 1300);
+        },
+      },
+      {
+        title: 'S5 runs for term 3 but its log is stale',
+        say: 'S5 becomes a candidate for term 3. Its last entry is t1 #1. S1 and S2 have t2 #2, which is newer, so they vote no. Only S4 says yes. 2 votes is not a majority, so S5 loses. This rule keeps committed entries safe.',
+        run: function (ctx) {
+          setTerm(ctx, 'S5', 3);
+          setRole(ctx, 'S5', 'candidate');
+          header(ctx, 3, null);
+          votes(ctx, 'Votes for S5: 1 of 5 (need 3)');
+          ctx.log('S5 → candidate, term 3, last log t1 #1', 'warn');
+          return Promise.all([
+            send(ctx, 'S5', ['S1', 'S2', 'S4'], '', 700),
+            ctx.packet(half('S5', 'S3'), { cls: 'bad', ms: 700, r: 6 }),
+          ]).then(function () {
+            ['S1', 'S2', 'S4'].forEach(function (id) { setTerm(ctx, id, 3); });
+            return Promise.all([
+              ctx.packet(line('S1', 'S5'), { cls: 'bad', ms: 700, r: 6 }),
+              ctx.packet(line('S2', 'S5'), { cls: 'bad', ms: 700, r: 6 }),
+              ctx.packet(line('S4', 'S5'), { cls: 'ok', ms: 700, r: 6 }),
+            ]);
+          }).then(function () {
+            ctx.log('S1, S2: no (my log t2 #2 is newer)', 'bad');
+            ctx.log('S4: yes. S5 has 2 of 5 → election fails', 'bad');
+            votes(ctx, 'Votes for S5: 2 of 5 → lost', 'fill-bad');
+            setRole(ctx, 'S5', 'follower');
+          });
+        },
+      },
+      {
+        title: 'S1 wins term 4',
+        say: 'Everyone picks a new random timeout. S1 wakes first, moves to term 4 and asks for votes with last log t2 #2. Its log is up to date, so S2, S4 and S5 all vote yes. S1 is the new leader.',
+        run: function (ctx) {
+          return runTimers(ctx, { S1: 170, S2: 250, S4: 290, S5: 270 }, 'S1', 1100).then(function () {
+            setTerm(ctx, 'S1', 4);
+            setRole(ctx, 'S1', 'candidate');
+            header(ctx, 4, null);
+            votes(ctx, 'Votes for S1: 1 of 5 (need 3)');
+            ctx.log('S1 → candidate, term 4, last log t2 #2', 'warn');
+            return send(ctx, 'S1', ['S2', 'S4', 'S5'], '', 700);
+          }).then(function () {
+            ['S2', 'S4', 'S5'].forEach(function (id) { setTerm(ctx, id, 4); });
+            return Promise.all(['S2', 'S4', 'S5'].map(function (id) { return ctx.packet(line(id, 'S1'), { cls: 'ok', ms: 700, r: 6 }); }));
+          }).then(function () {
+            setRole(ctx, 'S1', 'leader');
+            header(ctx, 4, 'S1');
+            votes(ctx, 'Votes for S1: 4 of 5 → leader', 'fill-ok');
+            ctx.flash(node(ctx, 'S1').g);
+            ctx.log('S1 is leader of term 4', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The new leader repairs the logs',
+        say: 'S1 appends a no-op in term 4 and sends AppendEntries. S4 and S5 are missing #2, so they get #2 and #3. When S3 restarts, it sees term 4 and becomes a follower. The committed write <code>x=5</code> survived the crash.',
+        run: function (ctx) {
+          return addCell(ctx, 'S1', 3, 4, 'no-op', 'pending').then(function () {
+            ctx.log('S1 appends #3 (t4 no-op)', 'info');
+            setRole(ctx, 'S3', 'follower');
+            node(ctx, 'S3').bar.setAttribute('width', 60);
+            ctx.log('S3 restarts as follower', 'info');
+            return send(ctx, 'S1', ['S2', 'S3', 'S4', 'S5'], 'accent', 800);
+          }).then(function () {
+            setTerm(ctx, 'S3', 4);
+            ctx.log('S3 sees term 4 > 2 → stays follower', 'warn');
+            return Promise.all([
+              addCell(ctx, 'S4', 2, 2, 'x=5', 'pending'),
+              addCell(ctx, 'S5', 2, 2, 'x=5', 'pending'),
+              addCell(ctx, 'S2', 3, 4, 'no-op', 'pending'),
+              addCell(ctx, 'S3', 3, 4, 'no-op', 'pending'),
+            ]);
+          }).then(function () {
+            return Promise.all([addCell(ctx, 'S4', 3, 4, 'no-op', 'pending'), addCell(ctx, 'S5', 3, 4, 'no-op', 'pending')]);
+          }).then(function () {
+            NODES.forEach(function (n) {
+              [2, 3].forEach(function (i) { if (node(ctx, n.id).cells[i]) setCell(ctx, n.id, i, 'committed'); });
+            });
+            commit(ctx, 'commitIndex = 3 on all 5 nodes');
+            refill(ctx, ['S2', 'S3', 'S4', 'S5']);
+            node(ctx, 'S1').bar.setAttribute('width', 0);
+            votes(ctx, '');
+            ctx.log('All logs match: #1, #2, #3 committed', 'ok');
+          });
+        },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>

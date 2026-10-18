@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Vending Machine States</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.on { stroke: var(--accent); stroke-width: 2.6; }
+  .stage .init { fill: var(--ink); }
+  .stage .rowhl { fill: var(--accent-soft); }
+  .stage .sep { stroke: var(--line); stroke-width: 1; }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag lld">LLD · Patterns</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>State Pattern: Vending Machine</h1>
+    <p class="lede">The machine behaves differently in each state. Instead of one big <code>if (state === …)</code> in every method, each state is a class that decides what an action does and which state comes next. Invalid actions are rejected by the state itself.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Vending machine state diagram with an action table"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Current state / last transition</span>
+        <span><i style="background: var(--ok)"></i>Action accepted</span>
+        <span><i style="background: var(--bad)"></i>Action rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Interactive vending machine">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 440" role="img" aria-label="Interactive vending machine"></svg>
+      </div>
+      <div class="controls">
+        <button class="btn primary" type="button" id="try-coin">insertCoin(₹10)</button>
+        <button class="btn" type="button" id="try-select">selectItem(Chips ₹15)</button>
+        <button class="btn" type="button" id="try-cancel">cancel()</button>
+        <span class="grow"></span>
+        <button class="btn" type="button" id="try-reset">New machine</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Drive the machine yourself</h2>
+        <p>Press the buttons in any order. Try <code>selectItem</code> with only ₹10, or press anything while it is dispensing. Each press calls the current state object; it accepts or rejects.</p>
+      </section>
+      <section class="log">
+        <h3>Machine log</h3>
+        <ol id="try-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I model each state as a class that implements the same <code>VendingState</code> interface. The machine holds the current state and delegates every action to it. A state rejects actions that make no sense for it and moves the machine to the next state. Adding a <code>SoldOut</code> state is one new class, not a new branch in every method."</p>
+    </div>
+    <div class="note">
+      <h3>The code</h3>
+<pre class="code">interface VendingState {
+  insertCoin(m: Machine, amount: number): void;
+  selectItem(m: Machine, item: Item): void;
+  cancel(m: Machine): void;
+}
+
+class IdleState implements VendingState {
+  insertCoin(m: Machine, amount: number) {
+    m.balance += amount;
+    m.setState(new HasMoneyState());
+  }
+  selectItem() { throw new InvalidAction('Insert a coin first'); }
+  cancel() { throw new InvalidAction('Nothing to refund'); }
+}
+
+class HasMoneyState implements VendingState {
+  insertCoin(m: Machine, amount: number) { m.balance += amount; }
+  selectItem(m: Machine, item: Item) {
+    if (m.balance &lt; item.price) throw new InvalidAction('Not enough money');
+    m.setState(new DispensingState(item, m.balance - item.price));
+  }
+  cancel(m: Machine) { m.refund(m.balance); m.setState(new IdleState()); }
+}
+
+class Machine {
+  balance = 0;
+  private state: VendingState = new IdleState();
+  setState(s: VendingState) { this.state = s; }
+  insertCoin(a: number) { this.state.insertCoin(this, a); }
+  selectItem(i: Item) { this.state.selectItem(this, i); }
+  cancel() { this.state.cancel(this); }
+}</pre>
+    </div>
+    <div class="note wide">
+      <h3>switch on a state field vs State pattern</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th><code>switch (this.state)</code> in each method</th><th>State pattern</th><th>Transition table (data)</th></tr></thead>
+          <tbody>
+            <tr><td>Where the rules live</td><td>Spread over every method</td><td>One class per state</td><td>One map: <code>[state][event] → next</code></td></tr>
+            <tr><td>Add a state</td><td>Edit every method</td><td>Add one class</td><td>Add rows</td></tr>
+            <tr><td>Per-state data</td><td>Nullable fields on the machine</td><td>Fields on the state object (item, change)</td><td>Kept outside</td></tr>
+            <tr><td>Best for</td><td>2–3 states, tiny logic</td><td>Rich behaviour per state (machine coding)</td><td>Many states, simple rules (order status)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Who changes the state: the machine or the state object?</summary><div>Usually the state object calls <code>m.setState(next)</code>, because it knows the rules. The machine only delegates.</div></details>
+      <details class="qa"><summary>Throw or return an error for an invalid action?</summary><div>Either works; be consistent. Throwing a typed <code>InvalidAction</code> keeps the API simple. Returning a <code>Result</code> is easier to test and to show in a UI.</div></details>
+      <details class="qa"><summary>Two users press buttons at once on a server-side machine. Problem?</summary><div>Yes, if an action awaits I/O between reading and changing the state. Process actions for one machine one at a time, for example with a per-machine queue or lock.</div></details>
+      <details class="qa"><summary>How would you add SoldOut?</summary><div>A <code>SoldOutState</code> that rejects coins and selections. <code>DispensingState</code> moves to it when stock reaches zero; a refill moves it back to <code>Idle</code>.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Pattern: <a href="../lld/concepts/patterns/p12-state.md">p12 · State</a></li>
+        <li>Build it: <a href="../lld/problems/06-vending-machine/README.md">Vending Machine</a></li>
+        <li>Same idea: <a href="../lld/problems/11-atm/README.md">ATM</a>, <a href="../lld/problems/10-elevator/README.md">Elevator</a>, <a href="../lld/problems/18-food-delivery/README.md">Food Delivery</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v24-observer-pubsub.html">← Observer and pub-sub</a>
+    <a href="v26-decorator-chain.html">Decorator and Chain of Responsibility →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  // ---------- the machine (State pattern in plain JS) ----------
+  var PRICE = 15, COIN = 10;
+  function reject(msg) { return function (m) { return m.reject(msg); }; }
+  var STATES = {
+    Idle: {
+      insertCoin: function (m) { m.balance += COIN; return m.go('HasMoney', 'T1', 'coin accepted, balance ₹' + m.balance); },
+      selectItem: reject('insert a coin first'),
+      cancel: reject('nothing to refund'),
+      done: reject('not dispensing'),
+    },
+    HasMoney: {
+      insertCoin: function (m) { m.balance += COIN; return m.go('HasMoney', 'T2', 'coin added, balance ₹' + m.balance); },
+      selectItem: function (m) {
+        if (m.balance < PRICE) return m.reject('need ₹' + PRICE + ', have ₹' + m.balance);
+        m.change = m.balance - PRICE; m.balance = 0;
+        return m.go('Dispensing', 'T3', 'Chips selected, change ₹' + m.change);
+      },
+      cancel: function (m) { var r = m.balance; m.balance = 0; m.tray = '₹' + r + ' refund'; return m.go('Idle', 'T4', 'refunded ₹' + r); },
+      done: reject('not dispensing'),
+    },
+    Dispensing: {
+      insertCoin: reject('busy dispensing'),
+      selectItem: reject('busy dispensing'),
+      cancel: reject('too late, already dispensing'),
+      done: function (m) { m.tray = 'Chips + ₹' + m.change + ' change'; m.change = 0; return m.go('Idle', 'T5', 'item dropped, back to Idle'); },
+    },
+  };
+  function Machine() { this.state = 'Idle'; this.balance = 0; this.change = 0; this.tray = '—'; }
+  Machine.prototype.go = function (to, t, msg) { var from = this.state; this.state = to; return { ok: true, from: from, to: to, t: t, msg: msg }; };
+  Machine.prototype.reject = function (msg) { return { ok: false, from: this.state, to: this.state, msg: 'rejected: ' + msg }; };
+  Machine.prototype.act = function (a) { var r = STATES[this.state][a](this); r.action = a; return r; };
+
+  // ---------- the view (shared by the stage and the try-it panel) ----------
+  var POS = { Idle: [40, 100], HasMoney: [305, 100], Dispensing: [570, 100] };
+  var ACTIONS = ['insertCoin', 'selectItem', 'cancel'];
+  var ROWS = ['Idle', 'HasMoney', 'Dispensing'];
+  var CELLS = {
+    Idle: ['→ HasMoney', 'reject', 'reject'],
+    HasMoney: ['add ₹10', '→ Dispensing*', '→ Idle'],
+    Dispensing: ['reject', 'reject', 'reject'],
+  };
+  var PATHS = {
+    init: 'M115,60 V98',
+    T1: 'M190,118 H303',
+    T2: 'M350,100 C350,48 410,48 410,98',
+    T3: 'M455,118 H568',
+    T4: 'M335,100 C305,58 195,58 165,98',
+    T5: 'M645,154 C645,252 115,252 115,156',
+  };
+  function rowY(i) { return 330 + i * 32; }
+
+  function buildView(mk, root, id) {
+    var v = { states: {}, paths: {}, cells: {}, root: root };
+    var d = mk('defs', {}, root);
+    var m = mk('marker', { id: id + '-arr', viewBox: '0 0 12 12', refX: 11, refY: 6, markerWidth: 11, markerHeight: 11, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    mk('path', { d: 'M1,1 L11,6 L1,11 Z', style: 'fill: var(--muted)' }, m);
+    mk('circle', { cx: 115, cy: 53, r: 7, class: 'init' }, root);
+    Object.keys(PATHS).forEach(function (k) {
+      v.paths[k] = mk('path', { d: PATHS[k], class: 'uml', 'marker-end': 'url(#' + id + '-arr)' }, root);
+    });
+    [['insertCoin', 247, 110], ['insertCoin (add ₹10)', 380, 40], ['selectItem', 512, 110], ['[enough money]', 512, 95],
+      ['cancel / refund', 250, 60], ['done / drop item + change', 380, 246]].forEach(function (l) {
+      mk('text', { x: l[1], y: l[2], 'text-anchor': 'middle', class: 'mono small' + (l[0].charAt(0) === '[' ? ' muted' : ''), text: l[0] }, root);
+    });
+    Object.keys(POS).forEach(function (k) {
+      var p = POS[k];
+      v.states[k] = mk('rect', { x: p[0], y: p[1], width: 150, height: 54, rx: 24, class: 'box' }, root);
+      mk('text', { x: p[0] + 75, y: p[1] + 32, 'text-anchor': 'middle', class: 'b', text: k }, root);
+    });
+    // status panel
+    mk('rect', { x: 20, y: 272, width: 300, height: 160, rx: 8, class: 'box' }, root);
+    mk('text', { x: 34, y: 298, class: 'title', text: 'Machine' }, root);
+    v.st = mk('text', { x: 34, y: 324, class: 'mono', text: '' }, root);
+    v.bal = mk('text', { x: 34, y: 346, class: 'mono', text: '' }, root);
+    mk('text', { x: 34, y: 368, class: 'mono', text: 'item:    Chips ₹15' }, root);
+    v.tray = mk('text', { x: 34, y: 390, class: 'mono', text: '' }, root);
+    v.msg = mk('text', { x: 34, y: 418, class: 'mono', text: '' }, root);
+    // action table
+    mk('rect', { x: 340, y: 272, width: 400, height: 160, rx: 8, class: 'box' }, root);
+    v.rowhl = mk('rect', { x: 342, y: rowY(0) - 18, width: 396, height: 26, class: 'rowhl' }, root);
+    mk('text', { x: 352, y: 298, class: 'mono small muted', text: 'state' }, root);
+    ACTIONS.forEach(function (a, j) { mk('text', { x: 500 + j * 90, y: 298, 'text-anchor': 'middle', class: 'mono small muted', text: a }, root); });
+    mk('line', { x1: 350, y1: 306, x2: 730, y2: 306, class: 'sep' }, root);
+    ROWS.forEach(function (s, i) {
+      mk('text', { x: 352, y: rowY(i), class: 'b', text: s }, root);
+      ACTIONS.forEach(function (a, j) {
+        v.cells[s + '.' + a] = mk('text', { x: 500 + j * 90, y: rowY(i), 'text-anchor': 'middle', class: '', text: CELLS[s][j] }, root);
+      });
+    });
+    mk('text', { x: 352, y: 422, class: 'mono small muted', text: '* only if balance ≥ ₹15' }, root);
+    return v;
+  }
+
+  function cellClass(s, a) { return CELLS[s][ACTIONS.indexOf(a)] === 'reject' ? 'mono small muted' : 'mono small'; }
+
+  function render(v, m, r) {
+    Object.keys(v.states).forEach(function (k) { v.states[k].setAttribute('class', 'box' + (k === m.state ? ' accent' : '')); });
+    Object.keys(v.paths).forEach(function (k) { v.paths[k].setAttribute('class', 'uml' + (r && r.ok && r.t === k ? ' on' : '')); });
+    v.st.textContent = 'state:   ' + m.state;
+    v.bal.textContent = 'balance: ₹' + m.balance;
+    v.tray.textContent = 'tray:    ' + m.tray;
+    v.msg.textContent = r ? r.msg : 'ready';
+    v.msg.setAttribute('class', 'mono ' + (r ? (r.ok ? 'fill-ok' : 'fill-bad') : 'muted'));
+    v.rowhl.setAttribute('y', rowY(ROWS.indexOf(m.state)) - 18);
+    Object.keys(v.cells).forEach(function (k) {
+      var parts = k.split('.');
+      v.cells[k].setAttribute('class', cellClass(parts[0], parts[1]));
+    });
+    if (r && v.cells[r.from + '.' + r.action]) v.cells[r.from + '.' + r.action].setAttribute('class', 'mono small ' + (r.ok ? 'fill-ok' : 'fill-bad'));
+  }
+
+  function samplePath(path, n) {
+    var len = path.getTotalLength(), pts = [];
+    for (var i = 0; i <= n; i++) { var p = path.getPointAtLength((len * i) / n); pts.push([p.x, p.y]); }
+    return pts;
+  }
+
+  // ---------- the guided lab ----------
+  function act(ctx, a) {
+    var m = ctx.state.m, v = ctx.state.v;
+    var r = m.act(a);
+    ctx.log(a + '() in ' + r.from + ' → ' + r.msg, r.ok ? 'ok' : 'bad');
+    if (!r.ok) {
+      render(v, m, r);
+      var cell = v.cells[r.from + '.' + a];
+      if (cell) ctx.flash(cell);
+      ctx.flash(v.states[r.from]);
+      return ctx.wait(500);
+    }
+    return ctx.packet(samplePath(v.paths[r.t], 24), { ms: 800, cls: 'accent' }).then(function () {
+      render(v, m, r);
+      ctx.flash(v.states[r.to]);
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three states, three actions',
+      say: 'The machine starts in <code>Idle</code>. We press buttons in a fixed order and watch which state accepts, which rejects, and where each transition goes.',
+    },
+    setup: function (ctx) {
+      ctx.state.m = new Machine();
+      ctx.state.v = buildView(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg, 'st');
+      render(ctx.state.v, ctx.state.m, null);
+    },
+    steps: [
+      {
+        title: 'Each state is an object',
+        say: 'The machine holds one state object, now <code>IdleState</code>. Every button press is forwarded to it: <code>this.state.insertCoin(this)</code>. The table shows what each state does with each action.',
+        run: function (ctx) {
+          ctx.flash(ctx.state.v.states.Idle);
+          ctx.log('machine.state = new IdleState()', 'info');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'selectItem in Idle: rejected',
+        say: 'No money yet, so <code>IdleState.selectItem()</code> refuses. The state stays <code>Idle</code>. No <code>if</code> in the machine was needed: the rule lives inside the state class.',
+        run: function (ctx) { return act(ctx, 'selectItem'); },
+      },
+      {
+        title: 'insertCoin: Idle → HasMoney',
+        say: '<code>IdleState</code> adds ₹10 to the balance and calls <code>m.setState(new HasMoneyState())</code>. The state object itself decides the next state.',
+        run: function (ctx) { return act(ctx, 'insertCoin'); },
+      },
+      {
+        title: 'selectItem with ₹10: guard fails',
+        say: 'Chips cost ₹15. The transition to <code>Dispensing</code> has a guard <code>[enough money]</code>. It fails, so <code>HasMoneyState</code> rejects and keeps the coin.',
+        run: function (ctx) { return act(ctx, 'selectItem'); },
+      },
+      {
+        title: 'insertCoin again: a self-transition',
+        say: 'In <code>HasMoney</code>, another coin just adds to the balance. The state does not change. This loop arrow is a self-transition.',
+        run: function (ctx) { return act(ctx, 'insertCoin'); },
+      },
+      {
+        title: 'selectItem: HasMoney → Dispensing',
+        say: 'Now the balance is ₹20, the guard passes, and the machine moves to <code>Dispensing</code> with ₹5 change pending.',
+        run: function (ctx) { return act(ctx, 'selectItem'); },
+      },
+      {
+        title: 'insertCoin while dispensing: rejected',
+        say: 'Every action is rejected in <code>Dispensing</code>. Without the State pattern, this is the bug you get: a coin accepted mid-dispense and lost.',
+        run: function (ctx) { return act(ctx, 'insertCoin'); },
+      },
+      {
+        title: 'Dispense done: back to Idle',
+        say: 'The motor finishes and fires an internal <code>done</code> event. <code>DispensingState</code> drops the item and the change, then returns the machine to <code>Idle</code>.',
+        run: function (ctx) { return act(ctx, 'done'); },
+      },
+      {
+        title: 'insertCoin, then cancel: refund',
+        say: 'A user inserts a coin and changes their mind. <code>HasMoneyState.cancel()</code> refunds the balance and goes back to <code>Idle</code>. Now try it yourself in the panel below.',
+        run: function (ctx) { return act(ctx, 'insertCoin').then(function () { return act(ctx, 'cancel'); }); },
+      },
+    ],
+  });
+
+  // ---------- try-it panel (independent of the guided steps) ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('try-log');
+  var tm, tv, anim = 0;
+  function tlog(msg, kind) {
+    var li = document.createElement('li');
+    li.className = kind || '';
+    li.textContent = msg;
+    logList.appendChild(li);
+    logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  function fresh() {
+    anim++;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    tm = new Machine();
+    tv = buildView(function (t, a, p) { return Kit.el(t, a, p); }, svg, 'try');
+    tv.dot = Kit.el('circle', { r: 7, class: 'packet accent', opacity: 0 }, svg);
+    render(tv, tm, null);
+    logList.innerHTML = '';
+    tlog('New machine: Idle, balance ₹0', 'info');
+  }
+  // Dispensing finishes by itself: animate the item along the "done" arrow, then fire done().
+  function dispense() {
+    var token = ++anim, pts = samplePath(tv.paths.T5, 40), start = null, dur = 1400;
+    tv.dot.setAttribute('opacity', 1);
+    function frame(t) {
+      if (token !== anim) return;
+      if (start === null) start = t;
+      var k = Math.min(1, (t - start) / dur);
+      var p = Kit.pointAlong(pts, k);
+      tv.dot.setAttribute('cx', p[0]); tv.dot.setAttribute('cy', p[1]);
+      if (k < 1) { requestAnimationFrame(frame); return; }
+      tv.dot.setAttribute('opacity', 0);
+      press('done');
+    }
+    requestAnimationFrame(frame);
+  }
+  function press(a) {
+    var r = tm.act(a);
+    render(tv, tm, r);
+    tlog(a + '() in ' + r.from + ' → ' + r.msg, r.ok ? 'ok' : 'bad');
+    if (r.ok && r.to === 'Dispensing') dispense();
+  }
+  document.getElementById('try-coin').addEventListener('click', function () { press('insertCoin'); });
+  document.getElementById('try-select').addEventListener('click', function () { press('selectItem'); });
+  document.getElementById('try-cancel').addEventListener('click', function () { press('cancel'); });
+  document.getElementById('try-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

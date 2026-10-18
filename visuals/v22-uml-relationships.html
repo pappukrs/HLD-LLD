@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>UML Relationships</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .panel { fill: var(--surface); stroke: var(--line); stroke-width: 1; opacity: 0.55; }
+  .stage .panel.on { opacity: 1; stroke: var(--accent); }
+  .stage .xmark { stroke: var(--bad); stroke-width: 2.5; }
+  .legend svg { width: 34px; height: 12px; overflow: visible; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag lld">LLD · Modelling</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>UML Relationships</h1>
+    <p class="lede">Six lines connect the boxes in a class diagram. The arrowhead tells the reader how strong the link is and who controls whose lifetime. Draw them right and the interviewer reads your design in seconds.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 510" role="img" aria-label="Six UML relationship types with examples"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="32" y2="6" style="stroke: var(--muted); stroke-width: 1.6"/><path d="M24,1 L32,6 L24,11" style="fill: none; stroke: var(--muted); stroke-width: 1.6"/></svg>Association</span>
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="18" y2="6" style="stroke: var(--muted); stroke-width: 1.6"/><path d="M14,6 L23,1 L32,6 L23,11 Z" style="fill: var(--surface); stroke: var(--muted); stroke-width: 1.5"/></svg>Aggregation</span>
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="18" y2="6" style="stroke: var(--muted); stroke-width: 1.6"/><path d="M14,6 L23,1 L32,6 L23,11 Z" style="fill: var(--muted); stroke: var(--muted); stroke-width: 1.5"/></svg>Composition</span>
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="32" y2="6" style="stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 5 3"/><path d="M24,1 L32,6 L24,11" style="fill: none; stroke: var(--muted); stroke-width: 1.6"/></svg>Dependency</span>
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="22" y2="6" style="stroke: var(--muted); stroke-width: 1.6"/><path d="M22,1 L32,6 L22,11 Z" style="fill: var(--surface); stroke: var(--muted); stroke-width: 1.5"/></svg>Inheritance</span>
+        <span><svg viewBox="0 0 34 12"><line x1="0" y1="6" x2="22" y2="6" style="stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 5 3"/><path d="M22,1 L32,6 L22,11 Z" style="fill: var(--surface); stroke: var(--muted); stroke-width: 1.5"/></svg>Realization</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A ParkingLot is composed of Floors: if the lot is deleted, its floors go too, so I draw a filled diamond. A Floor aggregates Vehicles that come and go, so that is a hollow diamond. Car and Bike extend Vehicle, and every pricing rule realizes a PricingStrategy interface."</p>
+    </div>
+    <div class="note">
+      <h3>The same six links in TypeScript</h3>
+<pre class="code">// association: a long-lived reference (field)
+class Order { constructor(public customer: Customer) {} }
+
+// aggregation: parts are made outside and passed in
+class Team { players: Player[] = []; add(p: Player) { this.players.push(p); } }
+
+// composition: the whole creates and owns its parts
+class House { private rooms = [new Room('hall'), new Room('kitchen')]; }
+
+// dependency: used only inside a method (param or local)
+class OrderService { notify(mail: EmailClient) { mail.send('...'); } }
+
+class Dog extends Animal {}                  // inheritance
+class CardPayment implements Payable {       // realization
+  pay(amount: number) { /* ... */ }
+}</pre>
+    </div>
+    <div class="note wide">
+      <h3>How to tell them apart</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Link</th><th>Drawn as</th><th>Means</th><th>Lifetime</th><th>In code</th></tr></thead>
+          <tbody>
+            <tr><td>Dependency</td><td>Dashed line, open arrow</td><td>"uses for a moment"</td><td>No link after the call</td><td>Method parameter, local variable, static call</td></tr>
+            <tr><td>Association</td><td>Solid line, open arrow (or none)</td><td>"knows a"</td><td>Independent</td><td>A field that holds a reference</td></tr>
+            <tr><td>Aggregation</td><td>Hollow diamond at the whole</td><td>"has a", parts are shared</td><td>Parts outlive the whole</td><td>Parts passed in from outside</td></tr>
+            <tr><td>Composition</td><td>Filled diamond at the whole</td><td>"owns a", parts are private</td><td>Parts die with the whole</td><td>Parts created inside, never handed out</td></tr>
+            <tr><td>Inheritance</td><td>Solid line, hollow triangle at the parent</td><td>"is a"</td><td>Same object</td><td><code>extends</code></td></tr>
+            <tr><td>Realization</td><td>Dashed line, hollow triangle at the interface</td><td>"can do"</td><td>Same object</td><td><code>implements</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Which end gets the diamond?</summary><div>The whole (the container). House ◆—— Room: the diamond touches House.</div></details>
+      <details class="qa"><summary>Library and Book: aggregation or composition?</summary><div>Usually aggregation: a book can move to another library and still exist. Book and Page is composition: pages have no life without their book.</div></details>
+      <details class="qa"><summary>What does 0..1 mean next to a class?</summary><div>From the other side, you link to zero or one of this class. Write the number next to the class it counts. "Team 0..1 —— * Player" reads: a player is in at most one team, and a team has many players.</div></details>
+      <details class="qa"><summary>Is dependency weaker than association?</summary><div>Yes. Dependency is temporary use inside a method. Association is a stored reference, so the two classes stay coupled for as long as the object lives.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../lld/concepts/03-uml-relationships.md">03 · UML and class relationships</a></li>
+        <li>Concept card: <a href="../lld/concepts/01-oop-pillars.md">01 · OOP pillars in TypeScript</a></li>
+        <li>Draw it for: <a href="../lld/problems/01-parking-lot/README.md">Parking Lot</a>, <a href="../lld/problems/12-library-management/README.md">Library Management</a></li>
+        <li>Composite trees: <a href="../lld/problems/24-file-system/README.md">In-memory File System</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v21-solid-refactor.html">← SOLID refactor</a>
+    <a href="v23-strategy-factory.html">Strategy and Factory →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var PW = 240, PH = 205;
+  // Each panel: whole/parent on top, part/child below. kind decides the line and the marker.
+  var PANELS = [
+    { id: 'assoc', title: 'Association', top: 'Order', bot: 'Customer', kind: 'assoc', role: 'buyer', mTop: '*', mBot: '1',
+      code: 'customer: Customer  // field', read: 'many Orders → 1 Customer' },
+    { id: 'agg', title: 'Aggregation', top: 'Team', bot: 'Player', kind: 'agg', role: 'members', mTop: '0..1', mBot: '*',
+      code: 'team.add(player) // made outside', read: 'a Team has * Players' },
+    { id: 'comp', title: 'Composition', top: 'House', bot: 'Room', kind: 'comp', role: 'rooms', mTop: '1', mBot: '1..*',
+      code: "rooms = [new Room('hall')]", read: '1 House owns 1..* Rooms' },
+    { id: 'dep', title: 'Dependency', top: 'OrderService', bot: 'EmailClient', kind: 'dep', role: 'uses',
+      code: 'notify(m: EmailClient) {…}', read: 'no field: used in one call' },
+    { id: 'inh', title: 'Inheritance', top: 'Animal', bot: 'Dog', kind: 'inh', role: 'is a',
+      code: 'class Dog extends Animal', read: 'a Dog is an Animal' },
+    { id: 'real', title: 'Realization', top: 'Payable', bot: 'CardPayment', kind: 'real', role: 'can do', stereo: true,
+      code: 'CardPayment implements Payable', read: 'CardPayment keeps the contract' },
+  ];
+
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    function marker(id, vb, refX, refY, w, h, path, style) {
+      var m = ctx.el('marker', { id: id, viewBox: vb, refX: refX, refY: refY, markerWidth: w, markerHeight: h, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+      ctx.el('path', { d: path, style: style }, m);
+    }
+    marker('u-open', '0 0 14 14', 13, 7, 13, 13, 'M1,1 L13,7 L1,13', 'fill: none; stroke: var(--muted); stroke-width: 1.6');
+    marker('u-tri', '0 0 16 16', 15, 8, 16, 16, 'M1,1 L15,8 L1,15 Z', 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5');
+    marker('u-dia-h', '0 0 24 14', 23, 7, 24, 14, 'M1,7 L12,1 L23,7 L12,13 Z', 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5');
+    marker('u-dia-f', '0 0 24 14', 23, 7, 24, 14, 'M1,7 L12,1 L23,7 L12,13 Z', 'fill: var(--muted); stroke: var(--muted); stroke-width: 1.5');
+  }
+
+  function origin(i) { return { x: 10 + (i % 3) * 250, y: 10 + Math.floor(i / 3) * 215 }; }
+
+  function box(ctx, parent, x, y, w, h, name, stereo) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 5, class: 'box' }, g);
+    if (stereo) {
+      ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«interface»' }, g);
+      ctx.el('text', { x: x + w / 2, y: y + 32, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    } else {
+      ctx.el('text', { x: x + w / 2, y: y + h / 2 + 5, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    }
+    g.r = r;
+    return g;
+  }
+
+  function drawPanel(ctx, p, i) {
+    var o = origin(i);
+    var frame = ctx.el('rect', { x: o.x, y: o.y, width: PW, height: PH, rx: 8, class: 'panel' });
+    ctx.el('text', { x: o.x + 12, y: o.y + 24, class: 'title', text: p.title });
+    var g = ctx.group({ opacity: 0 });
+    var bx = o.x + 60, bw = 120, cx = o.x + 120;
+    var topH = p.stereo ? 42 : 36;
+    var topY = o.y + 38, botY = o.y + 122;
+    var topBox = box(ctx, g, bx, topY, bw, topH, p.top, p.stereo);
+    var botBox = box(ctx, g, bx, botY, bw, 36, p.bot);
+    var y1 = topY + topH, y2 = botY;
+    // Lines are drawn from the part/child (bottom) up to the whole/parent (top) so the marker sits at the top,
+    // except association and dependency, which point from the user (top) to the used class (bottom).
+    var spec = {
+      assoc: ['M' + cx + ',' + y1 + ' V' + y2, 'uml', 'u-open'],
+      agg: ['M' + cx + ',' + y2 + ' V' + y1, 'uml', 'u-dia-h'],
+      comp: ['M' + cx + ',' + y2 + ' V' + y1, 'uml', 'u-dia-f'],
+      dep: ['M' + cx + ',' + y1 + ' V' + y2, 'uml dash', 'u-open'],
+      inh: ['M' + cx + ',' + y2 + ' V' + y1, 'uml', 'u-tri'],
+      real: ['M' + cx + ',' + y2 + ' V' + y1, 'uml dash', 'u-tri'],
+    }[p.kind];
+    var line = ctx.el('path', { d: spec[0], class: spec[1], 'marker-end': 'url(#' + spec[2] + ')' }, g);
+    ctx.el('text', { x: cx - 10, y: (y1 + y2) / 2 + 4, 'text-anchor': 'end', class: 'mono small muted', text: p.role }, g);
+    var mults = [];
+    if (p.mTop) mults.push(ctx.el('text', { x: cx + 14, y: y1 + 16, class: 'mono', text: p.mTop }, g));
+    if (p.mBot) mults.push(ctx.el('text', { x: cx + 14, y: y2 - 6, class: 'mono', text: p.mBot }, g));
+    ctx.el('text', { x: o.x + 12, y: o.y + 180, class: 'mono small', text: p.code }, g);
+    var read = ctx.el('text', { x: o.x + 12, y: o.y + 197, class: 'small fill-signal', text: p.read, opacity: 0 }, g);
+    ctx.state.p[p.id] = { g: g, frame: frame, top: topBox, bot: botBox, line: line, mults: mults, read: read, o: o, cx: cx, y1: y1, y2: y2 };
+  }
+
+  function show(ctx, id, logMsg) {
+    var p = ctx.state.p[id];
+    Object.keys(ctx.state.p).forEach(function (k) { ctx.state.p[k].frame.setAttribute('class', 'panel'); });
+    p.frame.setAttribute('class', 'panel on');
+    ctx.log(logMsg, 'info');
+    return ctx.fade(p.g, 1, 450);
+  }
+
+  function travel(ctx, id, up, label) {
+    var p = ctx.state.p[id];
+    var a = [p.cx, p.y1], b = [p.cx, p.y2];
+    return ctx.packet(up ? [b, a] : [a, b], { ms: 650, cls: 'accent', label: label });
+  }
+
+  function xmark(ctx, parent, x, y, w, h) {
+    var g = ctx.group({ opacity: 0 }, parent);
+    ctx.el('line', { x1: x + 14, y1: y + h / 2, x2: x + w - 14, y2: y + h / 2, class: 'xmark' }, g);
+    ctx.el('text', { x: x + w + 6, y: y + h / 2 + 4, class: 'mono small fill-bad', text: 'deleted' }, g);
+    return g;
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Six ways two classes can be linked',
+      say: 'We draw each link with a real example, then delete a whole to see which parts survive. Watch the end of each line: the arrowhead or diamond carries the meaning.',
+    },
+    setup: function (ctx) {
+      ctx.state.p = {};
+      defs(ctx);
+      PANELS.forEach(function (p, i) { drawPanel(ctx, p, i); });
+      var s = ctx.group({ opacity: 0 });
+      ctx.state.scale = s;
+      ctx.el('text', { x: 20, y: 452, class: 'mono small muted', text: 'How tightly are they coupled? (has-a / uses-a links)' }, s);
+      ctx.el('path', { d: 'M110,484 H690', class: 'uml', 'marker-end': 'url(#u-open)' }, s);
+      ctx.el('text', { x: 20, y: 488, class: 'mono small muted', text: 'weaker' }, s);
+      ctx.el('text', { x: 700, y: 488, class: 'mono small muted', text: 'stronger' }, s);
+      ['dependency', 'association', 'aggregation', 'composition'].forEach(function (w, i) {
+        var x = 160 + i * 160;
+        ctx.el('circle', { cx: x, cy: 484, r: 5, class: 'dot' + (i === 3 ? ' signal' : '') }, s);
+        ctx.el('text', { x: x, y: 472, 'text-anchor': 'middle', class: 'mono', text: w }, s);
+      });
+      ctx.el('text', { x: 20, y: 505, class: 'small muted', text: 'Inheritance and realization are "is-a" links: about type, not ownership.' }, s);
+    },
+    steps: [
+      {
+        title: 'Association: one class keeps a reference',
+        say: 'An <code>Order</code> stores its <code>Customer</code> in a field. Solid line, open arrow toward the class it knows. Both objects live on their own. Numbers at each end are multiplicities.',
+        run: function (ctx) {
+          return show(ctx, 'assoc', 'Order ——> Customer (field: customer)').then(function () { return travel(ctx, 'assoc', false, 'order.customer'); });
+        },
+      },
+      {
+        title: 'Aggregation: has-a, parts made outside',
+        say: 'A <code>Team</code> has <code>Player</code>s, but players are created elsewhere and passed in. Draw a <b>hollow</b> diamond at the whole. Parts can be shared and can outlive the whole.',
+        run: function (ctx) {
+          return show(ctx, 'agg', 'Team ◇—— Player (passed in)').then(function () { return travel(ctx, 'agg', true, 'add(p)'); });
+        },
+      },
+      {
+        title: 'Composition: owns-a, parts made inside',
+        say: 'A <code>House</code> creates its <code>Room</code>s and never hands them out. Draw a <b>filled</b> diamond at the whole. The parts belong to exactly one whole and share its lifetime.',
+        run: function (ctx) {
+          return show(ctx, 'comp', 'House ◆—— Room (new Room() inside)').then(function () { return travel(ctx, 'comp', true, 'new Room()'); });
+        },
+      },
+      {
+        title: 'Delete the whole: who survives?',
+        say: 'Delete the team: the players still exist, because someone else created and still holds them. Delete the house: its rooms go with it, because nothing else can reach them. That lifetime rule is the real difference between the two diamonds.',
+        run: function (ctx) {
+          var agg = ctx.state.p.agg, comp = ctx.state.p.comp;
+          Object.keys(ctx.state.p).forEach(function (k) { ctx.state.p[k].frame.setAttribute('class', 'panel'); });
+          agg.frame.setAttribute('class', 'panel on');
+          comp.frame.setAttribute('class', 'panel on');
+          var x1 = xmark(ctx, agg.g, agg.o.x + 60, agg.o.y + 38, 120, 36);
+          var x2 = xmark(ctx, comp.g, comp.o.x + 60, comp.o.y + 38, 120, 36);
+          ctx.log('delete team', 'warn');
+          return ctx.fade(x1, 1, 300).then(function () {
+            ctx.state.alive = ctx.el('text', { x: agg.o.x + 186, y: agg.o.y + 145, class: 'mono small fill-ok', text: 'alive' }, agg.g);
+            agg.bot.r.setAttribute('class', 'box ok');
+            ctx.flash(agg.bot.r);
+            ctx.log('Player objects still alive (aggregation)', 'ok');
+            return Promise.all([ctx.fade(agg.top, 0.35, 400), ctx.fade(agg.line, 0.35, 400)]);
+          }).then(function () {
+            ctx.log('delete house', 'warn');
+            return ctx.fade(x2, 1, 300);
+          }).then(function () {
+            comp.bot.r.setAttribute('class', 'box bad');
+            ctx.el('text', { x: comp.o.x + 186, y: comp.o.y + 145, class: 'mono small fill-bad', text: 'gone' }, comp.g);
+            ctx.log('Room objects destroyed too (composition)', 'bad');
+            return Promise.all([ctx.fade(comp.top, 0.35, 400), ctx.fade(comp.line, 0.35, 400), ctx.fade(comp.bot, 0.35, 600)]);
+          });
+        },
+      },
+      {
+        title: 'Dependency: uses it for one call',
+        say: '<code>OrderService</code> gets an <code>EmailClient</code> as a method parameter and does not keep it. Dashed line, open arrow. It is the weakest link: change the client\'s API and only that method breaks.',
+        run: function (ctx) {
+          return show(ctx, 'dep', 'OrderService - - -> EmailClient (param only)').then(function () { return travel(ctx, 'dep', false, 'send()'); });
+        },
+      },
+      {
+        title: 'Inheritance: is-a',
+        say: '<code>Dog extends Animal</code>. Solid line with a <b>hollow triangle</b> pointing at the parent. Use it only when the child can stand in for the parent everywhere (Liskov).',
+        run: function (ctx) {
+          return show(ctx, 'inh', 'Dog ——▷ Animal (extends)');
+        },
+      },
+      {
+        title: 'Realization: implements an interface',
+        say: '<code>CardPayment implements Payable</code>. <b>Dashed</b> line with a hollow triangle pointing at the interface. This is how Strategy, State and most patterns are drawn.',
+        run: function (ctx) {
+          return show(ctx, 'real', 'CardPayment - - -▷ «interface» Payable');
+        },
+      },
+      {
+        title: 'Read the multiplicities',
+        say: 'Write the count next to the class it counts. <code>1</code>, <code>0..1</code>, <code>*</code> (zero or more), <code>1..*</code> (at least one). Read across the line: "1 House owns 1..* Rooms". Interviewers check these for parking lots and bookings.',
+        run: function (ctx) {
+          var anims = [];
+          Object.keys(ctx.state.p).forEach(function (k) {
+            var p = ctx.state.p[k];
+            p.frame.setAttribute('class', 'panel');
+            p.mults.forEach(function (m) { m.setAttribute('class', 'mono fill-signal'); ctx.flash(m); });
+            anims.push(ctx.fade(p.read, 1, 400));
+          });
+          ctx.log('Order * → 1 Customer', 'info');
+          ctx.log('Team 0..1 ◇— * Player', 'info');
+          ctx.log('House 1 ◆— 1..* Room', 'info');
+          return Promise.all(anims);
+        },
+      },
+      {
+        title: 'Weak to strong',
+        say: 'Order the has-a links by coupling: dependency, association, aggregation, composition. Pick the weakest link that still models the domain. Inheritance and realization are a different axis: they say what a class <i>is</i>.',
+        run: function (ctx) {
+          ctx.log('dependency < association < aggregation < composition', 'ok');
+          return ctx.fade(ctx.state.scale, 1, 500);
+        },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>

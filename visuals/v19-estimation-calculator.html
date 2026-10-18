@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Estimation Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .calc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .calc h2 { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .calc .sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+  .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .presets .lbl { font-size: 12px; color: var(--muted); }
+  .presets .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .preset-note { margin: -6px 0 0; font-size: 13px; color: var(--muted); min-height: 1.6em; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px 14px; }
+  .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field .row { display: flex; gap: 6px; }
+  .field input, .field select {
+    font: 14px var(--font-mono); color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0; width: 100%;
+  }
+  .field select { width: auto; flex: none; }
+  .field input[aria-invalid="true"] { border-color: var(--bad); }
+  .field .hint { font: 12px var(--font-mono); color: var(--accent); min-height: 1.4em; }
+  .field .hint.bad { color: var(--bad); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+  .tile .k { font-size: 12px; color: var(--muted); }
+  .tile .v { font: 700 22px/1.2 var(--font-display); color: var(--accent); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .tile .s { font: 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+  .calc table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .calc th, .calc td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .calc th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .calc td.f { font: 12px/1.5 var(--font-mono); color: var(--muted); }
+  .calc td.f b { font-weight: 400; color: var(--ink); }
+  .calc td.r { font: 600 13px var(--font-mono); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .calc tr.group td { font-weight: 600; color: var(--accent); background: var(--accent-soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stage text.val { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+  .stage text.big { font-family: var(--font-display); font-size: 24px; font-weight: 700; fill: var(--accent); }
+  .stage text.verdict { font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Estimation</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Back-of-the-Envelope Estimation</h1>
+    <p class="lede">Turn a few assumptions into QPS, storage, bandwidth and cache size. The numbers tell you what the design must handle: one database or many, cache or no cache.</p>
+  </header>
+
+  <section class="calc" aria-labelledby="calc-h">
+    <div>
+      <h2 id="calc-h">Calculator</h2>
+      <p class="sub">Change any input. Every output updates and shows its formula. 1 KB = 1,000 bytes, 1 day = 86,400 s.</p>
+    </div>
+    <div class="presets" id="presets">
+      <span class="lbl">Presets</span>
+      <button class="btn" type="button" data-preset="twitter">Twitter</button>
+      <button class="btn" type="button" data-preset="url">URL shortener</button>
+      <button class="btn" type="button" data-preset="whatsapp">WhatsApp</button>
+    </div>
+    <p class="preset-note" id="preset-note"></p>
+    <div class="fields">
+      <div class="field">
+        <label for="in-dau">Daily active users (DAU)</label>
+        <input id="in-dau" type="text" inputmode="decimal" autocomplete="off" spellcheck="false">
+        <span class="hint" id="hint-dau">Accepts 150M, 1.5B, 2e8</span>
+      </div>
+      <div class="field">
+        <label for="in-act">Writes per user per day</label>
+        <input id="in-act" type="number" min="0" step="any">
+        <span class="hint" id="hint-act"></span>
+      </div>
+      <div class="field">
+        <label for="in-ratio">Reads per write (N:1)</label>
+        <input id="in-ratio" type="number" min="0" step="any">
+        <span class="hint" id="hint-ratio"></span>
+      </div>
+      <div class="field">
+        <label for="in-size">Object size</label>
+        <div class="row">
+          <input id="in-size" type="number" min="0" step="any">
+          <select id="in-unit" aria-label="Size unit">
+            <option value="1">B</option>
+            <option value="1000">KB</option>
+            <option value="1000000">MB</option>
+          </select>
+        </div>
+        <span class="hint" id="hint-size"></span>
+      </div>
+      <div class="field">
+        <label for="in-years">Retention (years)</label>
+        <input id="in-years" type="number" min="0" step="any">
+        <span class="hint" id="hint-years"></span>
+      </div>
+      <div class="field">
+        <label for="in-rep">Replicas (copies kept)</label>
+        <input id="in-rep" type="number" min="1" step="1">
+        <span class="hint" id="hint-rep"></span>
+      </div>
+      <div class="field">
+        <label for="in-peak">Peak factor (× average)</label>
+        <input id="in-peak" type="number" min="1" step="any">
+        <span class="hint" id="hint-peak"></span>
+      </div>
+      <div class="field">
+        <label for="in-cache">Cache share of daily reads (%)</label>
+        <input id="in-cache" type="number" min="0" max="100" step="any">
+        <span class="hint" id="hint-cache"></span>
+      </div>
+    </div>
+    <div class="tiles" id="tiles" aria-live="polite"></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Output</th><th>Formula</th><th>Result</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Worked estimation for a Twitter-like service"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Computed number</span>
+        <span><i style="background: var(--signal)"></i>Step in progress</span>
+        <span><i style="background: var(--muted)"></i>Not computed yet</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Let me size it. 150 million daily users post 2 times a day, so 300 million writes a day. That is about 3.5 thousand writes per second, 7 thousand at peak. With 100 reads per write, reads peak near 700 thousand per second, so reads must come from a cache. At 1 KB per post we add 300 GB a day, about 1.6 PB over 5 years with 3 replicas, so the data must be sharded."</p>
+    </div>
+    <div class="note">
+      <h3>Numbers to remember</h3>
+      <ul>
+        <li>1 day ≈ 86,400 s ≈ 10<sup>5</sup> s. So 1M per day ≈ 12 per second, 1B per day ≈ 12K per second.</li>
+        <li>1 year ≈ 365 days ≈ 3 × 10<sup>7</sup> s.</li>
+        <li>Powers of 1,000: KB → MB → GB → TB → PB. 1 B/s × 8 = bits per second.</li>
+        <li>Latency: memory ~100 ns, SSD random read ~100 µs, same-datacenter round trip ~0.5 ms, cross-continent ~100–150 ms.</li>
+        <li>Round hard: 86,400 → 100,000 is fine. Say that you are rounding.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Rough capacity of one node (to turn QPS into machine counts)</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Component</th><th>Rough limit per node</th><th>So if you need more</th></tr></thead>
+          <tbody>
+            <tr><td>Stateless API server (Node)</td><td>~1K–10K simple requests/s, depends on work per request</td><td>Add servers behind a load balancer</td></tr>
+            <tr><td>PostgreSQL / MySQL primary</td><td>~5K–10K simple writes/s, more reads with indexes and RAM</td><td>Read replicas for reads, sharding for writes</td></tr>
+            <tr><td>Redis</td><td>~100K ops/s, memory up to ~100 GB used comfortably</td><td>Redis Cluster: shard keys over many nodes</td></tr>
+            <tr><td>Kafka broker</td><td>~100 MB/s or more of writes</td><td>More partitions and brokers</td></tr>
+            <tr><td>Cassandra / DynamoDB style store</td><td>~10K+ writes/s per node, scales close to linearly</td><td>Add nodes; good for write-heavy, PB-scale data</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:8px">These are order-of-magnitude rules for interviews, not benchmarks. State them as assumptions.</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>10M writes a day. What is the average QPS?</summary><div>10M ÷ 86,400 ≈ 116 per second. With the shortcut: 10M ÷ 10<sup>5</sup> = 100 per second.</div></details>
+      <details class="qa"><summary>Why size for peak and not the average?</summary><div>Traffic follows the day and spikes on events. If you size for the average, the system fails exactly when most users are online. Peak is often 2–3× the average, and live events can be 10× or more.</div></details>
+      <details class="qa"><summary>Why is the cache number an upper bound?</summary><div>The formula assumes every cached read is a different object. Real reads repeat (a hot tweet is read millions of times but stored once), so the true working set is usually smaller.</div></details>
+      <details class="qa"><summary>Is 1.6 PB too much for one database?</summary><div>Yes. One machine holds a few TB to tens of TB. You need sharding over hundreds of nodes, or a store built for it (Cassandra, DynamoDB, S3 for media), and maybe tiering old data to cheaper storage.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../hld/concepts/02-back-of-envelope.md">02 · Back-of-the-envelope estimation</a></li>
+        <li>Try the presets on: <a href="../hld/problems/01-url-shortener/README.md">URL shortener</a>, <a href="../hld/problems/07-news-feed/README.md">News feed</a>, <a href="../hld/problems/06-chat-system/README.md">Chat system</a></li>
+        <li>Then size: <a href="../hld/problems/14-video-streaming/README.md">Video streaming</a> (large objects change everything)</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v18-raft-leader-election.html">← Raft leader election</a>
+    <a href="v20-isolation-levels.html">Transaction isolation levels →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  // ---------- formatting ----------
+  function trim(s) { return s.indexOf('.') >= 0 ? s.replace(/\.?0+$/, '') : s; }
+  function sig(v) { return trim(v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)); }
+  function num(n) {
+    if (!isFinite(n)) return '—';
+    var u = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
+    for (var i = 0; i < u.length; i++) if (Math.abs(n) >= u[i][0]) return sig(n / u[i][0]) + u[i][1];
+    return sig(n);
+  }
+  function bytes(n) {
+    if (!isFinite(n)) return '—';
+    var u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'], i = 0;
+    while (Math.abs(n) >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+    return sig(n) + ' ' + u[i];
+  }
+  function bits(bps) {
+    if (!isFinite(bps)) return '—';
+    if (bps >= 1e9) return sig(bps / 1e9) + ' Gbps';
+    if (bps >= 1e6) return sig(bps / 1e6) + ' Mbps';
+    if (bps >= 1e3) return sig(bps / 1e3) + ' Kbps';
+    return sig(bps) + ' bps';
+  }
+  function rate(bps) { return bytes(bps) + '/s (' + bits(bps * 8) + ')'; }
+  function parseCount(s) {
+    s = String(s).replace(/[,_\s]/g, '');
+    var m = /^(\d*\.?\d+)(e\d+)?([kmbt])?$/i.exec(s);
+    if (!m) return NaN;
+    var v = parseFloat(m[1] + (m[2] || ''));
+    var mult = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 }[(m[3] || '').toLowerCase()] || 1;
+    return v * mult;
+  }
+
+  // ---------- the model (shared by the calculator and the walkthrough) ----------
+  function calc(p) {
+    var r = {};
+    r.writesDay = p.dau * p.actions;
+    r.wAvg = r.writesDay / 86400;
+    r.wPeak = r.wAvg * p.peak;
+    r.readsDay = r.writesDay * p.ratio;
+    r.rAvg = r.readsDay / 86400;
+    r.rPeak = r.rAvg * p.peak;
+    r.storeDay = r.writesDay * p.size;
+    r.storeYear = r.storeDay * 365;
+    r.storeTotal = r.storeYear * p.years;
+    r.storeRep = r.storeTotal * p.replicas;
+    r.inAvg = r.wAvg * p.size;
+    r.outAvg = r.rAvg * p.size;
+    r.outPeak = r.rPeak * p.size;
+    r.cache = r.readsDay * p.size * (p.cache / 100);
+    return r;
+  }
+
+  var PRESETS = {
+    twitter: {
+      dau: '150M', actions: 2, ratio: 100, size: 1, unit: 1000, years: 5, replicas: 3, peak: 2, cache: 20,
+      note: 'Twitter: 150M daily users post 2 tweets a day. Each tweet is read about 100 times. 1 KB of text and metadata (media is stored separately in blob storage).',
+    },
+    url: {
+      dau: '100M', actions: 1, ratio: 10, size: 100, unit: 1, years: 10, replicas: 3, peak: 2, cache: 20,
+      note: 'URL shortener: 100M new short URLs a day, 10 redirects per URL, about 100 bytes per record, kept for 10 years.',
+    },
+    whatsapp: {
+      dau: '500M', actions: 40, ratio: 1, size: 100, unit: 1, years: 1, replicas: 3, peak: 3, cache: 20,
+      note: 'WhatsApp: 500M daily users send 40 messages a day. Each message is read once by the receiver (more in groups). 100 bytes of text. Kept 1 year on the server here; real WhatsApp deletes after delivery.',
+    },
+  };
+
+  // ---------- calculator ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var F = { dau: $('in-dau'), actions: $('in-act'), ratio: $('in-ratio'), size: $('in-size'), unit: $('in-unit'),
+            years: $('in-years'), replicas: $('in-rep'), peak: $('in-peak'), cache: $('in-cache') };
+
+  function readInputs() {
+    var p = {
+      dau: parseCount(F.dau.value),
+      actions: parseFloat(F.actions.value),
+      ratio: parseFloat(F.ratio.value),
+      size: parseFloat(F.size.value) * parseFloat(F.unit.value),
+      years: parseFloat(F.years.value),
+      replicas: parseFloat(F.replicas.value),
+      peak: parseFloat(F.peak.value),
+      cache: parseFloat(F.cache.value),
+    };
+    var ok = true;
+    function check(key, input, hintId, valid, hintText) {
+      var good = isFinite(p[key]) && valid(p[key]);
+      input.setAttribute('aria-invalid', good ? 'false' : 'true');
+      var h = $(hintId);
+      h.className = good ? 'hint' : 'hint bad';
+      h.textContent = good ? hintText(p[key]) : 'Enter a valid number';
+      if (!good) ok = false;
+    }
+    var pos = function (v) { return v >= 0; };
+    check('dau', F.dau, 'hint-dau', pos, function (v) { return '= ' + num(v) + ' users'; });
+    check('actions', F.actions, 'hint-act', pos, function (v) { return '= ' + num(p.dau * v) + ' writes/day'; });
+    check('ratio', F.ratio, 'hint-ratio', pos, function (v) { return 'read:write = ' + num(v) + ':1'; });
+    check('size', F.size, 'hint-size', pos, function (v) { return '= ' + bytes(v); });
+    check('years', F.years, 'hint-years', pos, function (v) { return '= ' + Math.round(v * 365).toLocaleString('en-US') + ' days'; });
+    check('replicas', F.replicas, 'hint-rep', function (v) { return v >= 1; }, function (v) { return v + ' cop' + (v === 1 ? 'y' : 'ies') + ' of every byte'; });
+    check('peak', F.peak, 'hint-peak', function (v) { return v >= 1; }, function (v) { return 'peak = avg × ' + num(v); });
+    check('cache', F.cache, 'hint-cache', function (v) { return v >= 0 && v <= 100; }, function (v) { return v === 20 ? '80/20 rule' : num(v) + '% of read volume'; });
+    return ok ? p : null;
+  }
+
+  function render() {
+    var p = readInputs();
+    var tiles = $('tiles'), rows = $('rows');
+    tiles.innerHTML = ''; rows.innerHTML = '';
+    if (!p) {
+      Kit.html('p', { class: 'sub', text: 'Fix the red inputs to see results.' }, tiles);
+      return;
+    }
+    var r = calc(p);
+    [
+      ['Peak write QPS', num(r.wPeak) + '/s', 'avg ' + num(r.wAvg) + '/s'],
+      ['Peak read QPS', num(r.rPeak) + '/s', 'avg ' + num(r.rAvg) + '/s'],
+      ['Storage, all replicas', bytes(r.storeRep), bytes(r.storeDay) + ' per day'],
+      ['Peak egress', bits(r.outPeak * 8), bytes(r.outPeak) + '/s'],
+      ['Cache memory', bytes(r.cache), '≈ ' + Math.max(1, Math.ceil(r.cache / 100e9)) + ' × 100 GB nodes'],
+    ].forEach(function (t) {
+      var d = Kit.html('div', { class: 'tile' }, tiles);
+      Kit.html('div', { class: 'k', text: t[0] }, d);
+      Kit.html('div', { class: 'v', text: t[1] }, d);
+      Kit.html('div', { class: 's', text: t[2] }, d);
+    });
+    var S = bytes(p.size);
+    var data = [
+      ['Traffic'],
+      ['Writes per day', 'DAU × writes per user', num(p.dau) + ' × ' + num(p.actions), num(r.writesDay)],
+      ['Average write QPS', 'writes per day ÷ 86,400 s', num(r.writesDay) + ' ÷ 86,400', num(r.wAvg) + '/s'],
+      ['Peak write QPS', 'average × peak factor', num(r.wAvg) + ' × ' + num(p.peak), num(r.wPeak) + '/s'],
+      ['Reads per day', 'writes per day × reads per write', num(r.writesDay) + ' × ' + num(p.ratio), num(r.readsDay)],
+      ['Average read QPS', 'reads per day ÷ 86,400 s', num(r.readsDay) + ' ÷ 86,400', num(r.rAvg) + '/s'],
+      ['Peak read QPS', 'average × peak factor', num(r.rAvg) + ' × ' + num(p.peak), num(r.rPeak) + '/s'],
+      ['Storage'],
+      ['New data per day', 'writes per day × object size', num(r.writesDay) + ' × ' + S, bytes(r.storeDay)],
+      ['New data per year', 'per day × 365', bytes(r.storeDay) + ' × 365', bytes(r.storeYear)],
+      ['Total for retention', 'per year × years', bytes(r.storeYear) + ' × ' + num(p.years), bytes(r.storeTotal)],
+      ['Total with replicas', 'total × replicas', bytes(r.storeTotal) + ' × ' + num(p.replicas), bytes(r.storeRep)],
+      ['Bandwidth'],
+      ['Ingress (average)', 'average write QPS × object size', num(r.wAvg) + '/s × ' + S, rate(r.inAvg)],
+      ['Egress (average)', 'average read QPS × object size', num(r.rAvg) + '/s × ' + S, rate(r.outAvg)],
+      ['Egress (peak)', 'peak read QPS × object size', num(r.rPeak) + '/s × ' + S, rate(r.outPeak)],
+      ['Memory'],
+      ['Cache memory', 'reads per day × size × cache %', num(r.readsDay) + ' × ' + S + ' × ' + num(p.cache) + '%', bytes(r.cache)],
+    ];
+    data.forEach(function (d) {
+      var tr = Kit.html('tr', d.length === 1 ? { class: 'group' } : {}, rows);
+      if (d.length === 1) { Kit.html('td', { colspan: '3', text: d[0] }, tr); return; }
+      Kit.html('td', { text: d[0] }, tr);
+      var f = Kit.html('td', { class: 'f' }, tr);
+      Kit.html('div', { text: d[1] }, f);
+      Kit.html('b', { text: '= ' + d[2] }, f);
+      Kit.html('td', { class: 'r', text: d[3] }, tr);
+    });
+  }
+
+  function loadPreset(name) {
+    var pr = PRESETS[name];
+    F.dau.value = pr.dau; F.actions.value = pr.actions; F.ratio.value = pr.ratio;
+    F.size.value = pr.size; F.unit.value = String(pr.unit); F.years.value = pr.years;
+    F.replicas.value = pr.replicas; F.peak.value = pr.peak; F.cache.value = pr.cache;
+    $('preset-note').textContent = pr.note;
+    markPreset(name);
+    render();
+  }
+  function markPreset(name) {
+    Array.prototype.forEach.call(document.querySelectorAll('#presets [data-preset]'), function (b) {
+      b.setAttribute('aria-pressed', b.getAttribute('data-preset') === name ? 'true' : 'false');
+    });
+  }
+
+  document.getElementById('presets').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-preset]');
+    if (b) loadPreset(b.getAttribute('data-preset'));
+  });
+  Object.keys(F).forEach(function (k) {
+    F[k].addEventListener('input', function () { markPreset(null); $('preset-note').textContent = 'Custom inputs.'; render(); });
+  });
+  loadPreset('twitter');
+
+  // ---------- the walkthrough: Twitter worked example ----------
+  var TW = { dau: 150e6, actions: 2, ratio: 100, size: 1000, years: 5, replicas: 3, peak: 2, cache: 20 };
+  var R = calc(TW);
+  var cacheNodes = Math.ceil(R.cache / 100e9);
+
+  var INPUTS = [
+    ['DAU', num(TW.dau)], ['Posts / user / day', String(TW.actions)], ['Reads per write', String(TW.ratio)],
+    ['Post size', bytes(TW.size)], ['Retention', TW.years + ' y'], ['Replicas', String(TW.replicas)],
+    ['Peak factor', '×' + TW.peak], ['Cache share', TW.cache + '%'],
+  ];
+  var CARDS = [
+    { id: 'w', x: 260, y: 20, title: 'Write QPS' },
+    { id: 'r', x: 505, y: 20, title: 'Read QPS' },
+    { id: 's', x: 260, y: 156, title: 'Storage' },
+    { id: 'b', x: 505, y: 156, title: 'Bandwidth' },
+    { id: 'c', x: 260, y: 292, title: 'Cache memory' },
+    { id: 'v', x: 505, y: 292, title: 'What it decides' },
+  ];
+  var CW = 235, CH = 124;
+
+  function focus(ctx, id) {
+    Object.keys(ctx.state.cards).forEach(function (k) {
+      var c = ctx.state.cards[k];
+      c.rect.setAttribute('class', k === id ? 'box hl' : c.done ? 'box accent' : 'box');
+    });
+  }
+
+  // Animate inputs → card, count the big number up, then show the formula lines.
+  function fill(ctx, id, value, fmt, l1, l2) {
+    var c = ctx.state.cards[id];
+    focus(ctx, id);
+    return ctx.packet([[230, 220], [245, 220], [245, c.y + CH / 2], [c.x, c.y + CH / 2]], { ms: 700 })
+      .then(function () {
+        ctx.fade(c.g, 1, 300);
+        return ctx.tween(800, function (t) { c.big.textContent = fmt(value * t); });
+      })
+      .then(function () {
+        c.big.textContent = fmt(value);
+        c.l1.textContent = l1; c.l2.textContent = l2 || '';
+        c.done = true;
+        ctx.flash(c.big);
+        return ctx.wait(300);
+      });
+  }
+
+  function showInputs(ctx) {
+    var chain = Promise.resolve();
+    ctx.state.inputEls.forEach(function (g) { chain = chain.then(function () { return ctx.fade(g, 1, 160); }); });
+    return chain;
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Worked example: a Twitter-like feed',
+      say: 'We size a service where 150M people post and read short posts. Each step turns the assumptions on the left into one number on the right. The calculator above uses the same formulas.',
+    },
+    setup: function (ctx) {
+      ctx.state.cards = {};
+      ctx.state.inputEls = [];
+      ctx.el('rect', { x: 20, y: 20, width: 210, height: 396, rx: 10, class: 'box accent' });
+      ctx.el('text', { x: 36, y: 48, class: 'title', text: 'Assumptions' });
+      INPUTS.forEach(function (it, i) {
+        var y = 86 + i * 38;
+        var g = ctx.group({ opacity: 0 });
+        ctx.el('text', { x: 36, y: y, text: it[0] }, g);
+        ctx.el('text', { x: 214, y: y, 'text-anchor': 'end', class: 'val', text: it[1] }, g);
+        if (i < INPUTS.length - 1) ctx.el('line', { x1: 36, x2: 214, y1: y + 14, y2: y + 14, class: 'wire', style: 'stroke-width:1' }, g);
+        ctx.state.inputEls.push(g);
+      });
+      ctx.el('text', { x: 36, y: 386, class: 'mono small muted', text: '1 KB = 1,000 B' });
+      ctx.el('text', { x: 36, y: 404, class: 'mono small muted', text: '1 day = 86,400 s' });
+      CARDS.forEach(function (c) {
+        var g = ctx.group({ opacity: 0.45 });
+        var rect = ctx.el('rect', { x: c.x, y: c.y, width: CW, height: CH, rx: 10, class: 'box' }, g);
+        ctx.el('text', { x: c.x + 14, y: c.y + 26, class: 'title', text: c.title }, g);
+        var big = ctx.el('text', { x: c.x + 14, y: c.y + 62, class: c.id === 'v' ? 'mono muted' : 'big', text: c.id === 'v' ? '' : '?' }, g);
+        var l1 = ctx.el('text', { x: c.x + 14, y: c.y + 88, class: 'mono small muted', text: '' }, g);
+        var l2 = ctx.el('text', { x: c.x + 14, y: c.y + 108, class: 'mono small muted', text: '' }, g);
+        ctx.state.cards[c.id] = { g: g, rect: rect, big: big, l1: l1, l2: l2, x: c.x, y: c.y, done: false };
+      });
+    },
+    steps: [
+      {
+        title: 'Write the assumptions down first',
+        say: 'Say each number out loud and write it on the board: 150M daily users, 2 posts each, 100 reads per write, 1 KB per post. Clear assumptions matter more than exact ones; the interviewer can correct them.',
+        run: function (ctx) {
+          ctx.log('Assumptions: 150M DAU, 2 posts/day, 100:1 reads, 1 KB', 'info');
+          return showInputs(ctx);
+        },
+      },
+      {
+        title: 'Writes per second',
+        say: 'Writes per day divided by 86,400 seconds gives the average write QPS. Shortcut: 1 day ≈ 10<sup>5</sup> s, so 300M a day is about 3K per second.',
+        run: function (ctx) {
+          ctx.log('Writes/day = 150M × 2 = ' + num(R.writesDay), 'info');
+          ctx.log('Avg write QPS = ' + num(R.wAvg) + '/s', 'ok');
+          return fill(ctx, 'w', R.wAvg, function (v) { return num(v) + '/s avg'; },
+            '150M × 2 = ' + num(R.writesDay) + ' writes/day', num(R.writesDay) + ' ÷ 86,400 s = ' + num(R.wAvg) + '/s');
+        },
+      },
+      {
+        title: 'Size for the peak, not the average',
+        say: 'Traffic is not flat over the day. Multiply by a peak factor (2–3× is common, live events can be 10×). The system must survive the peak, so peak QPS drives the server count.',
+        run: function (ctx) {
+          var c = ctx.state.cards.w;
+          focus(ctx, 'w');
+          ctx.log('Peak write QPS = ' + num(R.wAvg) + ' × 2 = ' + num(R.wPeak) + '/s', 'warn');
+          return ctx.tween(700, function (t) { c.big.textContent = num(R.wAvg + (R.wPeak - R.wAvg) * t) + '/s peak'; })
+            .then(function () {
+              c.big.textContent = num(R.wPeak) + '/s peak';
+              c.l2.textContent = 'avg ' + num(R.wAvg) + '/s × 2 = ' + num(R.wPeak) + '/s';
+              ctx.flash(c.big);
+            });
+        },
+      },
+      {
+        title: 'Reads per second',
+        say: 'Each post is read about 100 times, so reads are 100× writes. Near 700K reads per second at peak is far beyond one database. This number alone tells you to add a cache and read replicas.',
+        run: function (ctx) {
+          ctx.log('Reads/day = ' + num(R.writesDay) + ' × 100 = ' + num(R.readsDay), 'info');
+          ctx.log('Peak read QPS = ' + num(R.rPeak) + '/s', 'warn');
+          return fill(ctx, 'r', R.rPeak, function (v) { return num(v) + '/s peak'; },
+            num(R.writesDay) + ' × 100 = ' + num(R.readsDay) + ' reads/day', 'avg ' + num(R.rAvg) + '/s × 2 = ' + num(R.rPeak) + '/s');
+        },
+      },
+      {
+        title: 'Storage over the retention period',
+        say: 'Writes per day × object size gives new data per day. Multiply by 365, by the years you keep it, and by the replica count. 1.6 PB cannot live on one machine, so the data must be sharded.',
+        run: function (ctx) {
+          ctx.log('Per day = ' + num(R.writesDay) + ' × 1 KB = ' + bytes(R.storeDay), 'info');
+          ctx.log('5 years × 3 replicas = ' + bytes(R.storeRep), 'warn');
+          return fill(ctx, 's', R.storeRep, bytes,
+            num(R.writesDay) + ' × 1 KB = ' + bytes(R.storeDay) + '/day', '× 365 × 5 y × 3 = ' + bytes(R.storeRep));
+        },
+      },
+      {
+        title: 'Bandwidth in and out',
+        say: 'QPS × object size gives bytes per second. Ingress is small here; egress is 100× larger because of reads. Multiply bytes by 8 to compare with network links in Gbps.',
+        run: function (ctx) {
+          ctx.log('Ingress = ' + rate(R.inAvg), 'info');
+          ctx.log('Egress = ' + rate(R.outAvg) + ', peak ' + bits(R.outPeak * 8), 'info');
+          return fill(ctx, 'b', R.outAvg, function (v) { return bytes(v) + '/s out'; },
+            'in  ' + num(R.wAvg) + '/s × 1 KB = ' + bytes(R.inAvg) + '/s', 'out ' + num(R.rAvg) + '/s × 1 KB = ' + bits(R.outAvg * 8));
+        },
+      },
+      {
+        title: 'Cache memory with the 80/20 rule',
+        say: 'Assume 20% of content serves 80% of reads, so cache 20% of a day\'s read volume. This is an upper bound, because repeated reads of the same post share one cache entry.',
+        run: function (ctx) {
+          ctx.log('Cache = ' + num(R.readsDay) + ' × 1 KB × 20% = ' + bytes(R.cache), 'info');
+          ctx.log('≈ ' + cacheNodes + ' Redis nodes of 100 GB', 'ok');
+          return fill(ctx, 'c', R.cache, bytes,
+            num(R.readsDay) + ' × 1 KB × 20%', '≈ ' + cacheNodes + ' nodes of 100 GB each');
+        },
+      },
+      {
+        title: 'Turn the numbers into design decisions',
+        say: 'Estimation is useful only when it changes the design. Peak writes need a sharded store, peak reads need a cache layer, and petabytes need a horizontally scaled database. Say these out loud, then move on to the design.',
+        run: function (ctx) {
+          var c = ctx.state.cards.v;
+          focus(ctx, 'v');
+          c.done = true;
+          c.big.remove(); c.l1.remove(); c.l2.remove();
+          var lines = [
+            'Writes ' + num(R.wPeak) + '/s: shard the DB',
+            'Reads ' + num(R.rPeak) + '/s: cache first',
+            bytes(R.storeRep) + ': wide-column store',
+          ];
+          var p = ctx.fade(c.g, 1, 300);
+          lines.forEach(function (t, i) {
+            var tx = ctx.el('text', { x: c.x + 14, y: c.y + 56 + i * 24, class: 'verdict', opacity: 0, text: t }, c.g);
+            p = p.then(function () { return ctx.fade(tx, 1, 250); });
+          });
+          ctx.log('Decision: sharding + cache + replicas', 'ok');
+          return p;
+        },
+      },
+    ],
+  });
+
+  // Extra control: copy the worked example into the calculator. Lives in #controls, so it survives Reset.
+  var send = Kit.html('button', { class: 'btn', type: 'button', text: 'Open in calculator' }, document.getElementById('controls'));
+  send.addEventListener('click', function () {
+    loadPreset('twitter');
+    document.querySelector('.calc').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+})();
+</script>
+</body>
+</html>

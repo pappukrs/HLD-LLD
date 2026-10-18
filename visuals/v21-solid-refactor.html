@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>SOLID Refactor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .reason { stroke: var(--bad); stroke-width: 1.4; stroke-dasharray: 3 3; fill: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag lld">LLD · Design principles</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>SOLID Refactor</h1>
+    <p class="lede">One <code>PaymentService</code> that does everything. We fix it one principle at a time and watch the class boxes change. The behaviour stays the same; the design gets easier to change and to test.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="Class diagram of a payment service being refactored"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Changed in this step</span>
+        <span><i style="background: var(--bad)"></i>Smell / violation</span>
+        <span><i style="background: var(--ok)"></i>Fixed</span>
+        <span><i style="background: var(--muted)"></i>Dashed + triangle = implements</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I keep each class to one reason to change. The service depends on small interfaces like <code>Payable</code> and <code>PaymentRepo</code>, not on concrete classes. A new payment method is a new class, not an edit. I don't let a subclass throw 'not supported'; I split the interface instead. I inject dependencies through the constructor, so tests can pass fakes."</p>
+    </div>
+    <div class="note">
+      <h3>The final shape in TypeScript</h3>
+<pre class="code">interface Payable { pay(amount: number): Promise&lt;Receipt&gt;; }
+interface Refundable { refund(paymentId: string): Promise&lt;void&gt;; }
+interface PaymentRepo { save(p: Payment): Promise&lt;void&gt;; }
+interface Notifier { send(to: string, msg: string): Promise&lt;void&gt;; }
+
+class PaymentService {
+  constructor(private repo: PaymentRepo, private notifier: Notifier) {}
+
+  async pay(method: Payable, user: User, amount: number) {
+    const receipt = await method.pay(amount);
+    await this.repo.save({ userId: user.id, amount, receipt });
+    await this.notifier.send(user.email, `Paid ${amount}`);
+    return receipt;
+  }
+}
+
+// composition root: the only place that knows concrete classes
+const service = new PaymentService(new PostgresRepo(pool), new SmtpNotifier(cfg));</pre>
+    </div>
+    <div class="note wide">
+      <h3>Each principle: the smell and the fix</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Principle</th><th>Smell you can see</th><th>Fix</th><th>In this refactor</th></tr></thead>
+          <tbody>
+            <tr><td>S: Single responsibility</td><td>Many teams edit the same file for different reasons</td><td>Split by reason to change (by actor)</td><td>Validator, repository, mailer and audit logger leave the service</td></tr>
+            <tr><td>O: Open/closed</td><td><code>switch (type)</code> that grows with every feature</td><td>Polymorphism: an interface plus one class per case</td><td><code>PaymentMethod</code> interface; PayLater is a new class</td></tr>
+            <tr><td>L: Liskov substitution</td><td>Subclass throws "not supported", or callers need <code>instanceof</code></td><td>Only promise what every subtype can do</td><td>Gift card can't refund, so it must not claim <code>refund()</code></td></tr>
+            <tr><td>I: Interface segregation</td><td>Classes implement methods they don't need</td><td>Several small, role-based interfaces</td><td><code>Payable</code> and <code>Refundable</code></td></tr>
+            <tr><td>D: Dependency inversion</td><td><code>new PostgresRepo()</code> inside business logic</td><td>Depend on an interface; inject the concrete class</td><td>Constructor takes <code>PaymentRepo</code> and <code>Notifier</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Does SRP mean one method per class?</summary><div>No. It means one reason to change. A class can have many methods if they all change for the same actor, for example the payments team.</div></details>
+      <details class="qa"><summary>How do you spot an LSP violation in code review?</summary><div>A subtype throws <code>NotImplemented</code>, does nothing on purpose, needs stronger input rules than the parent, or callers check <code>instanceof</code> before calling it.</div></details>
+      <details class="qa"><summary>What is the difference between DIP and DI?</summary><div>DIP is the rule: high-level code depends on abstractions it owns. DI is one way to follow it: pass the dependency in (usually through the constructor) instead of creating it inside.</div></details>
+      <details class="qa"><summary>Should every class get an interface?</summary><div>No. Add an interface when there is a second implementation or a test needs a fake. Extra interfaces with one implementation are just noise.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../lld/concepts/02-solid.md">02 · SOLID principles</a></li>
+        <li>Pattern: <a href="../lld/concepts/patterns/p10-strategy.md">p10 · Strategy</a></li>
+        <li>Pattern: <a href="../lld/concepts/patterns/p18-repository-di.md">p18 · Repository and DI</a></li>
+        <li>Used in: <a href="../lld/problems/19-payment-wallet/README.md">Payment Wallet</a>, <a href="../lld/problems/05-notification-service/README.md">Notification Service</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v20-isolation-levels.html">← Transaction isolation levels</a>
+    <a href="v22-uml-relationships.html">UML relationships →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+    var bad = ctx.el('marker', { id: 'm-open-bad', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--bad); stroke-width: 1.6' }, bad);
+  }
+
+  // A UML class box. methods: strings or { t, cls }.
+  function cls(ctx, parent, x, y, w, name, methods, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = methods.length ? head + 8 + methods.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (methods.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = methods.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 17 + i * 17 - 3, class: 'mono' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], bad: ['uml red', 'm-open-bad'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function text(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function caption(ctx, parent, t) { return text(ctx, parent, 20, 28, t, 'title'); }
+
+  // Replace the current scene with a new one (fade out, then fade in).
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 450);
+    });
+  }
+
+  // ---------- scenes ----------
+  var REASONS = ['card rules change', 'a new payment type', 'DB schema change', 'email template change', 'audit format change'];
+
+  function sceneGod(ctx, g) {
+    caption(ctx, g, 'Before: one class does everything');
+    var god = cls(ctx, g, 40, 70, 300, 'PaymentService', [
+      'validateCard(card)', 'charge(type, amount)', 'saveToDb(payment)', 'sendReceiptEmail(user)', 'writeAuditLog(event)',
+    ], { cls: 'signal' });
+    ctx.state.god = god;
+    var rg = ctx.group({ opacity: 0 }, g);
+    text(ctx, rg, 430, 86, 'Reasons to change', 'mono small muted');
+    god.lines.forEach(function (ln, i) {
+      var y = parseFloat(ln.getAttribute('y')) - 4;
+      ctx.el('path', { d: 'M332,' + y + ' H420', class: 'reason' }, rg);
+      ctx.el('circle', { cx: 424, cy: y, r: 3, class: 'dot bad' }, rg);
+      text(ctx, rg, 432, y + 4, REASONS[i], 'mono fill-bad');
+    });
+    var bottom = ctx.group({ opacity: 0 }, g);
+    text(ctx, bottom, 40, 240, 'Five teams edit one file. A change for email can break card charging.', 'small');
+    text(ctx, bottom, 40, 262, 'A unit test needs a real card gateway, a database and an SMTP server.', 'small');
+    ctx.state.reasons = rg;
+    ctx.state.godBottom = bottom;
+  }
+
+  function sceneSRP(ctx, g) {
+    caption(ctx, g, 'S: one reason to change per class');
+    var svc = cls(ctx, g, 250, 50, 260, 'PaymentService', ['pay(type, amount)', 'charge(type, amount)'], { cls: 'accent' });
+    var parts = [
+      cls(ctx, g, 20, 220, 170, 'CardValidator', ['validate(card)']),
+      cls(ctx, g, 205, 220, 170, 'PaymentRepository', ['save(payment)']),
+      cls(ctx, g, 390, 220, 170, 'ReceiptMailer', ['send(user)']),
+      cls(ctx, g, 575, 220, 165, 'AuditLogger', ['write(event)']),
+    ];
+    parts.forEach(function (p) {
+      arrow(ctx, g, 'M' + svc.b.cx + ',' + svc.b.bottom + ' L' + p.b.cx + ',' + p.b.y, 'assoc');
+      text(ctx, g, p.b.cx, p.b.bottom + 20, 'one reason', 'mono small fill-ok', 'middle');
+    });
+    text(ctx, g, 380, 340, 'The service now only coordinates. Each helper changes for its own reason.', 'small', 'middle');
+    text(ctx, g, 380, 362, 'But charge(type, amount) still has a problem. Look inside it next.', 'small muted', 'middle');
+    ctx.state.srp = { svc: svc, parts: parts };
+  }
+
+  var SWITCH = [
+    'charge(type: string, amt: number) {',
+    '  switch (type) {',
+    "    case 'card':   return this.card(amt);",
+    "    case 'upi':    return this.upi(amt);",
+    "    case 'wallet': return this.wallet(amt);",
+    '  }',
+    '}',
+  ];
+  function sceneOCPBad(ctx, g) {
+    caption(ctx, g, 'O: the switch grows with every feature');
+    cls(ctx, g, 20, 70, 300, 'PaymentService', ['pay(type, amount)', { t: 'charge(type, amount)', cls: 'fill-bad' }], { cls: 'bad' });
+    ctx.el('rect', { x: 360, y: 60, width: 380, height: 190, rx: 8, class: 'box' }, g);
+    text(ctx, g, 376, 82, 'inside charge()', 'mono small muted');
+    var lines = SWITCH.map(function (s, i) { return text(ctx, g, 376, 108 + i * 18, s, 'mono'); });
+    ctx.state.sw = { lines: lines, g: g };
+    text(ctx, g, 20, 300, 'To add "pay later" we must open a class that already works,', 'small');
+    text(ctx, g, 20, 320, 'edit it, and re-test every payment type.', 'small');
+  }
+
+  function sceneOCPGood(ctx, g) {
+    caption(ctx, g, 'O: add a class, do not edit one');
+    var svc = cls(ctx, g, 20, 66, 240, 'PaymentService', ['pay(m: PaymentMethod, amt)'], { cls: 'accent' });
+    var itf = cls(ctx, g, 330, 50, 200, 'PaymentMethod', ['pay(amt)'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M' + svc.b.right + ',' + (svc.b.y + 30) + ' H' + itf.b.x, 'assoc');
+    text(ctx, g, 295, 88, 'uses', 'mono small muted', 'middle');
+    var names = ['CardPayment', 'UpiPayment', 'WalletPayment', 'PayLaterPayment'];
+    var impls = names.map(function (n, i) {
+      var sub = ctx.group(i === 3 ? { opacity: 0 } : {}, g);
+      var c = cls(ctx, sub, 180 + i * 142, 230, 132, n, ['pay(amt)'], i === 3 ? { cls: 'ok' } : {});
+      arrow(ctx, sub, 'M' + c.b.cx + ',230 V180 H' + itf.b.cx + ' V' + itf.b.bottom, 'real');
+      return sub;
+    });
+    ctx.state.payLater = impls[3];
+    var note = ctx.group({ opacity: 0 }, g);
+    text(ctx, note, 20, 340, 'PayLaterPayment is a new file. PaymentService did not change.', 'small fill-ok');
+    text(ctx, note, 20, 362, 'Open for extension, closed for modification.', 'small muted');
+    ctx.state.ocpNote = note;
+  }
+
+  function sceneLSP(ctx, g) {
+    caption(ctx, g, 'L: a subtype that breaks the promise');
+    var job = cls(ctx, g, 20, 66, 230, 'RefundJob', ['refundAll(ms: PaymentMethod[])']);
+    var itf = cls(ctx, g, 330, 50, 200, 'PaymentMethod', ['pay(amt)', { t: 'refund(id)', cls: 'fill-accent' }], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M' + job.b.right + ',' + (job.b.y + 30) + ' H' + itf.b.x, 'assoc');
+    var specs = [
+      ['CardPayment', ['pay(amt)', 'refund(id)'], ''],
+      ['UpiPayment', ['pay(amt)', 'refund(id)'], ''],
+      ['GiftCardPayment', ['pay(amt)', { t: 'refund() { throw }', cls: 'fill-bad' }], 'bad'],
+    ];
+    var impls = specs.map(function (s, i) {
+      var c = cls(ctx, g, 200 + i * 175, 250, 160, s[0], s[1], { cls: s[2] });
+      arrow(ctx, g, 'M' + c.b.cx + ',250 V200 H' + itf.b.cx + ' V' + itf.b.bottom, 'real');
+      return c;
+    });
+    ctx.state.lsp = { itf: itf, impls: impls };
+    var err = ctx.group({ opacity: 0 }, g);
+    text(ctx, err, impls[2].b.cx, 355, 'Error: refund not supported', 'mono fill-bad', 'middle');
+    text(ctx, err, 20, 400, 'The caller trusted the interface. One subtype broke that trust at runtime.', 'small');
+    ctx.state.lspErr = err;
+  }
+
+  function sceneISP(ctx, g) {
+    caption(ctx, g, 'I: small interfaces, each one honest');
+    var job = cls(ctx, g, 20, 66, 200, 'RefundJob', ['refundAll(rs: Refundable[])']);
+    var ref = cls(ctx, g, 270, 50, 160, 'Refundable', ['refund(id)'], { stereo: 'interface', cls: 'accent' });
+    var pay = cls(ctx, g, 480, 50, 160, 'Payable', ['pay(amt)'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M' + job.b.right + ',' + (job.b.y + 30) + ' H' + ref.b.x, 'assoc');
+    var specs = [
+      ['CardPayment', ['pay(amt)', 'refund(id)'], [ref, pay]],
+      ['UpiPayment', ['pay(amt)', 'refund(id)'], [ref, pay]],
+      ['GiftCardPayment', ['pay(amt)'], [pay]],
+    ];
+    var impls = specs.map(function (s, i) {
+      var c = cls(ctx, g, 200 + i * 180, 260, 160, s[0], s[1], i === 2 ? { cls: 'ok' } : {});
+      s[2].forEach(function (t) { arrow(ctx, g, 'M' + c.b.cx + ',' + c.b.y + ' L' + t.b.cx + ',' + t.b.bottom, 'real'); });
+      return c;
+    });
+    ctx.state.isp = { ref: ref, impls: impls };
+    text(ctx, g, impls[2].b.cx, 345, 'never asked to refund', 'mono small fill-ok', 'middle');
+    text(ctx, g, 20, 395, 'refundAll([giftCard]) is now a compile error, not a 3 a.m. runtime error.', 'small');
+    text(ctx, g, 20, 417, 'Splitting the fat interface also fixed the Liskov problem.', 'small muted');
+  }
+
+  function sceneDIPBad(ctx, g) {
+    caption(ctx, g, 'D: business logic creates its own tools');
+    text(ctx, g, 20, 80, 'high-level policy', 'mono small muted');
+    var svc = cls(ctx, g, 250, 56, 270, 'PaymentService', [
+      'constructor() {', '  this.repo = new PostgresRepo();', '  this.mail = new SmtpMailer();', '}', { t: 'pay(m: Payable, amt)' },
+    ], { cls: 'bad' });
+    text(ctx, g, 20, 300, 'low-level details', 'mono small muted');
+    var pg = cls(ctx, g, 160, 280, 170, 'PostgresRepo', ['save(p)']);
+    var smtp = cls(ctx, g, 440, 280, 170, 'SmtpMailer', ['send(to, msg)']);
+    arrow(ctx, g, 'M' + (svc.b.cx - 50) + ',' + svc.b.bottom + ' L' + pg.b.cx + ',' + pg.b.y, 'bad');
+    arrow(ctx, g, 'M' + (svc.b.cx + 50) + ',' + svc.b.bottom + ' L' + smtp.b.cx + ',' + smtp.b.y, 'bad');
+    text(ctx, g, 20, 385, 'The policy points down at the details. A unit test now needs a real Postgres', 'small');
+    text(ctx, g, 20, 405, 'and a real SMTP server, and switching to SES means editing PaymentService.', 'small');
+  }
+
+  function sceneDIPGood(ctx, g) {
+    caption(ctx, g, 'D: depend on interfaces, inject the details');
+    var svc = cls(ctx, g, 250, 40, 260, 'PaymentService', ['- repo: PaymentRepo', '- notifier: Notifier', 'pay(m: Payable, amt)'], { cls: 'ok' });
+    var repo = cls(ctx, g, 150, 150, 170, 'PaymentRepo', ['save(p)'], { stereo: 'interface', cls: 'accent' });
+    var notif = cls(ctx, g, 440, 150, 170, 'Notifier', ['send(to, msg)'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M' + (svc.b.cx - 50) + ',' + svc.b.bottom + ' L' + repo.b.cx + ',' + repo.b.y, 'assoc');
+    arrow(ctx, g, 'M' + (svc.b.cx + 50) + ',' + svc.b.bottom + ' L' + notif.b.cx + ',' + notif.b.y, 'assoc');
+    var conc = [
+      ['PostgresRepo', 40, repo, 'prod'], ['InMemoryRepo', 200, repo, 'tests'],
+      ['SmtpMailer', 420, notif, 'prod'], ['FakeNotifier', 580, notif, 'tests'],
+    ];
+    conc.forEach(function (c) {
+      var b = cls(ctx, g, c[1], 290, 140, c[0], []);
+      arrow(ctx, g, 'M' + b.b.cx + ',' + b.b.y + ' L' + c[2].b.cx + ',' + c[2].b.bottom, 'real');
+      text(ctx, g, b.b.cx, b.b.bottom + 18, c[3], 'mono small muted', 'middle');
+    });
+    text(ctx, g, 20, 375, 'The details now point up at the interfaces. They plug in from outside.', 'small');
+    text(ctx, g, 20, 405, 'new PaymentService(new PostgresRepo(), new SmtpMailer())', 'mono fill-accent');
+    text(ctx, g, 20, 425, '// composition root: tests pass InMemoryRepo and FakeNotifier', 'mono muted');
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A PaymentService that does everything',
+      say: 'We refactor one class, one principle at a time. Watch the boxes: each step changes the shape of the design, not what the code does.',
+    },
+    setup: function (ctx) {
+      defs(ctx);
+      var g = ctx.group();
+      sceneGod(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'The god class',
+        say: 'One class validates cards, charges money, writes to the DB, sends email and writes audit logs. It has <b>five reasons to change</b>, so every change risks breaking something unrelated.',
+        run: function (ctx) {
+          ctx.flash(ctx.state.god.r);
+          REASONS.forEach(function (r) { ctx.log('Reason to change: ' + r, 'bad'); });
+          return ctx.fade(ctx.state.reasons, 1, 500).then(function () { return ctx.fade(ctx.state.godBottom, 1, 400); });
+        },
+      },
+      {
+        title: 'S: split by reason to change',
+        say: 'Move each job to its own class: <code>CardValidator</code>, <code>PaymentRepository</code>, <code>ReceiptMailer</code>, <code>AuditLogger</code>. The service keeps only the payment flow. Now an email change touches only the mailer.',
+        run: function (ctx) {
+          var god = ctx.state.god;
+          var targets = [[105, 250], null, [290, 250], [475, 250], [657, 250]];
+          var moves = god.lines.map(function (ln, i) {
+            if (!targets[i]) return null;
+            var y = parseFloat(ln.getAttribute('y')) - 4;
+            return ctx.packet([[60, y], [targets[i][0], targets[i][1]]], { ms: 700, cls: 'accent' });
+          });
+          ctx.log('Split PaymentService into 5 classes', 'ok');
+          return Promise.all(moves).then(function () { return swap(ctx, function (g) { sceneSRP(ctx, g); }); });
+        },
+      },
+      {
+        title: 'O: the switch is still closed to extension',
+        say: '<code>charge()</code> uses a <code>switch</code> on the type. Adding "pay later" means editing a tested class and re-testing card, UPI and wallet. The class is not closed for modification.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneOCPBad(ctx, g); }).then(function () {
+            var sw = ctx.state.sw;
+            var close1 = sw.lines[5], close2 = sw.lines[6];
+            close1.setAttribute('y', 108 + 6 * 18);
+            close2.setAttribute('y', 108 + 7 * 18);
+            var added = text(ctx, sw.g, 376, 108 + 5 * 18, "    case 'paylater': ...  // edit!", 'mono fill-bad');
+            ctx.flash(added);
+            ctx.log("New type 'paylater' → edit PaymentService", 'bad');
+            ctx.log('Re-test card, upi and wallet too', 'warn');
+            return ctx.wait(600);
+          });
+        },
+      },
+      {
+        title: 'O: one interface, one class per method',
+        say: 'Define <code>PaymentMethod</code> with <code>pay(amt)</code>. Each method is its own class. To add pay later, we <b>add</b> <code>PayLaterPayment</code>. <code>PaymentService</code> is not touched. This is the Strategy pattern.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneOCPGood(ctx, g); }).then(function () {
+            ctx.log('Interface PaymentMethod with 3 implementations', 'info');
+            return ctx.fade(ctx.state.payLater, 1, 500);
+          }).then(function () {
+            ctx.log('Added PayLaterPayment: 1 new file, 0 edits', 'ok');
+            return ctx.fade(ctx.state.ocpNote, 1, 400);
+          });
+        },
+      },
+      {
+        title: 'L: a subtype that throws breaks the caller',
+        say: 'Someone adds <code>refund()</code> to the interface. Gift cards cannot refund, so <code>GiftCardPayment.refund()</code> throws. <code>RefundJob</code> trusted the interface and crashes. A subtype must keep every promise of its parent type.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneLSP(ctx, g); }).then(function () {
+            var s = ctx.state.lsp;
+            var chain = Promise.resolve();
+            s.impls.forEach(function (c, i) {
+              chain = chain.then(function () {
+                return ctx.packet([[s.itf.b.cx, s.itf.b.bottom], [s.itf.b.cx, 225], [c.b.cx, 225], [c.b.cx, c.b.y]], { ms: 600, cls: i === 2 ? 'bad' : 'ok', label: 'refund' });
+              }).then(function () {
+                if (i === 2) { ctx.flash(c.r); ctx.log('GiftCardPayment.refund() threw: not supported', 'bad'); return ctx.fade(ctx.state.lspErr, 1, 300); }
+                ctx.log(['Card', 'UPI'][i] + ' refund ok', 'ok');
+              });
+            });
+            return chain;
+          });
+        },
+      },
+      {
+        title: 'I: split the fat interface',
+        say: 'Split into <code>Payable</code> and <code>Refundable</code>. Card and UPI implement both. Gift card implements only <code>Payable</code>. <code>RefundJob</code> asks for <code>Refundable[]</code>, so the compiler stops the bad call. No class implements a method it cannot honour.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneISP(ctx, g); }).then(function () {
+            var s = ctx.state.isp;
+            return Promise.all(s.impls.slice(0, 2).map(function (c) {
+              return ctx.packet([[s.ref.b.cx, s.ref.b.bottom], [c.b.cx, c.b.y]], { ms: 700, cls: 'ok', label: 'refund' });
+            }));
+          }).then(function () {
+            ctx.log('Interfaces: Payable, Refundable', 'info');
+            ctx.log('refundAll() only receives Refundable objects', 'ok');
+          });
+        },
+      },
+      {
+        title: 'D: the service builds its own dependencies',
+        say: 'The constructor calls <code>new PostgresRepo()</code> and <code>new SmtpMailer()</code>. High-level policy now depends on low-level details. You cannot unit test it without a real DB, and changing the email provider means editing payment code.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneDIPBad(ctx, g); }).then(function () {
+            ctx.log('PaymentService → PostgresRepo (concrete)', 'bad');
+            ctx.log('PaymentService → SmtpMailer (concrete)', 'bad');
+          });
+        },
+      },
+      {
+        title: 'D: depend on interfaces, inject from outside',
+        say: 'The service depends on <code>PaymentRepo</code> and <code>Notifier</code> interfaces that it owns. The concrete classes are passed into the constructor. Production passes Postgres and SMTP; tests pass in-memory fakes. Both arrows now point toward the abstraction.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneDIPGood(ctx, g); }).then(function () {
+            ctx.log('Constructor injection: (repo: PaymentRepo, notifier: Notifier)', 'ok');
+            ctx.log('Tests run with InMemoryRepo + FakeNotifier, no network', 'ok');
+          });
+        },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>

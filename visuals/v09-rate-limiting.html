@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Rate Limiting Algorithms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage .slot { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+  .stage .burst { fill: none; stroke: var(--bad); stroke-width: 2; }
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag hld">HLD · Protection</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Rate Limiting Algorithms</h1>
+    <p class="lede">A rate limiter decides, per user or API key, whether a request may pass now or gets <code>429 Too Many Requests</code>. The algorithms differ in how they treat bursts, how smooth the output is, and how much memory they need.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A client, a rate limiter with its internal state, a server and a timeline of accepted and rejected requests"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="algo">Algorithm
+          <select id="algo">
+            <option value="token">Token bucket</option>
+            <option value="leaky">Leaky bucket</option>
+            <option value="fixed">Fixed window</option>
+            <option value="sliding">Sliding window</option>
+          </select>
+        </label>
+        <button class="btn" type="button" id="send1">Send request</button>
+        <button class="btn" type="button" id="send5">Send 5</button>
+        <button class="btn" type="button" id="tick">+0.25 s</button>
+        <button class="btn" type="button" id="tick1">+1 s</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Allowed</span>
+        <span><i style="background: var(--bad)"></i>Rejected (429)</span>
+        <span><i style="background: var(--accent)"></i>Token / queued item</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I'll use a token bucket per API key in Redis: capacity for bursts, refill rate for the average. The check and the decrement run in one Lua script so it is atomic across all gateway instances. Rejected calls get 429 with Retry-After. If Redis is down I fail open for normal endpoints and fail closed for expensive ones like login or OTP."</p>
+    </div>
+    <div class="note">
+      <h3>Where to put it</h3>
+      <ul>
+        <li>At the API gateway or edge, before any expensive work.</li>
+        <li>Key by user id or API key; by IP only for anonymous traffic (NAT puts many users behind one IP).</li>
+        <li>Several limits at once: per second (bursts) and per day (quota).</li>
+        <li>Return <code>X-RateLimit-Remaining</code> and <code>Retry-After</code>, so clients can back off.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>The algorithms side by side</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Algorithm</th><th>State per key</th><th>Bursts</th><th>Accuracy</th><th>Used by</th></tr></thead>
+          <tbody>
+            <tr><td>Token bucket</td><td>tokens + last refill time</td><td>Allowed up to capacity</td><td>Good</td><td>AWS API Gateway, Stripe</td></tr>
+            <tr><td>Leaky bucket</td><td>queue (or level) + last leak time</td><td>Queued, output is smooth</td><td>Good; adds latency</td><td>Nginx <code>limit_req</code>, traffic shaping</td></tr>
+            <tr><td>Fixed window</td><td>one counter per window</td><td>Up to 2× limit at a window edge</td><td>Weak at edges</td><td>Simple quotas (per day)</td></tr>
+            <tr><td>Sliding window log</td><td>a timestamp per request</td><td>Never over limit</td><td>Exact</td><td>Low-volume, strict limits</td></tr>
+            <tr><td>Sliding window counter</td><td>two counters</td><td>Smoothed</td><td>Close (assumes even spread)</td><td>Cloudflare</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Limit 100/min with a fixed window. What is the worst case?</summary><div>100 requests at 0:59 and 100 more at 1:00. That is 200 requests in about one second, twice the intended rate.</div></details>
+      <details class="qa"><summary>Why not GET the counter, check it in Node, then SET it?</summary><div>Two gateway instances can read the same value at once, and both let a request through. Use an atomic <code>INCR</code> with <code>EXPIRE</code>, or a Lua script that reads and updates in one step.</div></details>
+      <details class="qa"><summary>Token bucket or leaky bucket for a public API?</summary><div>Token bucket: clients often send short bursts (page load) and should not wait. Leaky bucket fits when the downstream needs a steady rate, like sending to an SMS provider.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Concept card: <a href="../hld/concepts/23-rate-limiting.md">23 · Rate limiting</a></li>
+        <li>Code it: <a href="../hld/code/02-rate-limiter-algorithms/README.md">hld/code/02-rate-limiter-algorithms</a></li>
+        <li>Design it: <a href="../hld/problems/02-rate-limiter/README.md">Distributed rate limiter</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v08-quorum.html">← Quorum reads and writes</a>
+    <a href="v10-kafka-consumer-groups.html">Kafka consumer groups →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var NAMES = { token: 'token bucket', leaky: 'leaky bucket', fixed: 'fixed window', sliding: 'sliding window counter' };
+  var LIMIT = 4, RATE = 2;           // windows: 4 per second; buckets: capacity 4, 2 per second
+  var PANEL = { x: 168, y: 40, w: 424, h: 250 };
+  var CL = { x: 16, y: 130, w: 120, h: 64 }, SV = { x: 624, y: 130, w: 120, h: 64 };
+  var TX0 = 60, TPX = 330;           // timeline: x of t=0, px per second (shows 2 s)
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+  function r2(x) { return Math.round(x * 100) / 100; }
+
+  // ---------- limiter logic (pure, on S.lim) ----------
+  function fresh(algo) {
+    return { algo: algo, tokens: LIMIT, last: 0, queue: 0, acc: 0, counts: {} };
+  }
+  function advance(S, dt) {
+    var L = S.lim, drained = 0;
+    S.t = r2(S.t + dt);
+    if (L.algo === 'token') { L.tokens = Math.min(LIMIT, L.tokens + dt * RATE); }
+    if (L.algo === 'leaky') {
+      L.acc += dt * RATE;
+      while (L.acc >= 1 - 1e-9 && L.queue > 0) { L.queue--; L.acc -= 1; drained++; }
+      if (L.queue === 0) L.acc = 0;
+    }
+    return drained;
+  }
+  function decide(S) {
+    var L = S.lim, t = S.t, w = Math.floor(t + 1e-9);
+    if (L.algo === 'token') { if (L.tokens >= 1 - 1e-9) { L.tokens -= 1; return true; } return false; }
+    if (L.algo === 'leaky') { if (L.queue < LIMIT) { L.queue++; return true; } return false; }
+    var cur = L.counts[w] || 0;
+    if (L.algo === 'fixed') { if (cur < LIMIT) { L.counts[w] = cur + 1; return true; } return false; }
+    var est = estimate(S);
+    if (est + 1 <= LIMIT + 1e-9) { L.counts[w] = cur + 1; return true; }
+    return false;
+  }
+  function estimate(S) {
+    var L = S.lim, w = Math.floor(S.t + 1e-9), el = S.t - w;
+    return (L.counts[w - 1] || 0) * (1 - el) + (L.counts[w] || 0);
+  }
+
+  // ---------- drawing ----------
+  function clear(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  function renderPanel(ctx) {
+    var S = ctx.state, L = S.lim, g = S.panelG, t = S.t;
+    clear(g);
+    S.panelTitle.textContent = 'Limiter: ' + NAMES[L.algo];
+    S.clock.textContent = 't = ' + t.toFixed(2) + ' s';
+    var X = PANEL.x, Y = PANEL.y;
+    if (L.algo === 'token') {
+      ctx.el('text', { x: X + 20, y: Y + 70, class: 'mono', text: 'tokens: ' + (Math.round(L.tokens * 10) / 10) + ' / ' + LIMIT }, g);
+      ctx.el('text', { x: X + 20, y: Y + 94, class: 'mono small muted', text: 'capacity 4 = max burst' }, g);
+      ctx.el('text', { x: X + 20, y: Y + 114, class: 'mono small muted', text: 'refill +2 tokens per second' }, g);
+      ctx.el('text', { x: X + 20, y: Y + 134, class: 'mono small muted', text: 'each request takes 1 token' }, g);
+      ctx.el('rect', { x: X + 270, y: Y + 46, width: 100, height: 186, rx: 8, class: 'box' }, g);
+      ctx.el('text', { x: X + 320, y: Y + 40, 'text-anchor': 'middle', class: 'mono small muted', text: '+2/s ↓' }, g);
+      for (var i = 0; i < LIMIT; i++) {
+        var fill = L.tokens - i;
+        var c = ctx.el('circle', { cx: X + 320, cy: Y + 206 - i * 44, r: 16, class: fill > 0.05 ? 'dot' : 'dot muted' }, g);
+        c.setAttribute('opacity', fill >= 1 ? 1 : fill > 0.05 ? 0.25 + fill * 0.5 : 0.15);
+      }
+    } else if (L.algo === 'leaky') {
+      ctx.el('text', { x: X + 20, y: Y + 70, class: 'mono', text: 'queue: ' + L.queue + ' / ' + LIMIT }, g);
+      ctx.el('text', { x: X + 20, y: Y + 94, class: 'mono small muted', text: 'leaks 2 per second, always' }, g);
+      ctx.el('text', { x: X + 20, y: Y + 114, class: 'mono small muted', text: 'full queue → drop (429)' }, g);
+      for (var j = 0; j < LIMIT; j++) {
+        ctx.el('rect', { x: X + 60 + j * 66, y: Y + 150, width: 56, height: 44, rx: 6, class: 'slot' }, g);
+        // queue fills from the right (the exit) side
+        if (LIMIT - 1 - j < L.queue) ctx.el('rect', { x: X + 66 + j * 66, y: Y + 156, width: 44, height: 32, rx: 4, class: 'fill-signal' }, g);
+      }
+      ctx.el('text', { x: X + 60, y: Y + 216, class: 'mono small muted', text: 'in →' }, g);
+      ctx.el('text', { x: X + 318, y: Y + 216, 'text-anchor': 'end', class: 'mono small muted', text: '→ out to server' }, g);
+    } else {
+      var w = Math.floor(t + 1e-9);
+      [w - 1, w].forEach(function (win, k) {
+        var x = X + 20 + k * 200, c = win >= 0 ? L.counts[win] || 0 : 0;
+        ctx.el('rect', { x: x, y: Y + 52, width: 184, height: 92, rx: 8, class: 'box ' + (k === 1 ? 'accent' : '') }, g);
+        ctx.el('text', { x: x + 12, y: Y + 74, class: 'mono small muted', text: win < 0 ? '(no previous)' : (k === 1 ? 'current ' : 'previous ') + '[' + win + ' s, ' + (win + 1) + ' s)' }, g);
+        ctx.el('text', { x: x + 12, y: Y + 100, class: 'mono', text: 'count ' + c + ' / ' + LIMIT }, g);
+        ctx.el('rect', { x: x + 12, y: Y + 114, width: 160, height: 12, rx: 3, class: 'box' }, g);
+        ctx.el('rect', { x: x + 12, y: Y + 114, width: 40 * Math.min(c, LIMIT), height: 12, rx: 3, class: c >= LIMIT ? 'fill-bad' : 'fill-accent' }, g);
+      });
+      if (L.algo === 'fixed') {
+        ctx.el('text', { x: X + 20, y: Y + 176, class: 'mono small muted', text: 'Only the current window counts.' }, g);
+        ctx.el('text', { x: X + 20, y: Y + 196, class: 'mono small muted', text: 'At each full second the counter resets to 0.' }, g);
+      } else {
+        var el = r2(t - w), prev = L.counts[w - 1] || 0, cur = L.counts[w] || 0, est = estimate(S);
+        ctx.el('text', { x: X + 20, y: Y + 176, class: 'mono small', text: 'estimate = prev × (1 − ' + el.toFixed(2) + ') + current' }, g);
+        ctx.el('text', { x: X + 82, y: Y + 198, class: 'mono', text: '= ' + prev + ' × ' + (1 - el).toFixed(2) + ' + ' + cur + ' = ' + (Math.round(est * 100) / 100) }, g);
+        ctx.el('text', { x: X + 20, y: Y + 222, class: 'mono small ' + (est + 1 <= LIMIT + 1e-9 ? 'fill-ok' : 'fill-bad'), text: est + 1 <= LIMIT + 1e-9 ? 'next request: allowed (estimate + 1 ≤ 4)' : 'next request: rejected (estimate + 1 > 4)' }, g);
+      }
+    }
+  }
+
+  var labRef = null;
+
+  function renderAxis(ctx) {
+    var S = ctx.state, g = S.axisG;
+    clear(g);
+    ctx.el('line', { x1: TX0, y1: 400, x2: TX0 + 2 * TPX, y2: 400, class: 'wire' }, g);
+    for (var k = 0; k <= 4; k++) {
+      var t = S.tBase + k * 0.5, x = TX0 + k * 0.5 * TPX;
+      var whole = k % 2 === 0;
+      ctx.el('line', { x1: x, y1: whole ? 336 : 396, x2: x, y2: 404, class: whole && (S.lim.algo === 'fixed' || S.lim.algo === 'sliding') ? 'wire dashed' : 'wire' }, g);
+      ctx.el('text', { x: x, y: 420, 'text-anchor': 'middle', class: 'mono small muted', text: t + ' s' }, g);
+    }
+    var nx = TX0 + (S.t - S.tBase) * TPX;
+    ctx.el('line', { x1: nx, y1: 330, x2: nx, y2: 404, class: 'wire accent' }, g);
+    ctx.el('text', { x: nx + 4, y: 436, class: 'mono small fill-accent', text: 'now' }, g);
+  }
+
+  function addMark(ctx, ok) {
+    var S = ctx.state;
+    if (S.t - S.tBase > 2 + 1e-9) { S.tBase = Math.floor(S.t); S.stack = {}; clear(S.marksG); renderAxis(ctx); }
+    var key = Math.round(S.t * 100);
+    var k = S.stack[key] || 0;
+    S.stack[key] = k + 1;
+    ctx.el('circle', { cx: TX0 + (S.t - S.tBase) * TPX, cy: 388 - k * 9, r: 4, class: ok ? 'dot ok' : 'dot bad' }, S.marksG);
+  }
+
+  function resetAlgo(ctx, algo) {
+    var S = ctx.state;
+    S.lim = fresh(algo);
+    S.t = 0; S.tBase = 0; S.stack = {};
+    clear(S.marksG);
+    clear(S.extraG);
+    var sel = document.getElementById('algo');
+    if (sel) sel.value = algo;
+    renderPanel(ctx); renderAxis(ctx);
+  }
+
+  var IN = function () { return [[CL.x + CL.w, 162], [PANEL.x, 162]]; };
+  var OUT = function () { return [[PANEL.x + PANEL.w, 162], [SV.x, 162]]; };
+
+  // Send n requests at the current virtual time.
+  function send(ctx, n) {
+    var S = ctx.state;
+    var res = [];
+    var chain = Promise.resolve();
+    for (var i = 0; i < n; i++) {
+      chain = chain.then(function () {
+        if (ctx.state !== S) return;
+        var ok = decide(S);
+        res.push(ok);
+        addMark(ctx, ok);
+        renderPanel(ctx);
+        var p = ctx.packet(IN(), { ms: 300 }).then(function () {
+          if (ctx.state !== S) return;
+          if (!ok) return ctx.packet(IN().reverse(), { ms: 300, cls: 'bad', label: '429' });
+          if (S.lim.algo === 'leaky') return;  // waits in the queue
+          return ctx.packet(OUT(), { ms: 300, cls: 'ok' });
+        });
+        return ctx.wait(110).then(function () { return p; });
+      });
+    }
+    return chain.then(function () {
+      var a = res.filter(Boolean).length;
+      if (ctx.state === S) ctx.log('t=' + S.t.toFixed(2) + 's: ' + n + ' sent → ' + a + (S.lim.algo === 'leaky' ? ' queued, ' : ' allowed, ') + (n - a) + ' rejected', a === n ? 'ok' : a === 0 ? 'bad' : 'warn');
+      return res;
+    });
+  }
+  function tick(ctx, dt) {
+    var S = ctx.state;
+    var drained = advance(S, dt);
+    renderPanel(ctx); renderAxis(ctx);
+    if (S.t - S.tBase > 2 + 1e-9) { S.tBase = Math.floor(S.t); S.stack = {}; clear(S.marksG); renderAxis(ctx); }
+    if (!drained) return Promise.resolve();
+    ctx.log('t=' + S.t.toFixed(2) + 's: ' + drained + ' leaked to server', 'ok');
+    var all = [];
+    for (var i = 0; i < drained; i++) all.push(ctx.wait(i * 160).then(function () { return ctx.packet(OUT(), { ms: 350, cls: 'ok' }); }));
+    return Promise.all(all);
+  }
+  function burstBracket(ctx, t1, t2, text) {
+    var S = ctx.state;
+    var x1 = TX0 + (t1 - S.tBase) * TPX - 8, x2 = TX0 + (t2 - S.tBase) * TPX + 8;
+    ctx.el('rect', { x: x1, y: 340, width: x2 - x1, height: 56, rx: 6, class: 'burst' }, S.extraG);
+    ctx.el('text', { x: x2 + 6, y: 352, class: 'mono small fill-bad', text: text }, S.extraG);
+  }
+
+  labRef = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Same traffic, four rules',
+      say: 'The limit is about <b>4 requests per second</b> per user. Time here is virtual: each step moves the clock. The timeline at the bottom shows each request as a green (allowed) or red (rejected) dot.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      ctx.el('polyline', { points: IN().join(' '), class: 'wire' });
+      ctx.el('polyline', { points: OUT().join(' '), class: 'wire' });
+      ctx.el('rect', { x: CL.x, y: CL.y, width: CL.w, height: CL.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: CL.x + CL.w / 2, y: CL.y + 28, 'text-anchor': 'middle', class: 'title', text: 'Client' });
+      ctx.el('text', { x: CL.x + CL.w / 2, y: CL.y + 46, 'text-anchor': 'middle', class: 'mono small muted', text: 'api key k_42' });
+      ctx.el('rect', { x: SV.x, y: SV.y, width: SV.w, height: SV.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: SV.x + SV.w / 2, y: SV.y + 28, 'text-anchor': 'middle', class: 'title', text: 'API server' });
+      ctx.el('text', { x: SV.x + SV.w / 2, y: SV.y + 46, 'text-anchor': 'middle', class: 'mono small muted', text: 'protected' });
+      ctx.el('rect', { x: PANEL.x, y: PANEL.y, width: PANEL.w, height: PANEL.h, rx: 12, class: 'box accent' });
+      S.panelTitle = ctx.el('text', { x: PANEL.x + 16, y: PANEL.y + 26, class: 'title', text: '' });
+      S.clock = ctx.el('text', { x: PANEL.x + PANEL.w - 14, y: PANEL.y + 26, 'text-anchor': 'end', class: 'mono fill-accent', text: '' });
+      S.panelG = ctx.group();
+      ctx.el('text', { x: 16, y: 322, class: 'title', text: 'Timeline' });
+      S.axisG = ctx.group();
+      S.marksG = ctx.group();
+      S.extraG = ctx.group();
+      resetAlgo(ctx, 'token');
+    },
+    steps: [
+      {
+        title: 'Token bucket: a burst uses the tokens',
+        say: 'The bucket holds up to 4 tokens and starts full. Each request takes one. A burst of 5 at t = 0: the first 4 pass at once, the 5th finds the bucket empty and gets <b>429</b>. Bursts up to the capacity are allowed.',
+        run: function (ctx) { resetAlgo(ctx, 'token'); return send(ctx, 5); },
+      },
+      {
+        title: 'Token bucket: refill sets the average rate',
+        say: 'Tokens come back at 2 per second. After 1 s there are 2 tokens, so 2 of the next 3 requests pass. Over a long time the user gets 2 requests per second on average, with short bursts up to 4. State per key: just tokens and a timestamp.',
+        run: function (ctx) {
+          return seq(ctx, [function () { return tick(ctx, 1); }, function () { return send(ctx, 3); }]);
+        },
+      },
+      {
+        title: 'Leaky bucket: bursts wait in a queue',
+        say: 'Requests enter a queue of size 4 that drains at a fixed 2 per second. A burst of 6: 4 are queued, 2 are dropped because the queue is full. Nothing goes to the server yet.',
+        run: function (ctx) { resetAlgo(ctx, 'leaky'); return send(ctx, 6); },
+      },
+      {
+        title: 'Leaky bucket: a smooth output',
+        say: 'Every half second one request leaks out to the server. The server sees a steady 2 per second, no matter how bursty the input was. The cost: queued requests wait (here up to 2 s), so this suits background work more than user clicks.',
+        run: function (ctx) {
+          return seq(ctx, [0, 1, 2, 3].map(function () { return function () { return tick(ctx, 0.5); }; }));
+        },
+      },
+      {
+        title: 'Fixed window: count per second',
+        say: 'Now one counter per calendar second, limit 4. At t = 0.9 s the user sends 4 requests. The counter for window [0 s, 1 s) reaches 4 / 4. All allowed. Very cheap: one <code>INCR</code> with an <code>EXPIRE</code> in Redis.',
+        run: function (ctx) {
+          resetAlgo(ctx, 'fixed');
+          return seq(ctx, [function () { return tick(ctx, 0.9); }, function () { return send(ctx, 4); }]);
+        },
+      },
+      {
+        title: 'Fixed window: the boundary burst',
+        say: 'At t = 1.1 s a new window starts and the counter resets to 0. The user sends 4 more, and all pass. That is <b>8 requests in 0.2 s</b>, twice the limit. Each window looks fine; the edge between them is the hole.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return tick(ctx, 0.2); },
+            function () { return send(ctx, 4); },
+            function () { burstBracket(ctx, 0.9, 1.1, '8 in 0.2 s'); ctx.log('Boundary burst: 8 allowed within 0.2 s', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'Sliding window: the edge burst is blocked',
+        say: 'Same traffic with a sliding window counter. At t = 1.1 s it weighs the previous window by how much of it is still inside the last second: 4 × 0.9 + 0 = 3.6. One more request would make 4.6 &gt; 4, so all 4 are <b>rejected</b>.',
+        run: function (ctx) {
+          resetAlgo(ctx, 'sliding');
+          return seq(ctx, [
+            function () { return tick(ctx, 0.9); },
+            function () { return send(ctx, 4); },
+            function () { return tick(ctx, 0.2); },
+            function () { return send(ctx, 4); },
+          ]);
+        },
+      },
+      {
+        title: 'Sliding window: capacity comes back smoothly',
+        say: 'At t = 1.5 s half of the previous window has slid out: 4 × 0.5 = 2. Two requests fit, the third is rejected. Two counters per key give a close estimate. A sliding <b>log</b> (one timestamp per request) is exact but costs much more memory.',
+        run: function (ctx) {
+          return seq(ctx, [function () { return tick(ctx, 0.4); }, function () { return send(ctx, 3); }]);
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var ctx = labRef.ctx;
+  document.getElementById('algo').addEventListener('change', function (e) {
+    resetAlgo(ctx, e.target.value);
+    ctx.log('Switched to ' + NAMES[e.target.value] + ', clock reset to 0', 'info');
+  });
+  document.getElementById('send1').addEventListener('click', function () { send(ctx, 1); });
+  document.getElementById('send5').addEventListener('click', function () { send(ctx, 5); });
+  document.getElementById('tick').addEventListener('click', function () { tick(ctx, 0.25); });
+  document.getElementById('tick1').addEventListener('click', function () { tick(ctx, 1); });
+})();
+</script>
+</body>
+</html>

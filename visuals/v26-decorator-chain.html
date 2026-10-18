@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Decorator and Chain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="assets/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .ring1 { fill: var(--surface); stroke: var(--signal); stroke-width: 1.5; }
+  .stage .ring2 { fill: var(--surface-2); stroke: var(--accent); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .fill-warn { fill: var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="index.html">System Design Lab</a>
+      <span class="tag lld">LLD · Patterns</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Decorator and Chain of Responsibility</h1>
+    <p class="lede">Both patterns pass a call through a line of objects. A decorator wraps one object and always calls the inner one, adding behaviour around it. In a chain, each handler decides: handle it and stop, or call <code>next()</code>.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Decorator layers around a notifier, and a middleware chain"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call going in</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Stopped / failed</span>
+        <span><i style="background: var(--accent)"></i>Same interface at every layer</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I keep <code>EmailNotifier</code> simple and add retry, logging and rate limiting as decorators that implement the same <code>Notifier</code> interface. I compose them at startup, and the order is a design choice. For request checks I use a chain: each middleware either responds and stops, or calls <code>next()</code>."</p>
+    </div>
+    <div class="note">
+      <h3>Both in TypeScript</h3>
+<pre class="code">interface Notifier { send(msg: Message): Promise&lt;void&gt;; }
+
+class RetryNotifier implements Notifier {
+  constructor(private inner: Notifier, private tries = 3) {}
+  async send(msg: Message) {
+    for (let i = 1; ; i++) {
+      try { return await this.inner.send(msg); }
+      catch (e) { if (i &gt;= this.tries) throw e; await sleep(100 * 2 ** i); }
+    }
+  }
+}
+
+const notifier: Notifier =
+  new RateLimitNotifier(new LoggingNotifier(new RetryNotifier(new EmailNotifier(smtp))), bucket);
+
+// Chain of Responsibility: Express middleware
+const auth: RequestHandler = (req, res, next) =&gt;
+  req.headers.authorization ? next() : res.status(401).end(); // no next(): chain stops
+
+app.post('/orders', auth, validate(orderSchema), rateLimit, createOrder);</pre>
+    </div>
+    <div class="note wide">
+      <h3>Decorator vs Chain vs Proxy</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Decorator</th><th>Chain of Responsibility</th><th>Proxy</th></tr></thead>
+          <tbody>
+            <tr><td>Goal</td><td>Add behaviour around a call</td><td>Find who handles a request, or reject early</td><td>Control access to one object</td></tr>
+            <tr><td>Calls the next one?</td><td>Always (that is the point)</td><td>Only if it does not handle it</td><td>Usually, after a check</td></tr>
+            <tr><td>Stacking</td><td>Any number, chosen at composition time</td><td>An ordered list of handlers</td><td>One layer</td></tr>
+            <tr><td>Node examples</td><td>Retry and logging wrappers, cache-aside wrapper</td><td>Express/Koa middleware, logger levels, ATM cash dispenser</td><td>Lazy loading, access checks, remote stub</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Retry inside or outside the rate limiter?</summary><div>Rate limit outside retry means one token per user call. Retry outside the rate limiter means every attempt costs a token, which protects the provider better. Choose on purpose and say why.</div></details>
+      <details class="qa"><summary>Why not use inheritance: RetryingLoggingEmailNotifier?</summary><div>Every combination would need its own subclass (class explosion). Decorators combine at runtime, and each one is tested alone.</div></details>
+      <details class="qa"><summary>In Express, what happens if a middleware neither responds nor calls next()?</summary><div>The request hangs until the client or server times out. Every path must either send a response or call <code>next()</code> (or <code>next(err)</code>).</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Pattern: <a href="../lld/concepts/patterns/p06-decorator.md">p06 · Decorator</a></li>
+        <li>Pattern: <a href="../lld/concepts/patterns/p14-chain-of-responsibility.md">p14 · Chain of Responsibility</a></li>
+        <li>Pattern: <a href="../lld/concepts/patterns/p08-proxy.md">p08 · Proxy</a></li>
+        <li>Used in: <a href="../lld/problems/03-logger/README.md">Logger framework</a>, <a href="../lld/problems/11-atm/README.md">ATM</a>, <a href="../lld/problems/05-notification-service/README.md">Notification Service</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="v25-state-machine.html">← State pattern: vending machine</a>
+    <a href="v27-command-undo-redo.html">Command: undo and redo →</a>
+  </nav>
+</div>
+
+<script src="assets/kit.js"></script>
+<script>
+(function () {
+  var RINGS = [
+    { id: 'rate', name: 'RateLimitDecorator', x: 20, y: 44, w: 470, h: 180, cls: 'ring1' },
+    { id: 'log', name: 'LoggingDecorator', x: 40, y: 72, w: 430, h: 136, cls: 'ring2' },
+    { id: 'retry', name: 'RetryDecorator', x: 60, y: 100, w: 390, h: 92, cls: 'ring1' },
+  ];
+  var MID = 152; // y of the call path through the onion
+  var CHAIN = [
+    { id: 'auth', name: 'auth', does: 'checks token', x: 130 },
+    { id: 'validate', name: 'validate', does: 'checks body', x: 290 },
+    { id: 'rate', name: 'rateLimit', does: 'checks quota', x: 450 },
+    { id: 'handler', name: 'handler', does: 'creates order', x: 610 },
+  ];
+  var CY = 320; // y of the chain arrows
+
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var m = ctx.el('marker', { id: 'dc-arr', viewBox: '0 0 12 12', refX: 11, refY: 6, markerWidth: 10, markerHeight: 10, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L11,6 L1,11 Z', style: 'fill: var(--muted)' }, m);
+  }
+
+  function trace(ctx, t, c) {
+    var n = ctx.state.traceN++;
+    ctx.el('text', { x: 524, y: 86 + n * 18, class: 'mono small ' + (c || ''), text: t }, ctx.state.traceG);
+  }
+  function clearTrace(ctx) {
+    var g = ctx.state.traceG;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    ctx.state.traceN = 0;
+  }
+  function go(ctx, pts, c, ms) { return ctx.packet(pts, { ms: ms || 380, cls: c || '' }); }
+
+  // Chain run: request passes handlers until one stops it.
+  function runChain(ctx, label, stopAt, status, statusCls) {
+    var s = ctx.state;
+    s.reqLabel.textContent = label;
+    s.status.textContent = '';
+    CHAIN.forEach(function (c) { s.chain[c.id].setAttribute('opacity', 1); s.chain[c.id].r.setAttribute('class', 'box'); });
+    ctx.log(label, 'info');
+    var chain = Promise.resolve(), x = 100, stopped = false;
+    CHAIN.forEach(function (c) {
+      chain = chain.then(function () {
+        if (stopped) return;
+        return go(ctx, [[x, CY], [c.x, CY]], '', 380).then(function () {
+          ctx.flash(s.chain[c.id].r);
+          x = c.x + 120;
+          if (c.id === stopAt) {
+            stopped = true;
+            var ok = c.id === 'handler';
+            s.chain[c.id].r.setAttribute('class', 'box ' + (ok ? 'ok' : 'bad'));
+            ctx.log(c.name + (ok ? ' handles it → ' : ' responds, no next() → ') + status, ok ? 'ok' : 'bad');
+            var dim = CHAIN.slice(CHAIN.indexOf(c) + 1).map(function (d) { ctx.log(d.name + ' never runs'); return ctx.fade(s.chain[d.id], 0.3, 300); });
+            var cx = c.x + 60;
+            return Promise.all(dim.concat([go(ctx, [[cx, 350], [cx, 376], [60, 376], [60, 350]], ok ? 'ok' : 'bad', 700)])).then(function () {
+              s.status.textContent = status;
+              s.status.setAttribute('class', 'title ' + statusCls);
+            });
+          }
+          ctx.log(c.name + ' ok → next()', 'ok');
+        });
+      });
+    });
+    return chain;
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Wrap one object, or pass along a line',
+      say: 'Top half: decorators wrap an email notifier, layer by layer. Bottom half: an Express-style middleware chain where any handler can stop the request.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      defs(ctx);
+      ctx.el('text', { x: 20, y: 28, class: 'title', text: 'Decorator: layers around one Notifier' });
+      s.rings = {};
+      RINGS.forEach(function (r) {
+        var g = ctx.group({ opacity: 0 });
+        ctx.el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: 10, class: r.cls }, g);
+        ctx.el('text', { x: r.x + 12, y: r.y + 18, class: 'b', text: r.name }, g);
+        ctx.el('text', { x: r.x + r.w - 12, y: r.y + 18, 'text-anchor': 'end', class: 'mono small muted', text: 'implements Notifier' }, g);
+        s.rings[r.id] = g;
+      });
+      var core = ctx.group({ opacity: 0 });
+      s.coreRect = ctx.el('rect', { x: 80, y: 128, width: 350, height: 48, rx: 8, class: 'box accent' }, core);
+      ctx.el('text', { x: 255, y: 157, 'text-anchor': 'middle', class: 'b', text: 'EmailNotifier.send(msg)' }, core);
+      s.core = core;
+      // trace panel
+      ctx.el('rect', { x: 510, y: 44, width: 240, height: 180, rx: 8, class: 'box' });
+      ctx.el('text', { x: 524, y: 64, class: 'mono small muted', text: 'trace' });
+      s.traceG = ctx.group();
+      s.traceN = 0;
+
+      ctx.el('line', { x1: 10, y1: 238, x2: 750, y2: 238, class: 'divider' });
+
+      // chain
+      var cg = ctx.group({ opacity: 0.25 });
+      s.chainG = cg;
+      ctx.el('text', { x: 20, y: 266, class: 'title', text: 'Chain of Responsibility: Express middleware' }, cg);
+      ctx.el('rect', { x: 20, y: 290, width: 80, height: 60, rx: 6, class: 'box signal' }, cg);
+      ctx.el('text', { x: 60, y: 325, 'text-anchor': 'middle', class: 'b', text: 'request' }, cg);
+      s.chain = {};
+      var prev = 100;
+      CHAIN.forEach(function (c) {
+        ctx.el('path', { d: 'M' + prev + ',' + CY + ' H' + (c.x - 2), class: 'uml', 'marker-end': 'url(#dc-arr)' }, cg);
+        ctx.el('text', { x: (prev + c.x) / 2, y: 284, 'text-anchor': 'middle', class: 'mono small muted', text: prev === 100 ? '' : 'next()' }, cg);
+        var g = ctx.group({}, cg);
+        g.r = ctx.el('rect', { x: c.x, y: 290, width: 120, height: 60, rx: 6, class: 'box' }, g);
+        ctx.el('text', { x: c.x + 60, y: 314, 'text-anchor': 'middle', class: 'b', text: c.name }, g);
+        ctx.el('text', { x: c.x + 60, y: 334, 'text-anchor': 'middle', class: 'mono small muted', text: c.does }, g);
+        s.chain[c.id] = g;
+        prev = c.x + 120;
+      });
+      ctx.el('text', { x: 400, y: 392, 'text-anchor': 'middle', class: 'mono small muted', text: 'response goes back to the client' }, cg);
+      s.reqLabel = ctx.el('text', { x: 20, y: 425, class: 'mono', text: '' }, cg);
+      s.status = ctx.el('text', { x: 20, y: 455, class: 'title', text: '' }, cg);
+    },
+    steps: [
+      {
+        title: 'One interface: Notifier',
+        say: '<code>EmailNotifier</code> implements <code>send(msg)</code> and only talks to SMTP. No retry, no logs, no limits. Small and easy to test.',
+        run: function (ctx) {
+          ctx.log('new EmailNotifier(smtp)', 'info');
+          return ctx.fade(ctx.state.core, 1, 400);
+        },
+      },
+      {
+        title: 'Wrap it with RetryDecorator',
+        say: '<code>RetryDecorator</code> also implements <code>Notifier</code> and holds an inner <code>Notifier</code>. Callers cannot tell the difference: it is still just <code>send(msg)</code>.',
+        run: function (ctx) {
+          ctx.log('new RetryDecorator(email)', 'info');
+          return ctx.fade(ctx.state.rings.retry, 1, 400);
+        },
+      },
+      {
+        title: 'Stack logging and rate limiting',
+        say: 'Add <code>LoggingDecorator</code> and then <code>RateLimitDecorator</code> on the outside. Each layer does one job. Order matters: the outer rate limit spends one token per call, not one per retry attempt.',
+        run: function (ctx) {
+          ctx.log('new LoggingDecorator(retry)', 'info');
+          ctx.log('new RateLimitDecorator(logging, bucket)', 'info');
+          return ctx.fade(ctx.state.rings.log, 1, 400).then(function () { return ctx.fade(ctx.state.rings.rate, 1, 400); });
+        },
+      },
+      {
+        title: 'A call goes in through every layer',
+        say: 'Each layer does its part, then calls <code>inner.send()</code>. SMTP times out once; Retry catches it, waits, and calls again. The result comes back out through the same layers, so Logging can record the total time.',
+        run: function (ctx) {
+          clearTrace(ctx);
+          var s = ctx.state;
+          return go(ctx, [[4, MID], [20, MID]]).then(function () { trace(ctx, 'rateLimit: token ok (4 left)', 'fill-ok'); ctx.log('rateLimit: token ok', 'ok'); return go(ctx, [[20, MID], [40, MID]]); })
+            .then(function () { trace(ctx, 'log: send start'); return go(ctx, [[40, MID], [60, MID]]); })
+            .then(function () { trace(ctx, 'retry: attempt 1'); return go(ctx, [[60, MID], [80, MID], [255, MID]], '', 500); })
+            .then(function () { ctx.flash(s.coreRect); trace(ctx, 'email: SMTP timeout', 'fill-bad'); ctx.log('attempt 1 failed: SMTP timeout', 'bad'); return go(ctx, [[255, MID], [80, MID], [60, MID]], 'bad', 500); })
+            .then(function () { trace(ctx, 'retry: wait 200 ms, attempt 2', 'fill-warn'); ctx.log('retry: backoff 200 ms, attempt 2', 'warn'); return go(ctx, [[60, MID], [80, MID], [255, MID]], '', 500); })
+            .then(function () { ctx.flash(s.coreRect); trace(ctx, 'email: 250 OK', 'fill-ok'); return go(ctx, [[255, MID], [430, MID], [450, MID]], 'ok', 500); })
+            .then(function () { trace(ctx, 'retry: success on attempt 2'); return go(ctx, [[450, MID], [470, MID]], 'ok'); })
+            .then(function () { trace(ctx, 'log: send ok in 240 ms'); return go(ctx, [[470, MID], [500, MID]], 'ok'); })
+            .then(function () { ctx.log('send() resolved after 240 ms', 'ok'); });
+        },
+      },
+      {
+        title: 'The outer layer can stop the call',
+        say: 'The bucket is empty. <code>RateLimitDecorator</code> throws before calling <code>inner.send()</code>. Logging, Retry and SMTP never run. Put cheap checks on the outside.',
+        run: function (ctx) {
+          clearTrace(ctx);
+          return go(ctx, [[4, MID], [20, MID]], 'bad').then(function () {
+            ctx.flash(ctx.state.rings.rate);
+            trace(ctx, 'rateLimit: 0 tokens → throw', 'fill-bad');
+            trace(ctx, 'logging, retry, email: skipped', 'fill-bad');
+            ctx.log('RateLimitError thrown at the outer layer', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Chain: a request walks the middleware',
+        say: 'Express runs handlers in order. Each one checks something and calls <code>next()</code> to pass the request on. A valid request reaches the route handler, which sends <code>201</code>.',
+        run: function (ctx) {
+          return ctx.fade(ctx.state.chainG, 1, 400).then(function () {
+            return runChain(ctx, 'Request 1: valid token, valid body', 'handler', '201 Created', 'fill-ok');
+          });
+        },
+      },
+      {
+        title: 'auth responds and does not call next()',
+        say: 'No token. <code>auth</code> sends <code>401</code> and does <b>not</b> call <code>next()</code>, so the chain stops there. Validation, rate limiting and the handler never run. This is the key difference from a decorator.',
+        run: function (ctx) { return runChain(ctx, 'Request 2: no Authorization header', 'auth', '401 Unauthorized', 'fill-bad'); },
+      },
+      {
+        title: 'validate stops a bad body',
+        say: 'Valid token, but the body is missing <code>items</code>. <code>validate</code> answers <code>400</code> with the field errors. Order the chain from cheap to expensive, so bad requests stop early.',
+        run: function (ctx) { return runChain(ctx, 'Request 3: token ok, body has no items', 'validate', '400 Bad Request', 'fill-bad'); },
+      },
+    ],
+  });
+})();
+</script>
+</body>
+</html>
