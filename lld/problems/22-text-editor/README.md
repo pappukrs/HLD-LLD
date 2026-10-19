@@ -92,7 +92,7 @@ Key detail: a command stores its position **when it is created**, not when it ru
 
 ## Concepts used
 
-- [Command and Memento](../../concepts/patterns/p13-command.md) · [Composite (for grouped commands)](../../concepts/patterns/p09-composite.md) · [SOLID](../../concepts/02-solid.md)
-- Related problem: [In-memory KV Store](../14-kv-store/) (Command and Memento for transactions)
-- Related HLD: [Collaborative Editor (Google Docs)](../../../hld/problems/25-collaborative-editor/) · [Event-driven, CQRS, event sourcing](../../../hld/concepts/21-event-driven-cqrs.md)
-- Visual: [Command: undo and redo](../../../visuals/v27-command-undo-redo.html)
+- [Command and Memento](../../4-behavioral/L23-command/README.md) · [Composite (for grouped commands)](../../3-structural/L17-composite/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md)
+- Related problem: [In-memory KV Store](../14-kv-store) (Command and Memento for transactions)
+- Related HLD: [Collaborative Editor (Google Docs)](../../../hld/case-studies/25-collaborative-editor) · [Event-driven, CQRS, event sourcing](../../../hld/4-async/H24-event-driven-cqrs/README.md)
+- Visual: [Command: undo and redo](../../4-behavioral/L23-command/visual.html)

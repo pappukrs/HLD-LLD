@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H13 Data modelling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 14px; }
+  .try input[type="range"] { width: 160px; accent-color: var(--accent); }
+  .try output { font-family: var(--font-mono); }
+  .meter { display: grid; grid-template-columns: max-content 1fr max-content; gap: 6px 10px; align-items: center; margin-top: 10px; font-size: 13px; }
+  .meter .bar { height: 12px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+  .meter .bar.bad { background: var(--bad); }
+  .meter .bar.ok { background: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H13 · Databases</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Data modelling and normalization</h1>
+    <p class="lede">One wide table stores the same fact many times, so a single change can leave the data disagreeing with itself. Watch a flat orders table break, then split it into 3NF tables joined by keys, and finally copy one value back on purpose.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 820 470" role="img" aria-label="Tables being normalized from one flat table into customers, orders, order_items and products"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Key / table</span>
+        <span><i style="background: var(--signal)"></i>Query or write</span>
+        <span><i style="background: var(--bad)"></i>Anomaly</span>
+        <span><i style="background: var(--ok)"></i>Fixed</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>Try it: what does one email change cost?</h3>
+      <div class="try">
+        <label>Orders per customer <input type="range" id="t-orders" min="1" max="200" value="40"> <output id="t-orders-v">40</output></label>
+        <label>Lines per order <input type="range" id="t-lines" min="1" max="10" value="2"> <output id="t-lines-v">2</output></label>
+        <label>Job crashes after <input type="range" id="t-crash" min="0" max="100" value="75"> <output id="t-crash-v">75</output>%</label>
+      </div>
+      <div class="meter" id="t-meter"></div>
+      <p id="t-say" style="margin-top:10px"></p>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Customer to order is 1:N, so <code>orders.customer_id</code> is a foreign key with an index on <code>(customer_id, placed_at DESC)</code>. Orders to products is M:N, so I add <code>order_items</code> with primary key <code>(order_id, product_id)</code>. Core tables are in 3NF, so each fact lives in one place."</p>
+      <p class="say">"I denormalize on purpose in two places: <code>unit_price</code> is a snapshot of the price paid, and <code>orders.total</code> is cached in the same transaction. Any other copy gets a CDC sync path and I accept a few seconds of lag."</p>
+    </div>
+    <div class="note">
+      <h3>Final schema (key lines)</h3>
+<pre class="code">customers  (cust_id PK, name, email UNIQUE)
+products   (product_id PK, name, price_paise)
+orders     (order_id PK, cust_id FK → customers,
+            total_paise, placed_at)
+order_items(order_id FK, product_id FK, qty,
+            unit_price_paise,          -- snapshot
+            PRIMARY KEY (order_id, product_id))
+INDEX orders (cust_id, placed_at DESC)</pre>
+    </div>
+    <div class="note wide">
+      <h3>Normal forms and denormalization at a glance</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Form / choice</th><th>Rule</th><th>Broken by</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>1NF</td><td>One atomic value per cell</td><td><code>items = "Pen x2, Book x1"</code></td><td>One row per order line</td></tr>
+            <tr><td>2NF</td><td>No column depends on part of a composite key</td><td><code>product_id → name, price</code>; <code>order_id → cust_id</code></td><td><code>products</code>, <code>orders</code> tables</td></tr>
+            <tr><td>3NF</td><td>No column depends on a non-key column</td><td><code>order_id → cust_id → email</code></td><td><code>customers</code> table</td></tr>
+            <tr><td>BCNF</td><td>Every determinant is a candidate key</td><td><code>teacher → course</code> inside <code>(student, course, teacher)</code></td><td>Split out <code>teacher → course</code></td></tr>
+            <tr><td>Snapshot copy</td><td>Freeze a historical fact</td><td>Invoice joining to today's price</td><td><code>order_items.unit_price</code></td></tr>
+            <tr><td>Derived copy</td><td>Cache a value for a hot read</td><td>Copy with no sync plan</td><td>Same transaction, or CDC consumer + repair job</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Key is (order_id, product_id) and product_name depends on product_id. Which form breaks?</summary><div>2NF: a partial dependency on part of the composite key. Move name and price into <code>products</code>.</div></details>
+      <details class="qa"><summary>Why is email in the orders table a 3NF problem and not a 2NF one, once orders has a single-column key?</summary><div>With key <code>order_id</code> there is no "part" of the key. But email depends on <code>cust_id</code>, a non-key column. That is a transitive dependency, so it breaks 3NF.</div></details>
+      <details class="qa"><summary>Is <code>order_items.unit_price</code> a denormalized copy of <code>products.price</code>?</summary><div>No. It is the price paid at purchase, a different fact. It must not change when the catalog price changes, or old invoices would change too.</div></details>
+      <details class="qa"><summary>How do you store "a post has many tags, a tag has many posts"?</summary><div>A junction table <code>post_tags(post_id, tag_id)</code> with a composite primary key, plus an index on <code>(tag_id, post_id)</code> for "posts with tag X". Never a comma list in one column.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Files</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (functional dependency checks, the update anomaly, snapshot vs live price)</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var ROW = 22, HEAD = 26;
+
+  // Draw a table: { x, y, title, cols: [[name, width]], rows: [[...cells]] }. Returns handles.
+  function table(ctx, spec) {
+    var g = ctx.group({ opacity: spec.hidden ? 0 : 1 });
+    var w = spec.cols.reduce(function (s, c) { return s + c[1]; }, 0);
+    ctx.el('text', { x: spec.x, y: spec.y - 8, class: 'title', text: spec.title }, g);
+    var frame = ctx.el('rect', { x: spec.x, y: spec.y, width: w, height: HEAD + spec.rows.length * ROW, rx: 6, class: 'box accent' }, g);
+    var cx = spec.x, heads = [];
+    spec.cols.forEach(function (c, i) {
+      heads.push(ctx.el('text', { x: cx + 6, y: spec.y + 17, class: 'mono small', style: 'font-weight:600' + (c[2] ? ';fill:var(--accent)' : ''), text: c[0] }, g));
+      cx += c[1];
+    });
+    var rows = spec.rows.map(function (r, ri) {
+      var y = spec.y + HEAD + ri * ROW;
+      var rg = ctx.group({}, g);
+      var bg = ctx.el('rect', { x: spec.x + 1, y: y, width: w - 2, height: ROW, class: 'fill-soft', opacity: 0 }, rg);
+      ctx.el('line', { x1: spec.x, y1: y, x2: spec.x + w, y2: y, class: 'wire' , 'stroke-width': 1 }, rg);
+      var x = spec.x, cells = [];
+      r.forEach(function (v, ci) {
+        cells.push(ctx.el('text', { x: x + 6, y: y + 15, class: 'mono small', text: v }, rg));
+        x += spec.cols[ci][1];
+      });
+      return { g: rg, bg: bg, cells: cells, y: y };
+    });
+    return { g: g, frame: frame, rows: rows, heads: heads, x: spec.x, y: spec.y, w: w, h: HEAD + spec.rows.length * ROW };
+  }
+
+  function setCls(node, cls) { node.setAttribute('class', 'mono small ' + cls); }
+
+  function metrics(ctx, m) {
+    var keys = ['tables', 'email', 'pen', 'rows'];
+    keys.forEach(function (k) {
+      if (m[k] === undefined) return;
+      var t = ctx.state.metric[k];
+      t.v.textContent = m[k][0];
+      t.v.setAttribute('class', 'title ' + (m[k][1] || ''));
+      ctx.flash(t.v);
+    });
+  }
+
+  function link(ctx, x1, y1, x2, y2, l1, l2) {
+    var g = ctx.group();
+    var line = ctx.el('line', { x1: x1, y1: y1, x2: x1, y2: y1, class: 'wire accent' }, g);
+    var a = ctx.el('text', { x: x1 + 6, y: y1 + (y2 > y1 ? 14 : -6), class: 'mono small', style: 'fill:var(--accent);font-weight:600', text: l1, opacity: 0 }, g);
+    var flat = y1 === y2;
+    var b = ctx.el('text', { x: flat ? x2 - 12 : x2 + 6, y: flat ? y2 - 6 : y2 + (y2 > y1 ? -6 : 14), class: 'mono small', style: 'fill:var(--accent);font-weight:600', text: l2, opacity: 0 }, g);
+    return ctx.animate(line, { x2: x2, y2: y2 }, 500).then(function () {
+      return Promise.all([ctx.fade(a, 1, 250), ctx.fade(b, 1, 250)]);
+    });
+  }
+
+  var UPD = [700, 440];
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'An online shop, stored like a spreadsheet',
+      say: 'Three orders from two customers. We start with one table and fix it step by step. Watch the counters on the right: how many times each fact is stored.',
+    },
+    setup: function (ctx) {
+      // metrics panel
+      ctx.el('rect', { x: 590, y: 30, width: 210, height: 230, rx: 8, class: 'box' });
+      ctx.el('text', { x: 604, y: 54, class: 'title', text: 'Copies of each fact' });
+      ctx.state.metric = {};
+      [['tables', 'tables'], ['email', "Asha's email stored"], ['pen', "Pen's price stored"], ['rows', 'rows hit by email change']].forEach(function (m, i) {
+        var y = 92 + i * 44;
+        ctx.el('text', { x: 604, y: y, class: 'small muted', text: m[1] });
+        ctx.state.metric[m[0]] = { v: ctx.el('text', { x: 604, y: y + 22, class: 'title', text: '·' }) };
+      });
+      ctx.el('rect', { x: 590, y: 400, width: 210, height: 56, rx: 8, class: 'box signal' });
+      ctx.el('text', { x: 604, y: 424, class: 'mono small', text: 'app / SQL' });
+      ctx.state.sql = ctx.el('text', { x: 604, y: 444, class: 'mono small muted', text: 'idle' });
+
+      ctx.state.raw = table(ctx, {
+        x: 30, y: 70, title: 'orders_raw (unnormalized)',
+        cols: [['order_id', 68, 1], ['cust', 52], ['email', 96], ['items', 170]],
+        rows: [['101', 'C1', 'asha@x.in', 'Pen x2, Book x1'], ['102', 'C1', 'asha@x.in', 'Bag x1'], ['103', 'C2', 'ravi@y.in', 'Pen x5']],
+      });
+      metrics(ctx, { tables: ['1'], email: ['2'], pen: ['2 (inside text)'], rows: ['?'] });
+    },
+    steps: [
+      {
+        title: '1NF: one value per cell',
+        say: 'The <code>items</code> cell holds a list. You cannot index it, sum it, or find every order with a Pen without string parsing. Split it: one row per order line, with key <code>(order_id, product_id)</code>.',
+        run: function (ctx) {
+          var raw = ctx.state.raw;
+          raw.rows.forEach(function (r) { setCls(r.cells[3], 'fill-bad'); });
+          ctx.log('items = "Pen x2, Book x1" is not atomic', 'bad');
+          return ctx.wait(500).then(function () { return ctx.fade(raw.g, 0, 400); }).then(function () {
+            ctx.state.flat = table(ctx, {
+              x: 30, y: 70, title: 'orders_flat (1NF)', hidden: true,
+              cols: [['order', 50, 1], ['prod', 44, 1], ['name', 48], ['price', 48], ['qty', 34], ['cust', 40], ['email', 96]],
+              rows: [['101', 'P1', 'Pen', '10', '2', 'C1', 'asha@x.in'], ['101', 'P2', 'Book', '250', '1', 'C1', 'asha@x.in'],
+                     ['102', 'P3', 'Bag', '900', '1', 'C1', 'asha@x.in'], ['103', 'P1', 'Pen', '10', '5', 'C2', 'ravi@y.in']],
+            });
+            metrics(ctx, { email: ['3', 'fill-bad'], pen: ['2', 'fill-bad'] });
+            ctx.log('4 rows, key = (order_id, product_id)', 'info');
+            return ctx.fade(ctx.state.flat.g, 1, 450);
+          });
+        },
+      },
+      {
+        title: 'Update anomaly: change Asha\'s email',
+        say: 'Her email is in 3 rows. The update job writes two rows and then crashes. Now one person has two emails, and nothing in the schema stops it.',
+        run: function (ctx) {
+          var f = ctx.state.flat;
+          ctx.state.sql.textContent = "UPDATE ... email='asha@new'";
+          metrics(ctx, { rows: ['3', 'fill-bad'] });
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function (i) {
+            chain = chain.then(function () {
+              var r = f.rows[i];
+              var ok = i < 2;
+              return ctx.packet([UPD, [560, r.y + 11], [f.x + f.w - 10, r.y + 11]], { ms: 500, cls: ok ? '' : 'bad' }).then(function () {
+                if (ok) { r.cells[6].textContent = 'asha@new'; setCls(r.cells[6], 'fill-signal'); ctx.log('row ' + (i + 1) + ' updated'); }
+                else { setCls(r.cells[6], 'fill-bad'); r.bg.setAttribute('class', 'fill-bad'); r.bg.setAttribute('opacity', 0.15); ctx.log('row 3 missed (job crashed): Asha now has 2 emails', 'bad'); }
+              });
+            });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Delete and insert anomalies',
+        say: 'Cancel order 102 and delete its row: the only record of the Bag and its price is gone too. And a new product, Lamp, cannot be stored until someone orders it.',
+        run: function (ctx) {
+          var f = ctx.state.flat, r = f.rows[2];
+          ctx.state.sql.textContent = 'DELETE ... order_id=102';
+          return ctx.packet([UPD, [560, r.y + 11], [f.x + 20, r.y + 11]], { ms: 600, cls: 'bad' }).then(function () {
+            ctx.log('delete order 102 → product Bag (Rs 900) lost', 'bad');
+            ctx.log('cannot insert product Lamp without an order', 'bad');
+            return ctx.fade(r.g, 0.25, 400);
+          });
+        },
+      },
+      {
+        title: '2NF: move columns that depend on part of the key',
+        say: '<code>name</code> and <code>price</code> depend only on <code>product_id</code>. <code>cust</code> and <code>email</code> depend only on <code>order_id</code>. Each group moves to a table keyed by the column it depends on.',
+        run: function (ctx) {
+          var f = ctx.state.flat;
+          [2, 3].forEach(function (c) { setCls(f.heads[c], 'fill-signal'); });
+          [5, 6].forEach(function (c) { setCls(f.heads[c], 'fill-warn'); });
+          ctx.log('product_id → name, price  (partial dependency)', 'warn');
+          ctx.log('order_id → cust, email  (partial dependency)', 'warn');
+          ctx.state.sql.textContent = 'undo delete; split tables';
+          return ctx.wait(700).then(function () { return ctx.fade(f.g, 0, 400); }).then(function () {
+            ctx.state.products = table(ctx, { x: 310, y: 70, title: 'products', hidden: true,
+              cols: [['product_id', 80, 1], ['name', 60], ['price', 60]],
+              rows: [['P1', 'Pen', '10'], ['P2', 'Book', '250'], ['P3', 'Bag', '900']] });
+            ctx.state.items = table(ctx, { x: 310, y: 250, title: 'order_items', hidden: true,
+              cols: [['order_id', 66, 1], ['product_id', 80, 1], ['qty', 40], ['', 76]],
+              rows: [['101', 'P1', '2', ''], ['101', 'P2', '1', ''], ['102', 'P3', '1', ''], ['103', 'P1', '5', '']] });
+            ctx.state.orders2 = table(ctx, { x: 30, y: 250, title: 'orders (2NF)', hidden: true,
+              cols: [['order_id', 66, 1], ['cust', 46], ['email', 100]],
+              rows: [['101', 'C1', 'asha@x.in'], ['102', 'C1', 'asha@x.in'], ['103', 'C2', 'ravi@y.in']] });
+            metrics(ctx, { tables: ['3'], email: ['2', 'fill-warn'], pen: ['1', 'fill-ok'] });
+            ctx.log('Bag now lives in products: delete anomaly gone', 'ok');
+            return Promise.all([ctx.fade(ctx.state.products.g, 1, 450), ctx.fade(ctx.state.items.g, 1, 450), ctx.fade(ctx.state.orders2.g, 1, 450)]);
+          });
+        },
+      },
+      {
+        title: '3NF: remove the transitive dependency',
+        say: '<code>email</code> depends on <code>cust</code>, which depends on <code>order_id</code>. That chain is a transitive dependency. Move customer facts into <code>customers</code>; <code>orders</code> keeps only the foreign key.',
+        run: function (ctx) {
+          var o = ctx.state.orders2;
+          setCls(o.heads[2], 'fill-bad');
+          ctx.log('order_id → cust_id → email  (transitive)', 'warn');
+          return ctx.wait(500).then(function () { return ctx.fade(o.g, 0, 400); }).then(function () {
+            ctx.state.customers = table(ctx, { x: 30, y: 70, title: 'customers', hidden: true,
+              cols: [['cust_id', 60, 1], ['name', 54], ['email', 100]],
+              rows: [['C1', 'Asha', 'asha@x.in'], ['C2', 'Ravi', 'ravi@y.in']] });
+            ctx.state.orders = table(ctx, { x: 30, y: 250, title: 'orders', hidden: true,
+              cols: [['order_id', 66, 1], ['cust_id', 60], ['', 50]],
+              rows: [['101', 'C1', ''], ['102', 'C1', ''], ['103', 'C2', '']] });
+            metrics(ctx, { tables: ['4'], email: ['1', 'fill-ok'] });
+            ctx.log('every fact now stored once', 'ok');
+            return Promise.all([ctx.fade(ctx.state.customers.g, 1, 450), ctx.fade(ctx.state.orders.g, 1, 450)]);
+          });
+        },
+      },
+      {
+        title: 'Draw the relationships',
+        say: 'Customer to orders is 1:N, so the foreign key sits on the many side: <code>orders.cust_id</code>. Orders to products is M:N, so <code>order_items</code> is the junction table with a composite key.',
+        run: function (ctx) {
+          var c = ctx.state.customers, o = ctx.state.orders, p = ctx.state.products, it = ctx.state.items;
+          ctx.log('customers 1 ── N orders  (FK orders.cust_id)', 'info');
+          return link(ctx, c.x + 40, c.y + c.h, o.x + 40, o.y - 22, '1', 'N')
+            .then(function () { ctx.log('orders 1 ── N order_items', 'info'); return link(ctx, o.x + o.w, o.y + 40, it.x, it.y + 40, '1', 'N'); })
+            .then(function () { ctx.log('products 1 ── N order_items  ⇒ orders M:N products', 'info'); return link(ctx, p.x + 60, p.y + p.h, it.x + 60 + 40, it.y - 22, '1', 'N'); });
+        },
+      },
+      {
+        title: 'Change the email again: one row',
+        say: 'Now the email lives in one row of <code>customers</code>. One write, no partial state, and a <code>UNIQUE(email)</code> constraint guards it.',
+        run: function (ctx) {
+          var c = ctx.state.customers, r = c.rows[0];
+          ctx.state.sql.textContent = "UPDATE customers ... C1";
+          metrics(ctx, { rows: ['1', 'fill-ok'] });
+          return ctx.packet([UPD, [560, 30], [c.x + c.w - 20, r.y + 11]], { ms: 800 }).then(function () {
+            r.cells[2].textContent = 'asha@new'; setCls(r.cells[2], 'fill-ok');
+            ctx.flash(r.g);
+            ctx.log('1 row updated, all 3 of her orders see it', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The read path is a join',
+        say: 'The order page for 101 reads four tables. With indexes on every key this costs about a millisecond. It is the price we pay for one-copy facts, and usually it is cheap.',
+        run: function (ctx) {
+          var o = ctx.state.orders, c = ctx.state.customers, it = ctx.state.items, p = ctx.state.products;
+          ctx.state.sql.textContent = 'GET /orders/101';
+          var hops = [
+            [o, 0, 'orders: order 101 → C1'], [c, 0, 'customers: C1 → Asha'],
+            [it, 0, 'order_items: 2 lines'], [p, 0, 'products: P1 Pen, P2 Book'],
+          ];
+          var from = UPD, chain = Promise.resolve();
+          hops.forEach(function (h) {
+            chain = chain.then(function () {
+              var t = h[0], r = t.rows[h[1]], to = [t.x + t.w / 2, r.y + 11];
+              var pts = [from, to]; from = to;
+              return ctx.packet(pts, { ms: 550 }).then(function () {
+                r.bg.setAttribute('opacity', 1); ctx.flash(r.g);
+                if (t === it) t.rows[1].bg.setAttribute('opacity', 1);
+                if (t === p) t.rows[1].bg.setAttribute('opacity', 1);
+                ctx.log(h[2]);
+              });
+            });
+          });
+          return chain.then(function () { ctx.log('3 joins on indexed keys ≈ 1 ms', 'ok'); });
+        },
+      },
+      {
+        title: 'Denormalize on purpose: snapshot the price',
+        say: 'Add <code>unit_price</code> to <code>order_items</code> and a cached <code>total</code> to <code>orders</code>. These are written once, in the same transaction as the order.',
+        run: function (ctx) {
+          var it = ctx.state.items, o = ctx.state.orders;
+          it.heads[3].textContent = 'unit_price';
+          o.heads[2].textContent = 'total';
+          var prices = ['10', '250', '900', '10'], totals = ['270', '900', '50'];
+          it.rows.forEach(function (r, i) { r.cells[3].textContent = prices[i]; setCls(r.cells[3], 'fill-signal'); });
+          o.rows.forEach(function (r, i) { r.cells[2].textContent = totals[i]; setCls(r.cells[2], 'fill-signal'); });
+          ctx.flash(it.g); ctx.flash(o.g);
+          return ctx.wait(400).then(function () {
+            ctx.log('order_items.unit_price = price at purchase', 'info');
+            ctx.log('orders.total = cached sum, same transaction', 'info');
+          });
+        },
+      },
+      {
+        title: 'Price changes: the snapshot is correct',
+        say: 'The Pen goes from Rs 10 to Rs 15. The catalog changes in one row; old order lines keep Rs 10 because that is what Asha paid. A live join would have silently rewritten her invoice.',
+        run: function (ctx) {
+          var p = ctx.state.products, it = ctx.state.items;
+          ctx.state.sql.textContent = 'UPDATE products P1 → 15';
+          return ctx.packet([UPD, [560, 30], [p.x + p.w - 20, p.rows[0].y + 11]], { ms: 700 }).then(function () {
+            p.rows[0].cells[2].textContent = '15'; setCls(p.rows[0].cells[2], 'fill-ok'); ctx.flash(p.rows[0].g);
+            setCls(it.rows[0].cells[3], 'fill-ok'); setCls(it.rows[3].cells[3], 'fill-ok');
+            metrics(ctx, { pen: ['1 + snapshots', 'fill-ok'] });
+            ctx.log('products.price P1 = 15 (today)', 'ok');
+            ctx.log('order_items 101/P1 still 10 (paid): different fact, not duplication', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: cost of an email change (outside the stage, independent of Prev/Reset) ----
+  var $ = function (id) { return document.getElementById(id); };
+  function calc() {
+    var o = +$('t-orders').value, l = +$('t-lines').value, crash = +$('t-crash').value;
+    $('t-orders-v').textContent = o; $('t-lines-v').textContent = l; $('t-crash-v').textContent = crash;
+    var flatRows = o * l, written = Math.floor(flatRows * crash / 100), stale = flatRows - written;
+    var max = Math.max(flatRows, 1);
+    function row(label, n, cls) {
+      return '<span>' + label + '</span><div class="bar ' + cls + '" style="width:' + Math.max(1, (n / max) * 100) + '%"></div><span><code>' + n + '</code></span>';
+    }
+    $('t-meter').innerHTML =
+      row('Flat table: rows to update', flatRows, '') +
+      row('Flat table: rows left stale after crash', crash >= 100 ? 0 : stale, 'bad') +
+      row('3NF: rows to update', 1, 'ok');
+    $('t-say').textContent = crash >= 100
+      ? 'The job finished, but it still wrote ' + flatRows + ' rows (and locked them) for one fact.'
+      : 'In the flat table the job leaves ' + stale + ' rows with the old email. In 3NF it is one row in customers, so it either commits or it does not.';
+  }
+  ['t-orders', 't-lines', 't-crash'].forEach(function (id) { $(id).addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

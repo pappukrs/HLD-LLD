@@ -1,71 +1,70 @@
 # Week 24 · Close offers
 
-> Mon 29 Mar – Sun 4 Apr · Phase 4: Offers and sharpness · ~8 h this week
-> **Goal:** Short daily sprints keep every problem fresh. Real interviews and mocks are the main practice now.
+> Mon 29 Mar – Sun 4 Apr · Phase 4: Offers and sharpness · ~9 h this week
+> **Goal:** Stay sharp with short redo sprints while you close offers. Never let the knowledge go cold.
 
 [← Week 23](week-23.md) · [All weeks](README.md) · [Week 25 →](week-25.md)
 
-## Mon 29 Mar · Day 162 · 45 min
+## Mon 29 Mar · Day 162 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: BookMyShow  
-  [13-bookmyshow](../../lld/problems/13-bookmyshow/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Collaborative Editor from memory  
-  [25-collaborative-editor](../../hld/problems/25-collaborative-editor/README.md) · [25-collaborative-editor/my-design](../../hld/problems/25-collaborative-editor/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Refresh: L13 + L14  
+  [demo.ts](../../lld/3-structural/L13-adapter/demo.ts) · [demo.ts](../../lld/3-structural/L14-decorator/demo.ts)  
+  _Write both patterns from memory (10 min each), then diff against demo.ts._
+- [ ] **HLD · 35 min**: Refresh: H10 + H11  
+  [H10-cdn/README.md](../../hld/2-scaling/H10-cdn/README.md) · [visual](../../hld/2-scaling/H10-cdn/visual.html) · [H11-indexing/README.md](../../hld/3-databases/H11-indexing/README.md) · [visual](../../hld/3-databases/H11-indexing/visual.html)  
+  _Self-test only. Answer every question on both READMEs from memory, replay the visuals, then re-read only what you got wrong._
 
-## Tue 30 Mar · Day 163 · 45 min
+## Tue 30 Mar · Day 163 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: LRU Cache  
-  [02-lru-cache](../../lld/problems/02-lru-cache/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Stock Exchange from memory  
-  [26-stock-exchange](../../hld/problems/26-stock-exchange/README.md) · [26-stock-exchange/my-design](../../hld/problems/26-stock-exchange/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Redo sprint: Elevator System  
+  [10-elevator/README.md](../../lld/problems/10-elevator/README.md)  
+  _Empty file, 25 min. Rebuild the core classes and the main method from memory. Spaced repetition: this is what makes it stick._
+- [ ] **HLD · 35 min**: Redo from memory: File Storage (Dropbox)  
+  [15-file-storage/README.md](../../hld/case-studies/15-file-storage/README.md) · [15-file-storage/my-design.md](../../hld/case-studies/15-file-storage/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
-## Wed 31 Mar · Day 164 · 45 min
+## Wed 31 Mar · Day 164 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Payment Wallet  
-  [19-payment-wallet](../../lld/problems/19-payment-wallet/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Unique IDs from memory  
-  [03-unique-id-generator](../../hld/problems/03-unique-id-generator/README.md) · [03-unique-id-generator/my-design](../../hld/problems/03-unique-id-generator/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Debrief fix  
+  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored concept._
+- [ ] **HLD · 35 min**: Refresh: H12 + H13  
+  [H12-transactions-isolation/README.md](../../hld/3-databases/H12-transactions-isolation/README.md) · [visual](../../hld/3-databases/H12-transactions-isolation/visual.html) · [H13-data-modeling/README.md](../../hld/3-databases/H13-data-modeling/README.md) · [visual](../../hld/3-databases/H13-data-modeling/visual.html)  
+  _Self-test only. Answer every question on both READMEs from memory, replay the visuals, then re-read only what you got wrong._
 
-## Thu 1 Apr · Day 165 · 45 min
+## Thu 1 Apr · Day 165 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Splitwise  
-  [09-splitwise](../../lld/problems/09-splitwise/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Payment System from memory  
-  [08-payment-system](../../hld/problems/08-payment-system/README.md) · [08-payment-system/my-design](../../hld/problems/08-payment-system/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Chess: requirements + class diagram  
+  [23-chess/README.md](../../lld/problems/23-chess/README.md) · [L30-machine-coding-framework/README.md](../../lld/5-machine-coding/L30-machine-coding-framework/README.md)  
+  _Steps 1–3 on paper: clarify, list entities, draw the class diagram, name the patterns. No code yet._
+- [ ] **HLD · 35 min**: Redo from memory: Video Streaming  
+  [14-video-streaming/README.md](../../hld/case-studies/14-video-streaming/README.md) · [14-video-streaming/my-design.md](../../hld/case-studies/14-video-streaming/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
-## Fri 2 Apr · Day 166 · 45 min
+## Fri 2 Apr · Day 166 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Rate Limiter  
-  [04-rate-limiter](../../lld/problems/04-rate-limiter/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Chat System from memory  
-  [06-chat-system](../../hld/problems/06-chat-system/README.md) · [06-chat-system/my-design](../../hld/problems/06-chat-system/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Chess: build the core  
+  [23-chess/README.md](../../lld/problems/23-chess/README.md)  
+  _Code the main flow in starter.ts. Run `npx vitest run lld/problems/23-chess` and get the first tests green._
+- [ ] **HLD · 35 min**: Redo from memory: Digital Wallet / UPI  
+  [28-digital-wallet/README.md](../../hld/case-studies/28-digital-wallet/README.md) · [28-digital-wallet/my-design.md](../../hld/case-studies/28-digital-wallet/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
 ## Sat 3 Apr · Day 167 · 150 min
 
-- [ ] **MOCK · 90 min**: Mock machine-coding round  
-  [concepts/04-lld-interview-framework](../../lld/concepts/04-lld-interview-framework.md)  
-  _Someone else (your brother, a friend, Pramp) picks any finished LLD problem and plays the interviewer. 90 min, full round. Write a debrief._
+- [ ] **LLD · 90 min**: Chess: finish + timed redo  
+  [23-chess/README.md](../../lld/problems/23-chess/README.md)  
+  _Finish starter.ts until all tests pass (40 min). Then answer the extension questions out loud. Only now open reference.ts and write down 3 differences._
+- [ ] **HLD · 60 min**: Redo from memory: URL Shortener  
+  [01-url-shortener/README.md](../../hld/case-studies/01-url-shortener/README.md) · [01-url-shortener/my-design.md](../../hld/case-studies/01-url-shortener/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
+
+## Sun 4 Apr · Day 168 · 105 min
+
 - [ ] **MOCK · 60 min**: Mock HLD round  
-  [concepts/01-how-to-approach-hld](../../hld/concepts/01-how-to-approach-hld.md)  
-  _Ask a friend, or use Pramp / interviewing.io peers. Pick a problem you have not designed in the last 2 weeks. 45 min + feedback. Write a debrief._
-
-## Sun 4 Apr · Day 168 · 80 min
-
-- [ ] **HLD · 35 min**: Refresh: Rate limiting + Resilience  
-  [concepts/23-rate-limiting](../../hld/concepts/23-rate-limiting.md) · [concepts/24-resilience-patterns](../../hld/concepts/24-resilience-patterns.md)  
-  _Self-test only. Answer every question on both cards from memory, then re-read only what you got wrong._
+  [H01-approach-hld-round/README.md](../../hld/1-basics/H01-approach-hld-round/README.md)  
+  _Ask a friend, or use Pramp / interviewing.io peers. Pick a case study you haven't done in 2 weeks. 45 min + feedback. Write a debrief._
 - [ ] **REV · 45 min**: Weekly review  
-  _Debrief this week's interviews. Prepare company-specific questions for next week. Then run /daily week._
+  _Score yourself 1–5 on each concept module. Redo the self-test of the two lowest, and update your weak list in plan/notes.md. Then run /daily week._
 
 ## Notes
 

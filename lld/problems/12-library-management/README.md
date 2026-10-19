@@ -90,5 +90,5 @@ Relationships: Book ◆— Copy (composition). Member ⟶ Loan ⟵ Copy (associa
 
 ## Concepts used
 
-- [Repository and DI](../../concepts/patterns/p18-repository-di.md) · [Observer](../../concepts/patterns/p11-observer.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [SOLID](../../concepts/02-solid.md)
-- Visuals: [Observer and pub-sub](../../../visuals/v24-observer-pubsub.html) · [UML relationships](../../../visuals/v22-uml-relationships.html)
+- [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md) · [Observer](../../4-behavioral/L21-observer/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md)
+- Visuals: [Observer and pub-sub](../../4-behavioral/L21-observer/visual.html) · [UML relationships](../../1-foundations/L06-uml-relationships/visual.html)

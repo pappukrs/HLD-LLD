@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L33 Domain modelling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage .arrow { fill: none; stroke: var(--line); stroke-width: 2; }
+  .stage .arrow.on { stroke: var(--accent); }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try input, .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .try input { width: 90px; }
+  .try output { font: 12.5px var(--font-mono); color: var(--ink); flex-basis: 100%; }
+  .try output.bad { color: var(--bad); }
+  .try output.ok { color: var(--ok); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L33 · Machine coding</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Domain modelling: make wrong states impossible</h1>
+    <p class="lede">Raw numbers pass through a value-object factory and come out valid or not at all. A payment moves through a discriminated union with a transition table. Every broken rule becomes a named error that maps to one HTTP status.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Money factory, payment state machine and error hierarchy"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Money.of(</span><input id="amt" type="text" value="0.1" aria-label="amount"><select id="cur" aria-label="currency"><option>INR</option><option>USD</option></select><span>) + ₹0.20 INR</span>
+        <button class="btn" type="button" id="go">Run</button>
+        <output id="out">Pick an amount and a currency, then Run.</output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Valid object / legal move</span>
+        <span><i style="background: var(--signal)"></i>Input in flight</span>
+        <span><i style="background: var(--bad)"></i>Rejected (typed error)</span>
+        <span><i style="background: var(--ok)"></i>Result</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Key lines (highlighted with the step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">amount: number; status: string; txnId?: string // before</span><span class="ln" data-l="2">class Money { private constructor(readonly paise: bigint, readonly currency) {}</span><span class="ln" data-l="3">  static of(x, cur) { if (x &lt; 0) throw new ValidationError() }</span><span class="ln" data-l="4">  add(o) { this.same(o); return new Money(this.paise + o.paise) } }</span><span class="ln" data-l="5">type Payment = | { status: 'CREATED' }</span><span class="ln" data-l="6">  | { status: 'CAPTURED'; txnId: string }</span><span class="ln" data-l="7">  | { status: 'REFUNDED'; txnId: string; refundId: string }</span><span class="ln" data-l="8">const NEXT = { CREATED: ['CAPTURED','FAILED'], CAPTURED: ['REFUNDED'] }</span><span class="ln" data-l="9">class ConflictError extends DomainError { httpStatus = 409 }</span><span class="ln" data-l="10">catch (e) { if (e instanceof DomainError) res.status(e.httpStatus) }</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Money is an immutable value object in paise with a currency, built by a factory that validates. The payment is a discriminated union on status, so a captured payment always has a txnId, and a transition table rejects illegal moves like a late duplicate webhook. Every broken rule is a named DomainError with an HTTP status, mapped by one catch at the boundary."</p>
+    </div>
+    <div class="note wide">
+      <h3>Which tool for which job</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Need</th><th>Tool</th><th>Example</th><th>Catches</th></tr></thead>
+          <tbody>
+            <tr><td>A value with rules</td><td>Value object (private ctor + factory)</td><td><code>Money</code>, <code>Email</code>, <code>DateRange</code></td><td>Negative money, float errors, currency mix</td></tr>
+            <tr><td>Ids that must not be swapped</td><td>Branded type</td><td><code>WalletId</code>, <code>PaymentId</code></td><td><code>transfer(to, from)</code> swaps</td></tr>
+            <tr><td>A fixed set</td><td>Union literal / <code>as const</code></td><td><code>'BIKE' | 'CAR'</code></td><td>Typos like <code>'capturd'</code></td></tr>
+            <tr><td>States with different data</td><td>Discriminated union + <code>never</code></td><td><code>Payment</code>, <code>Ride</code></td><td>Captured without txnId, unhandled state</td></tr>
+            <tr><td>Legal moves</td><td>Transition table</td><td><code>NEXT[status]</code></td><td>Refund before capture</td></tr>
+            <tr><td>Failures</td><td>Typed error hierarchy</td><td><code>ConflictError</code> 409</td><td>"return false" with no reason</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why a private constructor on Money?</summary><div>So the only way in is the factory that validates. If you hold a Money, it is valid.</div></details>
+      <details class="qa"><summary>Entity or value object: a shipping address?</summary><div>A value object. No identity of its own; you replace it as a whole. The user who owns it is an entity.</div></details>
+      <details class="qa"><summary>What does the <code>never</code> default buy you?</summary><div>When someone adds a new status and forgets to handle it, the switch stops compiling.</div></details>
+      <details class="qa"><summary>Throw or return a Result?</summary><div>Throw typed errors for broken rules. Return a Result when failure is a normal outcome, such as parsing input.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../problems/19-payment-wallet/README.md">19 Payment wallet</a> (Money, typed errors)</li>
+        <li><a href="../../problems/09-splitwise/README.md">09 Splitwise</a> (paise rounding)</li>
+        <li><a href="../../problems/17-ride-sharing/README.md">17 Ride sharing</a> (ride states)</li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var GATE = { x: 40, y: 92, w: 190, h: 40 };
+  var ST = { CREATED: [300, 110], CAPTURED: [300, 230], REFUNDED: [300, 350], FAILED: [440, 110] };
+  var ERR = { ValidationError: [570, 120, 400], NotFoundError: [570, 180, 404], ConflictError: [570, 240, 409], InsufficientFunds: [570, 300, 422] };
+
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+  function box(ctx, x, y, w, h, label, cls, sub) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: 0, y: 0, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: w / 2, y: sub ? h / 2 - 3 : h / 2 + 4, 'text-anchor': 'middle', class: 'mono', text: label }, g);
+    var s = sub !== undefined ? ctx.el('text', { x: w / 2, y: h / 2 + 12, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g) : null;
+    ctx.place(g, x, y);
+    g._r = r; g._t = t; g._s = s;
+    return g;
+  }
+  function moneySlot(i) { return [40 + (i % 2) * 100, 180 + Math.floor(i / 2) * 56]; }
+  function addMoney(ctx, label, sub) {
+    var i = ctx.state.moneyCount++;
+    var p = moneySlot(i);
+    var g = box(ctx, GATE.x + GATE.w / 2 - 45, GATE.y, 90, 44, label, 'accent', sub);
+    return ctx.move(g, p[0], p[1], 500).then(function () { return g; });
+  }
+  function throwTo(ctx, from, errName, msg) {
+    var e = ERR[errName];
+    var node = ctx.state.err[errName];
+    return ctx.packet([from, [520, from[1]], [520, e[1] + 18], [e[0], e[1] + 18]], { ms: 700, cls: 'bad', label: errName })
+      .then(function () {
+        node._r.setAttribute('class', 'box bad');
+        ctx.flash(node);
+        return ctx.packet([[e[0] + 150, e[1] + 18], [700, e[1] + 18], [700, 400]], { ms: 400, cls: 'bad' });
+      })
+      .then(function () {
+        ctx.state.http.textContent = e[2] + ' ' + errName.replace('Error', '').toUpperCase();
+        ctx.state.http.setAttribute('class', 'mono fill-bad');
+        ctx.log(errName + ': ' + msg + ' → ' + e[2], 'bad');
+      });
+  }
+  function token(ctx, to) {
+    var p = ST[to];
+    ctx.state.status = to;
+    Object.keys(ctx.state.nodes).forEach(function (k) { ctx.state.nodes[k]._r.setAttribute('class', 'box ' + (k === to ? 'accent' : '')); });
+    return ctx.move(ctx.state.token, p[0] + 14, p[1] + 20, 600);
+  }
+  function fields(ctx, list) {
+    var t = ctx.state.fields;
+    while (t.firstChild) t.removeChild(t.firstChild);
+    list.forEach(function (f, i) { ctx.el('tspan', { x: 8, dy: i ? 15 : 0, text: f }, t); });
+    ctx.flash(ctx.state.fieldsBox);
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Three ideas on one board', say: 'Left: a factory that turns raw numbers into Money. Middle: a payment state machine typed as a discriminated union. Right: the error hierarchy and the HTTP status each error maps to.' },
+    setup: function (ctx) {
+      hl([]);
+      ctx.state.moneyCount = 0;
+      ctx.el('text', { x: 40, y: 28, class: 'title', text: 'Value objects' });
+      ctx.el('text', { x: 280, y: 28, class: 'title', text: 'Payment state' });
+      ctx.el('text', { x: 570, y: 28, class: 'title', text: 'Typed errors' });
+      ctx.state.raw = ctx.el('text', { x: 40, y: 58, class: 'mono small muted', text: 'raw input: amount: number' });
+      var gate = box(ctx, GATE.x, GATE.y, GATE.w, GATE.h, 'Money.of(amount, cur)', 'signal');
+      ctx.state.gate = gate;
+
+      // state machine
+      [['CREATED', 'CAPTURED'], ['CAPTURED', 'REFUNDED'], ['CREATED', 'FAILED']].forEach(function (e) {
+        var a = ST[e[0]], b = ST[e[1]];
+        var d = a[0] === b[0] ? 'M ' + (a[0] + 60) + ' ' + (a[1] + 40) + ' L ' + (b[0] + 60) + ' ' + b[1]
+                              : 'M ' + (a[0] + 120) + ' ' + (a[1] + 20) + ' L ' + b[0] + ' ' + (b[1] + 20);
+        ctx.el('path', { d: d, class: 'arrow' });
+      });
+      ctx.state.nodes = {};
+      Object.keys(ST).forEach(function (k) { ctx.state.nodes[k] = box(ctx, ST[k][0], ST[k][1], k === 'FAILED' ? 100 : 120, 40, k, ''); });
+      ctx.state.token = ctx.group({ opacity: 0 });
+      ctx.el('circle', { r: 8, class: 'dot signal' }, ctx.state.token);
+      ctx.place(ctx.state.token, ST.CREATED[0] + 14, ST.CREATED[1] + 20);
+      ctx.state.fieldsBox = box(ctx, 430, 200, 120, 92, '', '');
+      ctx.state.fieldsBox.querySelector('text').remove();
+      ctx.el('text', { x: 8, y: 16, class: 'mono small muted', text: 'fields that exist' }, ctx.state.fieldsBox);
+      ctx.state.fields = ctx.el('text', { x: 8, y: 36, class: 'mono small', text: '—' }, ctx.state.fieldsBox);
+
+      // error hierarchy
+      ctx.state.root = box(ctx, 570, 52, 150, 40, 'DomainError', 'accent', 'code, httpStatus');
+      ctx.state.err = {};
+      Object.keys(ERR).forEach(function (k) {
+        var e = ERR[k];
+        ctx.el('path', { d: 'M 560 92 L 560 ' + (e[1] + 18) + ' L 570 ' + (e[1] + 18), class: 'wire' });
+        ctx.state.err[k] = box(ctx, e[0], e[1], 150, 36, k, '', String(e[2]));
+      });
+      box(ctx, 570, 380, 150, 40, '', 'signal');
+      ctx.state.http = ctx.el('text', { x: 645, y: 404, 'text-anchor': 'middle', class: 'mono', text: 'HTTP response' });
+    },
+    steps: [
+      {
+        title: 'Before: primitive obsession',
+        say: '<code>amount: number</code> in rupees and <code>status: string</code>. The compiler cannot stop <code>0.1 + 0.2</code> drift, a typo in a status, or a negative balance.',
+        run: function (ctx) {
+          hl([1]);
+          ctx.state.raw.textContent = '0.1 + 0.2 = 0.30000000000000004';
+          ctx.state.raw.setAttribute('class', 'mono small fill-bad');
+          ctx.flash(ctx.state.raw);
+          ctx.log('float rupees: 0.1 + 0.2 = 0.30000000000000004', 'bad');
+          ctx.log("status = 'capturd' compiles fine", 'bad');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'A factory builds a valid Money',
+        say: '499 enters <code>Money.of</code>. It is checked once and stored as 49,900 paise with a currency. The constructor is private, so this is the only way in.',
+        run: function (ctx) {
+          hl([2, 3]);
+          ctx.state.raw.textContent = 'raw input: 499';
+          ctx.state.raw.setAttribute('class', 'mono small');
+          return ctx.packet([[60, 62], [GATE.x + GATE.w / 2, GATE.y]], { ms: 500, label: '499' })
+            .then(function () { ctx.flash(ctx.state.gate); return addMoney(ctx, '₹499.00', '49900n paise'); })
+            .then(function () { ctx.log('Money.of(499) → 49900 paise INR', 'ok'); });
+        },
+      },
+      {
+        title: 'Invalid input never becomes Money',
+        say: '-5 hits the factory and is rejected with a <code>ValidationError</code>. It climbs to its class in the hierarchy and maps to 400.',
+        run: function (ctx) {
+          hl([3]);
+          ctx.state.raw.textContent = 'raw input: -5';
+          return ctx.packet([[60, 62], [GATE.x + GATE.w / 2, GATE.y]], { ms: 500, label: '-5' })
+            .then(function () { ctx.state.gate._r.setAttribute('class', 'box bad'); ctx.flash(ctx.state.gate); return throwTo(ctx, [GATE.x + GATE.w, GATE.y + 20], 'ValidationError', 'invalid amount -5'); })
+            .then(function () { ctx.state.gate._r.setAttribute('class', 'box signal'); });
+        },
+      },
+      {
+        title: 'Immutable: add returns a new Money',
+        say: '₹0.10 + ₹0.20. Both inputs stay as they were and a third object, exactly ₹0.30, appears. Integer paise: no float drift.',
+        run: function (ctx) {
+          hl([4]);
+          var a, b;
+          return addMoney(ctx, '₹0.10', '10n').then(function (g) { a = g; return addMoney(ctx, '₹0.20', '20n'); })
+            .then(function (g) {
+              b = g;
+              var pa = moneySlot(1), pb = moneySlot(2);
+              return Promise.all([ctx.packet([[pa[0] + 45, pa[1] + 44], [140, 380]], { ms: 500, cls: 'accent' }), ctx.packet([[pb[0] + 45, pb[1] + 44], [140, 380]], { ms: 500, cls: 'accent' })]);
+            })
+            .then(function () {
+              var c = box(ctx, 95, 380, 90, 44, '₹0.30', 'ok', '30n (new)');
+              c.setAttribute('opacity', 0);
+              ctx.flash(a); ctx.flash(b);
+              ctx.log('a.add(b) → new Money ₹0.30; a and b unchanged', 'ok');
+              return ctx.fade(c, 1, 400);
+            });
+        },
+      },
+      {
+        title: 'Currency mix is a rule, not a bug',
+        say: '₹10 + $1 calls <code>same()</code> inside <code>add</code>. Different currencies throw. Without the value object, this would silently add 10 + 1 = 11.',
+        run: function (ctx) {
+          hl([4]);
+          ctx.state.raw.textContent = 'raw input: ₹10 + $1';
+          return ctx.packet([[60, 62], [GATE.x + GATE.w / 2, GATE.y]], { ms: 500, label: 'INR + USD' })
+            .then(function () { return throwTo(ctx, [GATE.x + GATE.w, GATE.y + 20], 'ValidationError', 'cannot mix INR and USD'); });
+        },
+      },
+      {
+        title: 'Payment starts in CREATED',
+        say: 'In the CREATED variant only <code>id</code> and <code>amount</code> exist. There is no <code>txnId</code> field to read by mistake.',
+        run: function (ctx) {
+          hl([5]);
+          return ctx.fade(ctx.state.token, 1, 300).then(function () { return token(ctx, 'CREATED'); }).then(function () {
+            fields(ctx, ['id', 'amount']);
+            ctx.log('Payment { status: CREATED, amount: ₹499.00 }', 'info');
+          });
+        },
+      },
+      {
+        title: 'capture(): CREATED → CAPTURED',
+        say: 'The table allows CREATED → CAPTURED. The new variant must carry <code>txnId</code>, so "captured without a txnId" cannot be written.',
+        run: function (ctx) {
+          hl([6, 8]);
+          return token(ctx, 'CAPTURED').then(function () {
+            fields(ctx, ['id', 'amount', 'txnId']);
+            ctx.log('capture(txn_77): CREATED → CAPTURED', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A late duplicate webhook tries to capture again',
+        say: 'NEXT[CAPTURED] does not contain CAPTURED. The move is rejected with a <code>ConflictError</code> (409) instead of overwriting the payment.',
+        run: function (ctx) {
+          hl([8, 9]);
+          var n = ctx.state.nodes.CAPTURED;
+          n._r.setAttribute('class', 'box bad');
+          ctx.flash(n);
+          return throwTo(ctx, [ST.CAPTURED[0] + 120, ST.CAPTURED[1] + 20], 'ConflictError', 'CAPTURED → CAPTURED not allowed')
+            .then(function () { n._r.setAttribute('class', 'box accent'); });
+        },
+      },
+      {
+        title: 'refund(): CAPTURED → REFUNDED',
+        say: 'A legal move. The REFUNDED variant keeps <code>txnId</code> and adds <code>refundId</code>. The exhaustive switch over status still compiles because every variant is handled.',
+        run: function (ctx) {
+          hl([7, 8]);
+          return token(ctx, 'REFUNDED').then(function () {
+            fields(ctx, ['id', 'amount', 'txnId', 'refundId']);
+            ctx.log('refund(rfnd_9): CAPTURED → REFUNDED', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Wallet debit breaks a business rule',
+        say: 'The wallet entity guards its balance. Debit ₹5,000 from ₹749.25 throws <code>InsufficientFundsError</code>, which maps to 422. One catch at the boundary handles every DomainError.',
+        run: function (ctx) {
+          hl([10]);
+          return throwTo(ctx, [ST.REFUNDED[0] + 120, ST.REFUNDED[1] + 20], 'InsufficientFunds', 'balance ₹749.25, need ₹5000.00')
+            .then(function () { ctx.log('catch (e instanceof DomainError) → res.status(e.httpStatus)', 'info'); });
+        },
+      },
+    ],
+  });
+
+  // Try it: a pure function, no stage changes, so Prev/Reset are unaffected.
+  document.getElementById('go').addEventListener('click', function () {
+    var out = document.getElementById('out');
+    var raw = document.getElementById('amt').value.trim();
+    var cur = document.getElementById('cur').value;
+    var x = Number(raw);
+    var floatSum = x + 0.2;
+    if (raw === '' || !isFinite(x) || x < 0) { out.className = 'bad'; out.textContent = 'ValidationError (400): invalid amount "' + raw + '". No Money object exists.'; return; }
+    if (cur !== 'INR') { out.className = 'bad'; out.textContent = 'ValidationError (400): cannot mix ' + cur + ' and INR. With plain numbers this would print ' + floatSum + '.'; return; }
+    var paise = Math.round(x * 100) + 20;
+    out.className = 'ok';
+    out.textContent = 'Money: ' + Math.round(x * 100) + ' + 20 = ' + paise + ' paise = ₹' + (Math.floor(paise / 100)) + '.' + String(paise % 100).padStart(2, '0') + '   |   plain numbers: ' + raw + ' + 0.2 = ' + floatSum;
+  });
+})();
+</script>
+</body>
+</html>

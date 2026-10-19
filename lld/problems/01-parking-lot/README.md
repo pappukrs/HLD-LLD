@@ -79,5 +79,5 @@ Relationships: Lot ◆— Floor ◆— Spot (composition). Lot ⟶ PricingStrate
 
 ## Concepts used
 
-- [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [SOLID](../../concepts/02-solid.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

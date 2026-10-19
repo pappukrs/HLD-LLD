@@ -83,5 +83,5 @@ Do you need `Player` classes? Not for this scope. Two string symbols are enough.
 
 ## Concepts used
 
-- [Strategy](../../concepts/patterns/p10-strategy.md) · [Command (for undo)](../../concepts/patterns/p13-command.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy](../../4-behavioral/L20-strategy/README.md) · [Command (for undo)](../../4-behavioral/L23-command/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

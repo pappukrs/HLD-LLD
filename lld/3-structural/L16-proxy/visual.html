@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L16 Proxy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .row { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  .stage .net { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 6; }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .try output { font: 12px var(--font-mono); color: var(--ink); }
+  .stats { font: 12.5px var(--font-mono); color: var(--muted); margin-bottom: 6px; }
+  ol.trace { font: 12.5px/1.6 var(--font-mono); margin: 0; padding-left: 22px; max-height: 220px; overflow: auto; }
+  ol.trace li.ok { color: var(--ok); } ol.trace li.bad { color: var(--bad); } ol.trace li.warn { color: var(--warn); }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L16 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Proxy: a stand-in that controls access</h1>
+    <p class="lede">The ledger takes 800 ms per statement. A caching proxy with the same interface answers repeats in about 1 ms, merges concurrent misses, and expires entries. A protection proxy in front rejects forbidden reads before the cache is touched. The controller never changes.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Controller, auth proxy, caching proxy and the real ledger service"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Response</span>
+        <span><i style="background: var(--accent)"></i>Proxy (same interface)</span>
+        <span><i style="background: var(--bad)"></i>Rejected / expired</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The caching proxy</h3>
+<pre class="code">class CachingStatementProxy implements StatementService {
+  private cache = new Map&lt;string, Entry&gt;();
+  private inFlight = new Map&lt;string, Promise&lt;Statement&gt;&gt;();
+
+  async getStatement(id: string) {
+    const hit = this.cache.get(id);
+    if (hit &amp;&amp; hit.expiresAt &gt; this.now()) return hit.value; // HIT
+    const p = this.inFlight.get(id);
+    if (p) return p;                       // coalesce misses
+    const call = this.real.getStatement(id)
+      .then((v) =&gt; { this.cache.set(id, { value: v,
+          expiresAt: this.now() + this.ttlMs }); return v; })
+      .finally(() =&gt; this.inFlight.delete(id));
+    this.inFlight.set(id, call);
+    return call;
+  }
+}
+// wiring: new AuthProxy(new CachingProxy(new Ledger(), 60_000), user)</pre>
+    </div>
+    <div class="note">
+      <h3>Try it: drive the caching proxy</h3>
+      <div class="try">
+        <label>TTL <input id="t-ttl" type="range" min="10" max="120" step="10" value="60"> <output id="t-ttlv">60 s</output></label>
+      </div>
+      <div class="try">
+        <button class="btn" id="t-r1" type="button">read acc_1</button>
+        <button class="btn" id="t-r2" type="button">read acc_2</button>
+        <button class="btn" id="t-clock" type="button">clock +30 s</button>
+        <button class="btn" id="t-inv" type="button">write acc_1 (invalidate)</button>
+        <button class="btn" id="t-reset" type="button">clear</button>
+      </div>
+      <div class="stats" id="t-stats"></div>
+      <ol class="trace" id="t-out"></ol>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The statement service is slow, so I put a caching proxy in front of it. It implements the same interface, so the controller doesn't change. The cache has a TTL and a size cap, and it coalesces concurrent misses so a cold key hits the ledger once. Auth is a separate protection proxy placed outside the cache, so it runs on every call."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Proxy vs Decorator: what is the real difference?</summary><div>Intent. Same structure. A decorator adds behaviour and is often stacked by the client. A proxy controls access to one real object: it can skip the real call (cache, auth) or delay creating it (lazy).</div></details>
+      <details class="qa"><summary>Why must auth wrap the cache, not the other way round?</summary><div>If the cache is outermost, a forbidden user can read a value that another user's request already cached. Access checks must run before any data is returned.</div></details>
+      <details class="qa"><summary>100 requests miss the same cold key at once. How many ledger calls?</summary><div>Without coalescing, 100 (a cache stampede). With an in-flight promise map, 1: the other 99 await the same promise.</div></details>
+      <details class="qa"><summary>Which kind of proxy is a gRPC client stub?</summary><div>A remote proxy: a local object with the service's interface that turns each call into a network request. Give it a deadline and handle UNAVAILABLE.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>The four kinds of proxy</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Kind</th><th>Controls</th><th>Example</th><th>Watch out for</th></tr></thead>
+          <tbody>
+            <tr><td>Caching</td><td>Repeated expensive calls</td><td>Statement cache, DataLoader</td><td>TTL, size cap, stampede, stale reads</td></tr>
+            <tr><td>Protection</td><td>Who may call what</td><td>Role check, rate-limit guard</td><td>Must sit outermost</td></tr>
+            <tr><td>Virtual (lazy)</td><td>When the real object is built</td><td>Lazy DB pool, ORM lazy relation</td><td>First call is slow; N+1 queries</td></tr>
+            <tr><td>Remote</td><td>Where the real object lives</td><td>gRPC stub, AWS SDK client</td><td>Looks cheap but is a network call: timeouts, retries</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var Y = 175, H = 80, MID = Y + H / 2;
+  var C = { x: 16, w: 134 }, A = { x: 175, w: 130 }, P = { x: 330, w: 160 }, L = { x: 610, w: 135 };
+
+  function box(ctx, parent, b, title, sub, cls) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: b.x, y: Y, width: b.w, height: H, rx: 8, class: 'box' }, g);
+    g.r = ctx.el('rect', { x: b.x, y: Y, width: b.w, height: H, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: b.x + b.w / 2, y: Y + 22, 'text-anchor': 'middle', class: 'b', text: title }, g);
+    if (sub) ctx.el('text', { x: b.x + b.w / 2, y: Y + 40, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g);
+    g.s = ctx.el('text', { x: b.x + b.w / 2, y: Y + 62, 'text-anchor': 'middle', class: 'mono small', text: '' }, g);
+    return g;
+  }
+  function setS(g, t, c) { g.s.textContent = t; g.s.setAttribute('class', 'mono small ' + (c || '')); }
+  function R(b) { return b.x + b.w; }
+  function go(ctx, x1, x2, o) { return ctx.packet([[x1, MID - 8], [x2, MID - 8]], o); }
+  function ret(ctx, x1, x2, o) { o = o || {}; o.cls = o.cls || 'ok'; return ctx.packet([[x1, MID + 8], [x2, MID + 8]], o); }
+  function clock(ctx, t) { ctx.state.t = t; ctx.state.clockT.textContent = 'clock t = ' + t + ' s'; }
+  function ledgerCall(ctx) { ctx.state.calls++; ctx.state.callsT.textContent = 'ledger calls: ' + ctx.state.calls; ctx.flash(ctx.state.ledger.r); }
+  function row(ctx, i, key, text, cls) {
+    var y = 312 + i * 28;
+    var g = ctx.group({}, ctx.state.table);
+    ctx.el('rect', { x: P.x, y: y, width: 260, height: 24, rx: 4, class: 'row' }, g);
+    var t = ctx.el('text', { x: P.x + 8, y: y + 16, class: 'mono small ' + (cls || ''), text: key + '  ' + text }, g);
+    g.t = t; g.y = y;
+    return g;
+  }
+  function latency(ctx, ms, cls) { setS(ctx.state.ctrl, ms + ' ms', cls); }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'An 800 ms call that everyone repeats', say: 'The controller asks the ledger for a statement. Watch the cost of calling it directly, then put proxies in front without touching the controller.' },
+    setup: function (ctx) {
+      ctx.state.calls = 0;
+      ctx.state.clockT = ctx.el('text', { x: 20, y: 28, class: 'mono', text: '' });
+      clock(ctx, 0);
+      ctx.el('text', { x: 20, y: 52, class: 'mono small muted', text: 'every box below implements «StatementService»' });
+      ctx.state.wires = ctx.group();
+      ctx.state.direct = ctx.el('line', { x1: R(C), y1: MID, x2: L.x, y2: MID, class: 'wire' }, ctx.state.wires);
+      ctx.state.ctrl = box(ctx, null, C, 'Controller', 'svc.getStatement()');
+      ctx.state.ledger = box(ctx, null, L, 'LedgerService', 'real · 800 ms');
+      ctx.state.callsT = ctx.el('text', { x: L.x + L.w / 2, y: Y + H + 22, 'text-anchor': 'middle', class: 'mono small', text: 'ledger calls: 0' });
+      ctx.state.cacheG = ctx.group({ opacity: 0 });
+      ctx.state.cache = box(ctx, ctx.state.cacheG, P, 'CachingProxy', 'TTL 60 s', 'accent');
+      ctx.state.table = ctx.group({}, ctx.state.cacheG);
+      ctx.el('text', { x: P.x, y: 300, class: 'mono small muted', text: 'cache: key  value  expiresAt' }, ctx.state.cacheG);
+      ctx.state.authG = ctx.group({ opacity: 0 });
+      ctx.state.auth = box(ctx, ctx.state.authG, A, 'AuthProxy', 'user u7 → acc_1', 'accent');
+      ctx.state.netG = ctx.group({ opacity: 0 });
+      ctx.el('line', { x1: 555, y1: 80, x2: 555, y2: 285, class: 'net' }, ctx.state.netG);
+      ctx.el('text', { x: 562, y: 96, class: 'mono small muted', text: 'network' }, ctx.state.netG);
+      ctx.el('text', { x: 562, y: 112, class: 'mono small muted', text: 'other host' }, ctx.state.netG);
+    },
+    steps: [
+      {
+        title: 'No proxy: every read pays 800 ms',
+        say: 'Three reads of the same account go straight to the ledger. Each one waits 800 ms and loads the ledger database. The data has not changed between them.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [1, 2, 3].forEach(function (n) {
+            chain = chain.then(function () { return go(ctx, R(C), L.x, { ms: 450, label: 'acc_1' }); })
+              .then(function () { ledgerCall(ctx); return ret(ctx, L.x, R(C), { ms: 650 }); })
+              .then(function () { latency(ctx, 800, 'fill-bad'); ctx.log('read #' + n + ' acc_1 -> ledger, 800 ms', 'bad'); });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Slide a caching proxy in between',
+        say: 'The proxy implements the same <code>StatementService</code> interface and holds a reference to the real ledger. The controller still calls <code>svc.getStatement()</code>; only the wiring code changed.',
+        run: function (ctx) {
+          setS(ctx.state.ctrl, '');
+          ctx.state.direct.remove();
+          ctx.state.calls = 0;
+          ctx.state.callsT.textContent = 'ledger calls: 0 (counting again)';
+          ctx.el('line', { x1: R(C), y1: MID, x2: P.x, y2: MID, class: 'wire accent' }, ctx.state.wires);
+          ctx.el('line', { x1: R(P), y1: MID, x2: L.x, y2: MID, class: 'wire accent' }, ctx.state.wires);
+          ctx.log('wiring: svc = new CachingProxy(ledger, 60s)', 'info');
+          ctx.log('Controller code: unchanged', 'ok');
+          return ctx.fade(ctx.state.cacheG, 1, 450);
+        },
+      },
+      {
+        title: 'First read: miss, forward, store with a TTL',
+        say: 'The cache has no entry for acc_1. The proxy forwards to the ledger, waits 800 ms, stores the value with <code>expiresAt = now + 60 s</code>, and returns it.',
+        run: function (ctx) {
+          return go(ctx, R(C), P.x, { ms: 400, label: 'acc_1' }).then(function () {
+            setS(ctx.state.cache, 'MISS', 'fill-warn');
+            ctx.log('proxy: acc_1 MISS', 'warn');
+            return go(ctx, R(P), L.x, { ms: 400 });
+          }).then(function () {
+            ledgerCall(ctx);
+            return ret(ctx, L.x, R(P), { ms: 650 });
+          }).then(function () {
+            ctx.state.r1 = row(ctx, 0, 'acc_1', 'Rs 12500  t=60');
+            ctx.log('stored acc_1, expires at t=60 s', 'info');
+            return ret(ctx, P.x, R(C), { ms: 400 });
+          }).then(function () { latency(ctx, 800, 'fill-warn'); });
+        },
+      },
+      {
+        title: 'Second read: hit, about 1 ms',
+        say: 'The entry is fresh, so the proxy answers by itself. The ledger is not touched, its call counter does not move, and the controller gets the answer about 800 times faster.',
+        run: function (ctx) {
+          return go(ctx, R(C), P.x, { ms: 400, label: 'acc_1' }).then(function () {
+            setS(ctx.state.cache, 'HIT', 'fill-ok');
+            ctx.flash(ctx.state.r1);
+            ctx.log('proxy: acc_1 HIT', 'ok');
+            return ret(ctx, P.x, R(C), { ms: 400 });
+          }).then(function () { latency(ctx, 1, 'fill-ok'); ctx.log('ledger calls still ' + ctx.state.calls, 'ok'); });
+        },
+      },
+      {
+        title: 'Three cold reads at once: coalesce them',
+        say: 'Three requests for acc_2 arrive together. The first miss stores its promise in <code>inFlight</code>; the other two await that same promise. One ledger call serves all three, which prevents a cache stampede.',
+        run: function (ctx) {
+          var parked = [];
+          return Promise.all([0, 1, 2].map(function (k) {
+            return ctx.wait(k * 120).then(function () { return ctx.packet([[R(C), MID - 20 + k * 14], [P.x, MID - 20 + k * 14]], { ms: 400, label: k === 0 ? 'acc_2' : '' }); });
+          })).then(function () {
+            setS(ctx.state.cache, 'MISS + 2 waiting', 'fill-warn');
+            ctx.state.inf = row(ctx, 1, 'inFlight', 'acc_2 -> Promise', 'fill-warn');
+            [1, 2].forEach(function (k) { parked.push(ctx.el('circle', { cx: P.x + 14, cy: MID - 20 + k * 14, r: 5, class: 'packet warn' })); });
+            ctx.log('acc_2 MISS; 2 callers await the in-flight promise', 'warn');
+            return go(ctx, R(P), L.x, { ms: 400 });
+          }).then(function () {
+            ledgerCall(ctx);
+            return ret(ctx, L.x, R(P), { ms: 650 });
+          }).then(function () {
+            parked.forEach(function (p) { p.remove(); });
+            ctx.state.inf.t.textContent = 'acc_2     Rs 9800   t=60';
+            ctx.state.inf.t.setAttribute('class', 'mono small');
+            ctx.log('one ledger call answered 3 callers', 'ok');
+            return Promise.all([0, 1, 2].map(function (k) { return ctx.packet([[P.x, MID - 20 + k * 14], [R(C), MID - 20 + k * 14]], { ms: 400, cls: 'ok' }); }));
+          }).then(function () { setS(ctx.state.cache, '3 served, 1 call', 'fill-ok'); });
+        },
+      },
+      {
+        title: 'Clock moves past the TTL',
+        say: 'At t = 61 s both entries have expired. The next read of acc_1 is a miss again and goes to the ledger. TTL is how a caching proxy limits stale data; for strict data, also call <code>invalidate(id)</code> on writes.',
+        run: function (ctx) {
+          clock(ctx, 61);
+          [ctx.state.r1, ctx.state.inf].forEach(function (r) {
+            r.t.setAttribute('class', 'mono small fill-bad');
+            ctx.el('line', { x1: P.x + 6, y1: r.y + 12, x2: P.x + 254, y2: r.y + 12, class: 'strike' }, r);
+          });
+          ctx.log('t=61 s: acc_1 and acc_2 expired', 'bad');
+          return go(ctx, R(C), P.x, { ms: 400, label: 'acc_1' }).then(function () {
+            setS(ctx.state.cache, 'EXPIRED -> MISS', 'fill-bad');
+            return go(ctx, R(P), L.x, { ms: 400 });
+          }).then(function () {
+            ledgerCall(ctx);
+            return ret(ctx, L.x, R(P), { ms: 650 });
+          }).then(function () {
+            ctx.state.r1.remove();
+            ctx.state.r1 = row(ctx, 2, 'acc_1', 'Rs 12500  t=121');
+            ctx.log('refreshed acc_1, expires at t=121 s', 'info');
+            return ret(ctx, P.x, R(C), { ms: 400 });
+          }).then(function () { latency(ctx, 800, 'fill-warn'); });
+        },
+      },
+      {
+        title: 'Add a protection proxy outside the cache',
+        say: 'An <code>AuthProxy</code> wraps the caching proxy. Customer u7 may read only acc_1. It sits outermost so the check runs on every call, even when the answer is already cached.',
+        run: function (ctx) {
+          ctx.el('line', { x1: R(A), y1: MID, x2: P.x, y2: MID, class: 'wire accent' }, ctx.state.wires);
+          ctx.log('wiring: new AuthProxy(cachingProxy, u7)', 'info');
+          return ctx.fade(ctx.state.authG, 1, 400);
+        },
+      },
+      {
+        title: 'u7 asks for acc_2: rejected at the door',
+        say: 'acc_2 is not u7\'s account. The auth proxy rejects it before the cache is reached. If the cache were outside, u7 could have read acc_2 from a value another user cached.',
+        run: function (ctx) {
+          setS(ctx.state.cache, '');
+          return go(ctx, R(C), A.x, { ms: 450, label: 'acc_2', cls: 'bad' }).then(function () {
+            setS(ctx.state.auth, 'FORBIDDEN', 'fill-bad');
+            ctx.flash(ctx.state.auth.r);
+            ctx.log('AuthProxy: u7 cannot read acc_2', 'bad');
+            return ret(ctx, A.x, R(C), { ms: 400, cls: 'bad' });
+          }).then(function () { setS(ctx.state.ctrl, '403', 'fill-bad'); ctx.log('cache and ledger never touched', 'ok'); });
+        },
+      },
+      {
+        title: 'u7 asks for acc_1: auth passes, cache hits',
+        say: 'Own account: the auth proxy forwards to the caching proxy, which has a fresh entry. Two proxies, one interface, and the controller code is still the same single line.',
+        run: function (ctx) {
+          return go(ctx, R(C), A.x, { ms: 400, label: 'acc_1' }).then(function () {
+            setS(ctx.state.auth, 'allowed', 'fill-ok');
+            return go(ctx, R(A), P.x, { ms: 300 });
+          }).then(function () {
+            setS(ctx.state.cache, 'HIT', 'fill-ok');
+            ctx.flash(ctx.state.r1);
+            return ret(ctx, P.x, R(C), { ms: 500 });
+          }).then(function () { latency(ctx, 1, 'fill-ok'); ctx.log('auth ok -> cache HIT -> 1 ms', 'ok'); });
+        },
+      },
+      {
+        title: 'Remote proxy: the ledger lives on another host',
+        say: 'Now the ledger runs in another service. Locally we hold a gRPC stub with the same interface: a remote proxy. It looks like a method call but crosses the network, so it needs a deadline and error handling.',
+        run: function (ctx) {
+          setS(ctx.state.ledger, 'via gRPC stub', 'fill-warn');
+          ctx.log('ledger behind a remote proxy (gRPC stub)', 'info');
+          return ctx.fade(ctx.state.netG, 1, 400).then(function () {
+            clock(ctx, 130);
+            ctx.log('t=130 s: acc_1 expired again', 'warn');
+            return go(ctx, R(C), A.x, { ms: 350, label: 'acc_1' });
+          }).then(function () { return go(ctx, R(A), P.x, { ms: 300 }); })
+            .then(function () { setS(ctx.state.cache, 'MISS', 'fill-warn'); return go(ctx, R(P), L.x, { ms: 700, label: 'gRPC, deadline 300ms' }); })
+            .then(function () {
+              ledgerCall(ctx);
+              ctx.state.r1.t.textContent = 'acc_1  Rs 12500  t=190';
+              ctx.flash(ctx.state.r1);
+              return ret(ctx, L.x, R(C), { ms: 900 });
+            })
+            .then(function () { latency(ctx, 803, 'fill-warn'); ctx.log('network hop hidden behind the same interface', 'warn'); });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: a plain-JS caching proxy with a fake clock ----
+  var ttl = 60, now = 0, cache = {}, calls = 0, hits = 0;
+  var out = document.getElementById('t-out'), stats = document.getElementById('t-stats');
+  function draw() {
+    var keys = Object.keys(cache).map(function (k) { return k + ' (exp t=' + cache[k] + (cache[k] <= now ? ', expired' : '') + ')'; });
+    stats.textContent = 't=' + now + ' s · ledger calls=' + calls + ' · hits=' + hits + ' · cache: ' + (keys.join(', ') || 'empty');
+  }
+  function add(t, c) { var li = document.createElement('li'); li.textContent = t; if (c) li.className = c; out.appendChild(li); out.scrollTop = out.scrollHeight; draw(); }
+  function read(k) {
+    if (cache[k] !== undefined && cache[k] > now) { hits++; add('t=' + now + ' read ' + k + ': HIT, ~1 ms', 'ok'); return; }
+    calls++;
+    cache[k] = now + ttl;
+    add('t=' + now + ' read ' + k + ': MISS -> ledger 800 ms, store until t=' + cache[k], 'warn');
+  }
+  document.getElementById('t-ttl').addEventListener('input', function (e) { ttl = +e.target.value; document.getElementById('t-ttlv').textContent = ttl + ' s'; });
+  document.getElementById('t-r1').addEventListener('click', function () { read('acc_1'); });
+  document.getElementById('t-r2').addEventListener('click', function () { read('acc_2'); });
+  document.getElementById('t-clock').addEventListener('click', function () { now += 30; add('clock -> t=' + now + ' s'); });
+  document.getElementById('t-inv').addEventListener('click', function () { delete cache.acc_1; add('write acc_1 -> invalidate(acc_1)', 'bad'); });
+  document.getElementById('t-reset').addEventListener('click', function () { now = 0; cache = {}; calls = 0; hits = 0; out.innerHTML = ''; draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>

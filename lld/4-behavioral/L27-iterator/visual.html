@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L27 Iterator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .wall { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .stage .slot { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .stage .lnhl { fill: var(--accent-soft); }
+  .stage .cur-a { fill: var(--accent); }
+  .stage .cur-b { fill: var(--signal); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .filelinks { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L27 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Iterator: cursors over hidden storage</h1>
+    <p class="lede">The log keeps payments in private segments. Callers get a cursor that answers one question: "what is next?". A generator pauses at <code>yield</code> between calls. Below, an async generator hides cursor pagination and stops fetching when the caller breaks.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 480" role="img" aria-label="A segmented log with two iterator cursors, and an async generator over a paginated API"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Cursor A (for..of)</span>
+        <span><i style="background: var(--signal)"></i>Cursor B (from offset)</span>
+        <span><i style="background: var(--ok)"></i>Yielded / fetched</span>
+        <span><i style="background: var(--muted)"></i>Never touched</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Try it">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 240" role="img" aria-label="Interactive iterator cursors"></svg>
+      </div>
+      <div class="controls">
+        <button class="btn primary" type="button" id="try-a">A.next()</button>
+        <label>offset <input type="number" id="try-off" value="2" min="0" max="8" style="width: 4em"></label>
+        <button class="btn" type="button" id="try-newb">B = log.from(offset)</button>
+        <button class="btn" type="button" id="try-b">B.next()</button>
+        <button class="btn" type="button" id="try-append">log.append()</button>
+        <span class="grow"></span>
+        <button class="btn" type="button" id="try-reset">New log</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Drive two cursors yourself</h2>
+        <p>Call <code>next()</code> on each cursor. They move on their own. Append while a cursor is mid-way: a live generator sees the new item. Run a cursor past the end to get <code>{ done: true }</code>.</p>
+      </section>
+      <section class="log">
+        <h3>Iterator log</h3>
+        <ol id="try-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The topic stores messages in segments, but consumers shouldn't know that. The topic is iterable through a generator, and each consumer group keeps its own offset, like Kafka. For external data I wrap cursor pagination in an async generator: callers write <code>for await</code>, the next page is fetched only when needed, and on <code>break</code> the <code>finally</code> block closes the connection."</p>
+    </div>
+    <div class="note">
+      <h3>The code</h3>
+<pre class="code">class PaymentLog implements Iterable&lt;Payment&gt; {
+  private segments: Payment[][] = [[]];
+  *[Symbol.iterator]() {
+    for (const seg of this.segments) yield* seg;
+  }
+  *from(offset: number) {
+    let i = 0;
+    for (const p of this) if (i++ &gt;= offset) yield p;
+  }
+}
+
+async function* allPayments(api: Api) {
+  let cursor: string | undefined;
+  try {
+    do {
+      const page = await api.list({ cursor });
+      yield* page.items;
+      cursor = page.nextCursor;
+    } while (cursor);
+  } finally { /* close socket / DB cursor */ }
+}
+for await (const p of allPayments(api)) {
+  reconcile(p);
+  if (done) break;          // → return() → finally
+}</pre>
+    </div>
+    <div class="note wide">
+      <h3>Ways to walk a collection in TypeScript</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Expose the array</th><th>Hand-written iterator class</th><th>Generator <code>function*</code></th><th>Async generator</th></tr></thead>
+          <tbody>
+            <tr><td>Hides storage</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Lazy</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes, plus waits for I/O</td></tr>
+            <tr><td>Works with for..of / spread</td><td>Yes</td><td>Only if you add <code>[Symbol.iterator]</code></td><td>Yes</td><td><code>for await</code> only</td></tr>
+            <tr><td>Cleanup on break</td><td>n/a</td><td>Write <code>return()</code> yourself</td><td><code>finally</code></td><td><code>finally</code></td></tr>
+            <tr><td>Best for</td><td>Small, stable arrays</td><td>Rarely needed in TS</td><td>Trees, logs, offsets, pipelines</td><td>Pagination, streams, files, queues</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did cursor A not move when cursor B read?</summary><div>Each call to <code>[Symbol.iterator]()</code> or <code>from()</code> creates a new generator with its own paused position. The log is shared; the cursors are not.</div></details>
+      <details class="qa"><summary>Why was page 2 never fetched?</summary><div>The async generator is pull-based. The caller broke after pay_2, so <code>next()</code> was never called again. <code>break</code> called <code>return()</code>, which ran <code>finally</code>.</div></details>
+      <details class="qa"><summary>Crossing from segment 0 to segment 1: did the caller notice?</summary><div>No. <code>yield*</code> moved to the next segment inside the generator. The caller only sees the next value.</div></details>
+      <details class="qa"><summary>What does <code>next()</code> return after the last item?</summary><div><code>{ value: undefined, done: true }</code>, and it keeps returning that. The generator is used up.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/15-pub-sub-queue/README.md">Pub-Sub Queue</a> (offsets per consumer group)</li>
+        <li>Tree walks: <a href="../../problems/24-file-system/README.md">File System</a></li>
+        <li>Ordered walk: <a href="../../problems/02-lru-cache/README.md">LRU Cache</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="filelinks">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var MAX = 9;
+  function cellX(k) { return 30 + Math.floor(k / 3) * 142 + (k % 3) * 43; }
+  var CELL_Y = 50, CELL_W = 39, CELL_H = 30;
+  function cx(k) { return cellX(Math.min(k, MAX - 1)) + CELL_W / 2; }
+
+  function newModel(n) {
+    var items = [];
+    for (var i = 1; i <= n; i++) items.push('pay_' + i);
+    return { items: items, A: null, B: null, last: '' };
+  }
+
+  // ---------- the sync log (top) ----------
+  function buildTop(mk, root) {
+    var v = { cells: [], labels: [] };
+    mk('rect', { x: 14, y: 14, width: 446, height: 212, rx: 10, class: 'box' }, root);
+    mk('text', { x: 28, y: 36, class: 'b', text: 'PaymentLog' }, root);
+    mk('text', { x: 116, y: 36, class: 'mono small muted', text: 'private segments: Payment[][]' }, root);
+    for (var s = 0; s < 3; s++) mk('text', { x: 30 + s * 142, y: 96, class: 'mono small muted', text: 'segment ' + s }, root);
+    for (var k = 0; k < MAX; k++) {
+      v.cells.push(mk('rect', { x: cellX(k), y: CELL_Y, width: CELL_W, height: CELL_H, rx: 5, class: 'slot' }, root));
+      v.labels.push(mk('text', { x: cellX(k) + CELL_W / 2, y: CELL_Y + 19, 'text-anchor': 'middle', class: 'mono small', text: '' }, root));
+    }
+    function cursor(cls, name, y) {
+      var g = mk('g', { opacity: 0 }, root);
+      mk('path', { d: 'M0,0 L-7,12 L7,12 Z', class: cls }, g);
+      var t = mk('text', { x: 10, y: 12, class: 'mono small', text: name }, g);
+      g._y = y; g._label = t;
+      return g;
+    }
+    v.curA = cursor('cur-a', 'A', 112);
+    v.curB = cursor('cur-b', 'B', 132);
+    v.stA = mk('text', { x: 28, y: 172, class: 'mono small', text: '' }, root);
+    v.stB = mk('text', { x: 28, y: 192, class: 'mono small', text: '' }, root);
+    v.last = mk('text', { x: 28, y: 214, class: 'mono small', text: '' }, root);
+    mk('line', { x1: 474, y1: 14, x2: 474, y2: 226, class: 'wall' }, root);
+    mk('text', { x: 468, y: 237, 'text-anchor': 'end', class: 'mono small muted', text: 'private' }, root);
+    mk('text', { x: 480, y: 237, class: 'mono small muted', text: 'public' }, root);
+    mk('rect', { x: 490, y: 14, width: 256, height: 196, rx: 10, class: 'box' }, root);
+    mk('text', { x: 504, y: 36, class: 'b', text: 'Callers' }, root);
+    mk('text', { x: 504, y: 56, class: 'mono small fill-accent', text: 'A: for (p of log)' }, root);
+    mk('text', { x: 628, y: 56, class: 'mono small fill-signal', text: 'B: log.from(n)' }, root);
+    v.outA = []; v.outB = [];
+    for (var r = 0; r < 8; r++) {
+      v.outA.push(mk('text', { x: 504, y: 78 + r * 16, class: 'mono small', text: '' }, root));
+      v.outB.push(mk('text', { x: 628, y: 78 + r * 16, class: 'mono small', text: '' }, root));
+    }
+    return v;
+  }
+
+  function renderTop(v, m) {
+    for (var k = 0; k < MAX; k++) {
+      var has = k < m.items.length;
+      v.labels[k].textContent = has ? m.items[k].replace('pay_', 'p') : '';
+      var read = (m.A && k < m.A.pos) || (m.B && k >= m.B.start && k < m.B.pos);
+      v.cells[k].setAttribute('class', has ? 'box' + (read ? ' ok' : '') : 'slot');
+    }
+    [['A', v.curA, v.stA, v.outA], ['B', v.curB, v.stB, v.outB]].forEach(function (row) {
+      var c = m[row[0]], g = row[1];
+      if (!c) { g.setAttribute('opacity', 0); row[2].textContent = row[0] === 'A' ? 'A: (no iterator yet)' : 'B: (no iterator yet)'; }
+      else {
+        g.setAttribute('opacity', 1);
+        var done = c.finished;
+        g.setAttribute('transform', 'translate(' + cx(c.pos) + ',' + g._y + ')');
+        g._label.textContent = row[0] + (done ? ' done' : '');
+        row[2].textContent = row[0] + ': ' + (done ? 'finished, next() → { done: true }' : 'paused at yield, next index ' + c.pos + ' (segment ' + Math.floor(c.pos / 3) + ')');
+      }
+      for (var r = 0; r < row[3].length; r++) {
+        var list = c ? c.out : [];
+        var start = Math.max(0, list.length - row[3].length);
+        row[3][r].textContent = list[start + r] || '';
+      }
+    });
+    v.last.textContent = m.last;
+  }
+
+  // Pure step on a cursor. Returns { value, done }.
+  function step(m, key) {
+    var c = m[key];
+    if (c.finished || c.pos >= m.items.length) { c.finished = true; m.last = key + '.next() → { value: undefined, done: true }'; return { done: true }; }
+    var val = m.items[c.pos];
+    c.pos++;
+    c.out.push(val);
+    m.last = key + '.next() → { value: \'' + val + '\', done: false }';
+    return { value: val, done: false, idx: c.pos - 1 };
+  }
+
+  // ---------- the async pagination (bottom) ----------
+  var PAGES = [['pay_1', 'pay_2', 'pay_3'], ['pay_4', 'pay_5', 'pay_6'], ['pay_7']];
+  var GEN_LINES = ['const page = await api.list(cursor)', 'yield* page.items', 'cursor = page.nextCursor', 'finally { close() }'];
+  function buildBottom(mk, root) {
+    var b = { pages: [], lines: [] };
+    mk('text', { x: 14, y: 262, class: 'title', text: 'Async iterator over a paginated API' }, root);
+    mk('rect', { x: 14, y: 276, width: 210, height: 190, rx: 10, class: 'box' }, root);
+    mk('text', { x: 28, y: 298, class: 'b', text: 'Provider API' }, root);
+    b.calls = mk('text', { x: 210, y: 298, 'text-anchor': 'end', class: 'mono small muted', text: 'calls: 0' }, root);
+    PAGES.forEach(function (p, i) {
+      b.pages.push(mk('rect', { x: 28, y: 312 + i * 48, width: 182, height: 38, rx: 6, class: 'box' }, root));
+      mk('text', { x: 38, y: 335 + i * 48, class: 'mono small', text: 'page ' + (i + 1) + ': ' + p.join(' ') }, root);
+    });
+    mk('rect', { x: 250, y: 276, width: 260, height: 190, rx: 10, class: 'box' }, root);
+    mk('text', { x: 264, y: 298, class: 'b', text: 'async *allPayments()' }, root);
+    b.hl = mk('rect', { x: 256, y: 0, width: 248, height: 22, rx: 4, class: 'lnhl', opacity: 0 }, root);
+    GEN_LINES.forEach(function (l, i) { b.lines.push(mk('text', { x: 264, y: 330 + i * 30, class: 'mono small', text: l }, root)); });
+    b.buf = mk('text', { x: 264, y: 452, class: 'mono small muted', text: 'buffer: []' }, root);
+    mk('rect', { x: 536, y: 276, width: 210, height: 190, rx: 10, class: 'box' }, root);
+    mk('text', { x: 550, y: 298, class: 'b', text: 'for await (p of ...)' }, root);
+    b.out = [0, 1, 2, 3].map(function (i) { return mk('text', { x: 550, y: 326 + i * 22, class: 'mono small', text: '' }, root); });
+    b.note = mk('text', { x: 550, y: 452, class: 'mono small', text: '' }, root);
+    return b;
+  }
+  function genLine(b, i) {
+    b.hl.setAttribute('opacity', i === null ? 0 : 1);
+    if (i !== null) b.hl.setAttribute('y', 330 + i * 30 - 15);
+  }
+
+  // ---------- guided lab ----------
+  async function nextOn(ctx, key) {
+    var m = ctx.state.m, v = ctx.state.v;
+    var r = step(m, key);
+    if (r.done) {
+      renderTop(v, m);
+      ctx.flash(key === 'A' ? v.curA : v.curB);
+      ctx.log(m.last, 'warn');
+      return ctx.wait(300);
+    }
+    ctx.flash(v.cells[r.idx]);
+    var col = key === 'A' ? 504 : 628;
+    var row = Math.min(m[key].out.length - 1, 7);
+    var tmp = m[key].out.pop(); // hide until the packet lands
+    renderTop(v, m);
+    await ctx.packet([[cx(r.idx), CELL_Y + 15], [cx(r.idx), 150], [482, 150], [col + 20, 74 + row * 16]], { ms: 650, cls: key === 'A' ? 'accent' : '' });
+    m[key].out.push(tmp);
+    renderTop(v, m);
+    ctx.log(m.last, 'ok');
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Storage on the left, callers on the right',
+      say: 'Seven payments live in three private segments. Callers sit on the other side of the wall. They will only ever call <code>next()</code>.',
+    },
+    setup: function (ctx) {
+      var mk = function (t, a, p) { return ctx.el(t, a, p); };
+      ctx.state.m = newModel(7);
+      ctx.state.v = buildTop(mk, ctx.svg);
+      ctx.state.b = buildBottom(mk, ctx.svg);
+      renderTop(ctx.state.v, ctx.state.m);
+    },
+    steps: [
+      {
+        title: 'The layout is private',
+        say: 'Segments of 3 let the log drop old data cheaply. If callers looped over <code>log.segments[i][j]</code>, every one of them would break when this changes. So the segments stay behind the wall.',
+        run: async function (ctx) {
+          var v = ctx.state.v;
+          for (var k = 0; k < 7; k++) { ctx.flash(v.cells[k]); await ctx.wait(70); }
+          ctx.log('segments = [[p1,p2,p3],[p4,p5,p6],[p7]] (private)', 'info');
+        },
+      },
+      {
+        title: 'for..of asks for an iterator',
+        say: '<code>for (const p of log)</code> first calls <code>log[Symbol.iterator]()</code>. Our generator method returns a fresh cursor A, paused before the first item. Nothing has been read yet.',
+        run: async function (ctx) {
+          var m = ctx.state.m;
+          m.A = { pos: 0, start: 0, out: [], finished: false };
+          m.last = 'it = log[Symbol.iterator]()  // generator, suspended';
+          renderTop(ctx.state.v, m);
+          ctx.state.v.curA.setAttribute('opacity', 0);
+          await ctx.fade(ctx.state.v.curA, 1, 400);
+          ctx.log(m.last, 'info');
+        },
+      },
+      {
+        title: 'next(): run until the first yield',
+        say: 'The generator runs until <code>yield</code>, hands out <code>pay_1</code> and freezes right there, local variables and all. The caller gets <code>{ value, done: false }</code>.',
+        run: function (ctx) { return nextOn(ctx, 'A'); },
+      },
+      {
+        title: 'next(), next(): resume from the pause',
+        say: 'Each call resumes from the exact line where it stopped. No index is kept by the caller. The cursor is inside the generator.',
+        run: async function (ctx) { await nextOn(ctx, 'A'); await nextOn(ctx, 'A'); },
+      },
+      {
+        title: 'Crossing a segment: the caller cannot tell',
+        say: '<code>yield*</code> finishes segment 0 and moves into segment 1 inside the generator. The caller just gets <code>pay_4</code>. That is the whole point: storage changes, callers do not.',
+        run: async function (ctx) {
+          await nextOn(ctx, 'A');
+          ctx.log('  (inside: yield* moved from segment 0 to segment 1)', '');
+        },
+      },
+      {
+        title: 'A second cursor: log.from(4)',
+        say: 'A second consumer group starts at offset 4, like a Kafka consumer. It gets its own generator. Cursor A does not move when B reads.',
+        run: async function (ctx) {
+          var m = ctx.state.m;
+          m.B = { pos: 4, start: 4, out: [], finished: false };
+          renderTop(ctx.state.v, m);
+          ctx.state.v.curB.setAttribute('opacity', 0);
+          await ctx.fade(ctx.state.v.curB, 1, 300);
+          ctx.log('B = log.from(4)', 'info');
+          await nextOn(ctx, 'B');
+          await nextOn(ctx, 'B');
+          ctx.log('A is still at index ' + m.A.pos + ': cursors are independent', 'info');
+        },
+      },
+      {
+        title: 'Run A to the end: done: true',
+        say: 'A reads the rest. After <code>pay_7</code> the generator function returns, so the next call gives <code>{ done: true }</code> and <code>for..of</code> stops. This generator is now used up for good.',
+        run: async function (ctx) {
+          for (var i = 0; i < 3; i++) await nextOn(ctx, 'A');
+          await nextOn(ctx, 'A');
+        },
+      },
+      {
+        title: 'Async: the first next() fetches page 1',
+        say: 'Now data comes from a paginated API. <code>for await</code> calls <code>next()</code>, which returns a Promise. The async generator awaits page 1 only now, when someone asks.',
+        run: async function (ctx) {
+          var b = ctx.state.b;
+          genLine(b, 0);
+          await ctx.packet([[256, 330], [224, 330]], { ms: 400, cls: 'accent', label: 'GET ?cursor=' });
+          b.pages[0].setAttribute('class', 'box ok');
+          ctx.flash(b.pages[0]);
+          b.calls.textContent = 'calls: 1';
+          await ctx.packet([[210, 331], [256, 331]], { ms: 450, cls: 'ok' });
+          b.buf.textContent = 'buffer: [pay_1, pay_2, pay_3]';
+          ctx.log('await api.list(cursor=null) → page 1 (3 items), calls = 1', 'ok');
+        },
+      },
+      {
+        title: 'yield items, then the caller breaks',
+        say: 'The generator yields <code>pay_1</code>, <code>pay_2</code>. The loop finds what it needs and does <code>break</code>. That calls <code>return()</code> on the generator: <code>finally</code> runs and closes the connection. Pages 2 and 3 are never fetched.',
+        run: async function (ctx) {
+          var b = ctx.state.b;
+          var got = ['pay_1', 'pay_2'];
+          genLine(b, 1);
+          for (var i = 0; i < got.length; i++) {
+            await ctx.packet([[500, 360], [550, 322 + i * 22]], { ms: 400, cls: 'accent' });
+            b.out[i].textContent = 'reconcile ' + got[i];
+            b.buf.textContent = 'buffer: [' + ['pay_1', 'pay_2', 'pay_3'].slice(i + 1).join(', ') + ']';
+            ctx.log('yield ' + got[i] + ' → reconcile', 'ok');
+          }
+          b.out[2].textContent = 'break';
+          b.out[2].setAttribute('class', 'mono small fill-bad');
+          await ctx.packet([[550, 370], [500, 420]], { ms: 400, cls: 'bad', label: 'return()' });
+          genLine(b, 3);
+          ctx.flash(b.lines[3]);
+          b.pages[1].setAttribute('class', 'box dim');
+          b.pages[2].setAttribute('class', 'box dim');
+          b.note.textContent = 'API calls: 1, not 3';
+          b.note.setAttribute('class', 'mono small fill-ok');
+          ctx.log('break → return() → finally { close() }', 'warn');
+          ctx.log('pages 2 and 3 never fetched: pull-based = backpressure for free', 'info');
+        },
+      },
+    ],
+  });
+
+  // ---------- try-it panel ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('try-log');
+  var tm, tv;
+  function tlog(msg, kind) {
+    var li = document.createElement('li');
+    li.className = kind || '';
+    li.textContent = msg;
+    logList.appendChild(li);
+    logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  function fresh() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    tm = newModel(5);
+    tm.A = { pos: 0, start: 0, out: [], finished: false };
+    tv = buildTop(function (t, a, p) { return Kit.el(t, a, p); }, svg);
+    renderTop(tv, tm);
+    logList.innerHTML = '';
+    tlog('log has 5 payments. A = log[Symbol.iterator]()', 'info');
+  }
+  function next(key) {
+    if (!tm[key]) { tlog(key + ' does not exist yet. Create it first.', 'bad'); return; }
+    var r = step(tm, key);
+    renderTop(tv, tm);
+    tlog(tm.last, r.done ? 'warn' : 'ok');
+  }
+  document.getElementById('try-a').addEventListener('click', function () { next('A'); });
+  document.getElementById('try-b').addEventListener('click', function () { next('B'); });
+  document.getElementById('try-newb').addEventListener('click', function () {
+    var off = Math.max(0, Math.min(MAX - 1, parseInt(document.getElementById('try-off').value, 10) || 0));
+    tm.B = { pos: off, start: off, out: [], finished: false };
+    renderTop(tv, tm);
+    tlog('B = log.from(' + off + '): a new, independent generator', 'info');
+  });
+  document.getElementById('try-append').addEventListener('click', function () {
+    if (tm.items.length >= MAX) { tlog('demo log is full (9 slots)', 'bad'); return; }
+    tm.items.push('pay_' + (tm.items.length + 1));
+    renderTop(tv, tm);
+    tlog('append(' + tm.items[tm.items.length - 1] + ') into segment ' + Math.floor((tm.items.length - 1) / 3) + '. Live, unfinished cursors will see it; finished ones stay done.', 'info');
+  });
+  document.getElementById('try-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

@@ -89,7 +89,7 @@ Relationships: Broker ◆— Topic, Group. Group ◆— GroupConsumer. Broker �
 4. **A poison message** that always fails. Retry N times, then publish it to a dead-letter topic and commit past it.
 5. **Push instead of pull** (Observer): the broker calls `onMessage`. Why Kafka pulls: the consumer controls its own speed (backpressure) and can batch.
 6. **Rebalance cost.** Eager rebalancing stops all consumers. Sticky and cooperative assignors move as few partitions as possible.
-7. **Many brokers.** Each partition has a leader and replicas. See [Kafka deep dive](../../../hld/concepts/18-kafka-deep-dive.md).
+7. **Many brokers.** Each partition has a leader and replicas. See [Kafka deep dive](../../../hld/4-async/H21-kafka/README.md).
 
 ## Self-check before you call it done
 
@@ -101,6 +101,6 @@ Relationships: Broker ◆— Topic, Group. Group ◆— GroupConsumer. Broker �
 
 ## Concepts used
 
-- [Iterator](../../concepts/patterns/p16-iterator.md) · [Observer](../../concepts/patterns/p11-observer.md) · [Strategy](../../concepts/patterns/p10-strategy.md)
-- HLD link: [Message queues](../../../hld/concepts/17-message-queues.md) · [Kafka deep dive](../../../hld/concepts/18-kafka-deep-dive.md) · [Idempotency and delivery semantics](../../../hld/concepts/19-idempotency-delivery-semantics.md) · [Distributed Message Queue](../../../hld/problems/18-distributed-message-queue/)
-- Visuals: [Kafka partitions and consumer groups](../../../visuals/v10-kafka-consumer-groups.html) · [Delivery semantics](../../../visuals/v11-delivery-semantics.html) · [Observer and pub-sub](../../../visuals/v24-observer-pubsub.html)
+- [Iterator](../../4-behavioral/L27-iterator/README.md) · [Observer](../../4-behavioral/L21-observer/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md)
+- HLD link: [Message queues](../../../hld/4-async/H20-message-queues/README.md) · [Kafka deep dive](../../../hld/4-async/H21-kafka/README.md) · [Idempotency and delivery semantics](../../../hld/4-async/H22-delivery-semantics/README.md) · [Distributed Message Queue](../../../hld/case-studies/18-distributed-message-queue)
+- Visuals: [Kafka partitions and consumer groups](../../../hld/4-async/H21-kafka/visual.html) · [Delivery semantics](../../../hld/4-async/H22-delivery-semantics/visual.html) · [Observer and pub-sub](../../4-behavioral/L21-observer/visual.html)

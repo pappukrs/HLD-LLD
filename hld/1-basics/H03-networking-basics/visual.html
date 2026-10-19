@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H03 Networking basics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .life { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .msg { stroke-width: 1.8; fill: none; stroke: var(--accent); }
+  .stage .msg.dns { stroke: var(--muted); }
+  .stage .msg.tcp { stroke: var(--signal); }
+  .stage .msg.tls { stroke: var(--warn); }
+  .stage .msg.http { stroke: var(--ok); }
+  .stage .msg.bad { stroke: var(--bad); stroke-dasharray: 5 4; }
+  .stage .notebox { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+  .stage .notebox.bad { stroke: var(--bad); }
+  .stage .notebox.ok { stroke: var(--ok); }
+  .stage text.seg { fill: var(--surface); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; }
+  .try { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try input[type="range"] { width: 140px; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .try output { font: 600 13px var(--font-mono); color: var(--ink); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H03 · Basics</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Networking: DNS, TCP/UDP, HTTP, TLS</h1>
+    <p class="lede">Before your server does any work, a new HTTPS request pays for a DNS lookup, a TCP handshake and a TLS handshake. Count the round trips, watch keep-alive and a nearby edge remove them, then see why one lost packet hurts TCP, HTTP/2 and HTTP/3 differently.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 520" role="img" aria-label="Sequence diagram of DNS, TCP, TLS and HTTP between a browser, a resolver, DNS servers and a server, with latency bars"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <label for="rtt">Round trip to server</label>
+        <input id="rtt" type="range" min="10" max="250" step="10" value="150">
+        <output id="rtt-out">150 ms</output>
+        <label for="tls">TLS</label>
+        <select id="tls"><option value="1.3">1.3 (1 RTT)</option><option value="1.2">1.2 (2 RTT)</option></select>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--muted)"></i>DNS</span>
+        <span><i style="background: var(--signal)"></i>TCP</span>
+        <span><i style="background: var(--warn)"></i>TLS</span>
+        <span><i style="background: var(--ok)"></i>HTTP</span>
+        <span><i style="background: var(--bad)"></i>Lost / stale</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A new HTTPS request costs a DNS lookup, one round trip for TCP and one for TLS 1.3 before the request itself, so about three round trips. From Mumbai to us-east that's over half a second. So I terminate TLS at a CDN edge near the user, keep connections alive and pooled, use HTTP/2 or gRPC between services, and deploy in the user's region. HTTP/3 helps mobile users on lossy networks."</p>
+    </div>
+    <div class="note">
+      <h3>Numbers worth remembering</h3>
+      <ul>
+        <li>Same data centre RTT ~0.5 ms; cross-AZ ~1–2 ms</li>
+        <li>Mumbai ↔ Singapore ~60 ms; Mumbai ↔ us-east ~200+ ms</li>
+        <li>New HTTPS: TCP 1 RTT + TLS 1.3 1 RTT (TLS 1.2: 2) + request 1 RTT</li>
+        <li>QUIC/HTTP/3: 1 RTT to first request, 0 with resumption</li>
+        <li>Ethernet MTU 1,500 B; 1 Gbps = 125 MB/s</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Transport and HTTP versions</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>TCP</th><th>UDP</th><th>HTTP/1.1</th><th>HTTP/2</th><th>HTTP/3 (QUIC)</th></tr></thead>
+          <tbody>
+            <tr><td>Handshake</td><td>1 RTT</td><td>None</td><td>TCP + TLS</td><td>TCP + TLS</td><td>1 RTT combined (0-RTT resume)</td></tr>
+            <tr><td>Reliable, ordered</td><td>Yes</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes, per stream</td></tr>
+            <tr><td>Parallel requests</td><td>n/a</td><td>n/a</td><td>~6 connections per host</td><td>Many streams, one connection</td><td>Many independent streams</td></tr>
+            <tr><td>Head-of-line blocking</td><td>Yes</td><td>No</td><td>Per connection</td><td>Yes, at the TCP layer</td><td>Only the stream that lost data</td></tr>
+            <tr><td>Used by</td><td>APIs, DBs, Kafka</td><td>DNS, WebRTC media, games</td><td>Legacy, simple internal</td><td>Browsers, gRPC</td><td>Mobile, CDNs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why is the second request so much faster?</summary><div>DNS is cached and the TCP + TLS connection is reused (keep-alive). Only one round trip plus server time is left.</div></details>
+      <details class="qa"><summary>Why does a CDN edge speed up dynamic APIs too?</summary><div>The expensive handshakes happen over a short RTT to the edge. The edge reaches the origin over warm, pooled connections, so only the request itself crosses the long distance.</div></details>
+      <details class="qa"><summary>Why does HTTP/2 still have head-of-line blocking?</summary><div>Its streams share one TCP byte stream. A lost TCP segment holds back every later byte, so every stream waits for the retransmit. QUIC tracks loss per stream.</div></details>
+      <details class="qa"><summary>Why is DNS failover slow?</summary><div>Resolvers and clients cache the old record until its TTL expires, and some ignore low TTLs. Lower the TTL before a move, or use anycast / a global load balancer with a fixed IP.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../case-studies/06-chat-system/README.md">Chat system</a> (long-lived connections)</li>
+        <li><a href="../../case-studies/14-video-streaming/README.md">Video streaming</a> (CDN, UDP vs TCP)</li>
+        <li>Next: <a href="../H04-api-design/README.md">H04 API design</a>, <a href="../H05-realtime-communication/README.md">H05 Real-time</a></li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var RTT = 150, TLS = '1.3';
+  var DNS_MS = 60, SERVER_MS = 20, EDGE_RTT = 20;
+  var X = { B: 70, R: 210, D: 355, S: 640 };
+  var TOP = 82, ROW = 24;
+  var BAR_X = 150, BAR_W = 560;
+
+  function newConnMs() { return DNS_MS + RTT * (TLS === '1.3' ? 3 : 4) + SERVER_MS; }
+  function scale() { return BAR_W / (DNS_MS + 250 * 4 + SERVER_MS); }
+
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    [['dns', 'var(--muted)'], ['tcp', 'var(--signal)'], ['tls', 'var(--warn)'], ['http', 'var(--ok)'], ['bad', 'var(--bad)']].forEach(function (m) {
+      var mk = ctx.el('marker', { id: 'nw-' + m[0], viewBox: '0 0 12 12', refX: 11, refY: 6, markerWidth: 9, markerHeight: 9, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+      ctx.el('path', { d: 'M1,1 L11,6 L1,11 Z', style: 'fill: ' + m[1] }, mk);
+    });
+  }
+  function lane(ctx, k, label, sub) {
+    var x = X[k];
+    ctx.el('rect', { x: x - 58, y: 10, width: 116, height: 40, rx: 6, class: 'box' });
+    var t = ctx.el('text', { x: x, y: 27, 'text-anchor': 'middle', class: 'b', text: label });
+    var s = ctx.el('text', { x: x, y: 43, 'text-anchor': 'middle', class: 'mono small muted', text: sub });
+    ctx.el('line', { x1: x, y1: 50, x2: x, y2: 396, class: 'life' });
+    ctx.state.lanes[k] = { t: t, s: s };
+  }
+  function scene(ctx, labels) {
+    if (ctx.state.seq) ctx.state.seq.remove();
+    ctx.state.seq = ctx.group();
+    ctx.state.y = TOP;
+    if (labels) Object.keys(labels).forEach(function (k) { ctx.state.lanes[k].t.textContent = labels[k][0]; ctx.state.lanes[k].s.textContent = labels[k][1]; });
+  }
+  function msg(ctx, f, t, text, kind, o) {
+    o = o || {};
+    var y = ctx.state.y; ctx.state.y += ROW;
+    var x1 = X[f], x2 = o.toX || X[t], dir = x2 > x1 ? 1 : -1;
+    var line = ctx.el('line', { x1: x1, y1: y, x2: x2 - dir * 2, y2: y, class: 'msg ' + kind, 'marker-end': 'url(#nw-' + kind + ')', opacity: 0 }, ctx.state.seq);
+    ctx.el('text', { x: (x1 + x2) / 2, y: y - 5, 'text-anchor': 'middle', class: 'mono small' + (kind === 'bad' ? ' fill-bad' : ''), text: text }, ctx.state.seq);
+    return ctx.packet([[x1, y], [x2, y]], { ms: o.ms || 380, cls: kind === 'bad' ? 'bad' : kind === 'http' ? 'ok' : kind === 'tcp' ? '' : kind === 'tls' ? 'warn' : 'accent' }).then(function () {
+      line.setAttribute('opacity', 1);
+      if (o.log) ctx.log(o.log, o.kind || 'info');
+    });
+  }
+  function note(ctx, x, text, cls, sameRow) {
+    var y = ctx.state.y - 6; if (!sameRow) ctx.state.y += ROW;
+    var g = ctx.group({ opacity: 0 }, ctx.state.seq);
+    var w = text.length * 6.6 + 16;
+    ctx.el('rect', { x: x - w / 2, y: y - 10, width: w, height: 19, rx: 4, class: 'notebox ' + (cls || '') }, g);
+    ctx.el('text', { x: x, y: y + 4, 'text-anchor': 'middle', class: 'mono small' + (cls === 'bad' ? ' fill-bad' : cls === 'ok' ? ' fill-ok' : ''), text: text }, g);
+    return ctx.fade(g, 1, 250);
+  }
+  function seq(list) { return list.reduce(function (p, f) { return p.then(f); }, Promise.resolve()); }
+
+  function seg(ctx, row, ms, label, cls) {
+    var S = ctx.state;
+    var y = 418 + row * 34;
+    var x = S.barX[row];
+    var w = ms * scale();
+    S.barX[row] = x + w;
+    S.total[row] += ms;
+    var r = ctx.el('rect', { x: x, y: y, width: 0, height: 22, rx: 2, class: cls });
+    return ctx.animate(r, { width: Math.max(1, w - 1) }, 350).then(function () {
+      if (w >= 44 && label) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'seg', text: label });
+      S.totals[row].setAttribute('x', Math.min(S.barX[row] + 6, 712));
+      S.totals[row].textContent = S.total[row] + ' ms';
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: { title: 'GET https://api.shop.in/v1/orders', say: 'A user in Pune opens the app for the first time. Nothing is cached and no connection is open. Round trip to the server: <b>' + RTT + ' ms</b> (change it in Try it).' },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.lanes = {};
+      defs(ctx);
+      lane(ctx, 'B', 'Browser', 'Pune');
+      lane(ctx, 'R', 'Resolver', 'ISP / 8.8.8.8');
+      lane(ctx, 'D', 'DNS servers', 'root, .in, auth');
+      lane(ctx, 'S', 'Server', 'RTT ' + RTT + ' ms');
+      S.seq = ctx.group();
+      S.y = TOP;
+      S.barX = [BAR_X, BAR_X, BAR_X];
+      S.total = [0, 0, 0];
+      ctx.el('text', { x: 16, y: 408, class: 'mono small muted', text: 'time to first byte' });
+      ['new conn', 'reused conn', 'via CDN edge'].forEach(function (l, i) { ctx.el('text', { x: 16, y: 433 + i * 34, class: 'mono small', text: l }); });
+      ctx.el('line', { x1: BAR_X, y1: 412, x2: BAR_X, y2: 512, class: 'wire' });
+      S.totals = [0, 1, 2].map(function (i) { return ctx.el('text', { x: BAR_X + 6, y: 433 + i * 34, class: 'mono', text: '' }); });
+    },
+    steps: [
+      {
+        title: 'DNS: name → IP',
+        say: 'The browser asks a recursive resolver. On a miss, the resolver walks root → <code>.in</code> TLD → the authoritative server, then caches the A record for its TTL. DNS uses UDP: one small question, one small answer.',
+        run: function (ctx) {
+          return seq([
+            function () { return msg(ctx, 'B', 'R', 'A? api.shop.in (UDP)', 'dns'); },
+            function () { return msg(ctx, 'R', 'D', 'root → .in → ns1.shop.in', 'dns'); },
+            function () { return msg(ctx, 'D', 'R', 'A 13.2.4.5  TTL 300', 'dns'); },
+            function () { return msg(ctx, 'R', 'B', '13.2.4.5 (cached 300 s)', 'dns', { log: 'DNS: 13.2.4.5, ~' + DNS_MS + ' ms cold', kind: 'ok' }); },
+            function () { return seg(ctx, 0, DNS_MS, 'DNS', 'fill-muted'); },
+          ]);
+        },
+      },
+      {
+        title: 'TCP three-way handshake: 1 RTT',
+        say: 'SYN, SYN-ACK, ACK. The client can send data right after its ACK, so the handshake costs one full round trip before anything useful happens.',
+        run: function (ctx) {
+          return seq([
+            function () { return msg(ctx, 'B', 'S', 'SYN', 'tcp'); },
+            function () { return msg(ctx, 'S', 'B', 'SYN-ACK', 'tcp'); },
+            function () { return msg(ctx, 'B', 'S', 'ACK', 'tcp', { log: 'TCP connected after 1 RTT (' + RTT + ' ms)', kind: 'info' }); },
+            function () { return seg(ctx, 0, RTT, 'TCP', 'fill-signal'); },
+          ]);
+        },
+      },
+      {
+        title: 'TLS handshake: identity and keys',
+        say: 'The server sends its certificate; the browser checks it against trusted CAs, and both derive session keys (ECDHE). TLS 1.3 needs <b>1 RTT</b>; TLS 1.2 needs <b>2</b>.',
+        run: function (ctx) {
+          var rows = [
+            function () { return msg(ctx, 'B', 'S', 'ClientHello + key share', 'tls'); },
+            function () { return msg(ctx, 'S', 'B', 'ServerHello, cert, Finished', 'tls'); },
+          ];
+          if (TLS === '1.2') rows.push(
+            function () { return msg(ctx, 'B', 'S', 'KeyExchange, Finished', 'tls'); },
+            function () { return msg(ctx, 'S', 'B', 'Finished', 'tls'); });
+          rows.push(function () { ctx.log('TLS ' + TLS + ': ' + (TLS === '1.3' ? 1 : 2) + ' RTT, cert verified', 'info'); return seg(ctx, 0, RTT * (TLS === '1.3' ? 1 : 2), 'TLS ' + TLS, 'fill-warn'); });
+          return seq(rows);
+        },
+      },
+      {
+        title: 'HTTP request and response',
+        say: 'Now the real request travels: 1 more RTT plus ~20 ms of server work. Count it: DNS + TCP + TLS + request. Most of the time was setup and distance, not your code.',
+        run: function (ctx) {
+          return seq([
+            function () { return msg(ctx, 'B', 'S', 'GET /v1/orders', 'http'); },
+            function () { return note(ctx, X.S - 50, 'server work ' + SERVER_MS + ' ms', '', false); },
+            function () { return msg(ctx, 'S', 'B', '200 OK  {orders}', 'http'); },
+            function () { return seg(ctx, 0, RTT, 'request', 'fill-ok'); },
+            function () { return seg(ctx, 0, SERVER_MS, '', 'fill-accent'); },
+            function () { ctx.log('First byte after ' + newConnMs() + ' ms (only ' + SERVER_MS + ' ms was our server)', 'warn'); },
+          ]);
+        },
+      },
+      {
+        title: 'Second request: keep-alive reuses everything',
+        say: 'DNS is cached and the TCP + TLS connection is still open (keep-alive). Only one RTT plus server time is left. Connection pools to Postgres, Redis and other services work the same way.',
+        run: function (ctx) {
+          scene(ctx);
+          return seq([
+            function () { return note(ctx, X.R, 'DNS: cached (TTL left)', 'ok'); },
+            function () { return note(ctx, (X.B + X.S) / 2, 'TCP + TLS: reused (keep-alive)', 'ok'); },
+            function () { return msg(ctx, 'B', 'S', 'GET /v1/orders?page=2', 'http'); },
+            function () { return msg(ctx, 'S', 'B', '200 OK', 'http'); },
+            function () { return seg(ctx, 1, RTT, 'request', 'fill-ok'); },
+            function () { return seg(ctx, 1, SERVER_MS, '', 'fill-accent'); },
+            function () { ctx.log('Reused connection: ' + (RTT + SERVER_MS) + ' ms', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'A CDN edge near the user',
+        say: 'Put a CDN or regional edge 20 ms away. The handshakes run over the short hop; the edge reaches the origin over a warm pooled connection, so only the request crosses the long distance once.',
+        run: function (ctx) {
+          scene(ctx, { S: ['CDN edge', 'RTT ' + EDGE_RTT + ' ms'] });
+          return seq([
+            function () { return msg(ctx, 'B', 'S', 'SYN / SYN-ACK / ACK', 'tcp', { toX: X.S - 140 }); },
+            function () { return msg(ctx, 'B', 'S', 'TLS ' + TLS + ' with the edge', 'tls', { toX: X.S - 140 }); },
+            function () { return msg(ctx, 'B', 'S', 'GET /v1/orders', 'http', { toX: X.S - 140 }); },
+            function () { return note(ctx, X.S - 70, 'edge → origin: warm conn, 1 RTT', ''); },
+            function () { return seg(ctx, 2, DNS_MS, 'DNS', 'fill-muted'); },
+            function () { return seg(ctx, 2, EDGE_RTT * (TLS === '1.3' ? 2 : 3), '', 'fill-warn'); },
+            function () { return seg(ctx, 2, EDGE_RTT + RTT, 'request', 'fill-ok'); },
+            function () { return seg(ctx, 2, SERVER_MS, '', 'fill-accent'); },
+            function () { ctx.log('Via edge: ' + ctx.state.total[2] + ' ms vs ' + ctx.state.total[0] + ' ms direct', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'TCP vs UDP when a packet is lost',
+        say: 'TCP: segment 2 is lost, so segment 3 waits in the kernel until 2 is resent (ordered, reliable, but late). UDP: the video frame 2 is simply skipped and frame 3 plays now. For a live call, late is as bad as lost.',
+        run: function (ctx) {
+          scene(ctx, { S: ['Server', 'RTT ' + RTT + ' ms'] });
+          return seq([
+            function () { return note(ctx, 140, 'TCP (API call)', ''); },
+            function () { return msg(ctx, 'S', 'B', 'seg 1', 'tcp'); },
+            function () { return msg(ctx, 'S', 'B', 'seg 2  ✗ lost', 'bad', { toX: 360 }); },
+            function () { return msg(ctx, 'S', 'B', 'seg 3 (held: waiting for 2)', 'tcp'); },
+            function () { return msg(ctx, 'S', 'B', 'seg 2 retransmit (+1 RTT)', 'tcp', { log: 'TCP: seg 3 delayed until seg 2 is resent', kind: 'warn' }); },
+            function () { return note(ctx, 140, 'UDP (video call frames)', ''); },
+            function () { return msg(ctx, 'S', 'B', 'frame 1 → play', 'http'); },
+            function () { return msg(ctx, 'S', 'B', 'frame 2  ✗ lost', 'bad', { toX: 360 }); },
+            function () { return msg(ctx, 'S', 'B', 'frame 3 → play now (2 skipped)', 'http', { log: 'UDP: no wait, frame 2 skipped', kind: 'ok' }); },
+          ]);
+        },
+      },
+      {
+        title: 'HTTP/2 vs HTTP/3 on one lost packet',
+        say: 'HTTP/2 runs streams A, B, C over one TCP connection. One lost segment of B stalls A and C too. HTTP/3 (QUIC over UDP) tracks loss per stream, so only B waits.',
+        run: function (ctx) {
+          scene(ctx);
+          return seq([
+            function () { return note(ctx, 140, 'HTTP/2 over TCP', ''); },
+            function () { return msg(ctx, 'S', 'B', 'A1  B1(✗ lost)  C1', 'bad', { toX: 360 }); },
+            function () { return note(ctx, (X.B + X.S) / 2, 'A1, C1 arrived but held: one TCP byte stream', 'bad'); },
+            function () { return msg(ctx, 'S', 'B', 'B1 resent → A, B, C all delivered', 'tcp', { log: 'HTTP/2: every stream waited for B1', kind: 'warn' }); },
+            function () { return note(ctx, 140, 'HTTP/3 over QUIC', ''); },
+            function () { return msg(ctx, 'S', 'B', 'A1  B1(✗ lost)  C1', 'bad', { toX: 360 }); },
+            function () { return note(ctx, (X.B + X.S) / 2, 'A1, C1 delivered now; only B waits', 'ok'); },
+            function () { return msg(ctx, 'S', 'B', 'B1 resent → B delivered', 'http', { log: 'HTTP/3: only stream B waited', kind: 'ok' }); },
+          ]);
+        },
+      },
+      {
+        title: 'DNS TTL and failover',
+        say: 'You move the API to a new IP. Resolvers keep serving the cached old IP until the 300 s TTL runs out. Lower the TTL to 60 s a day before a move, or use anycast / a global LB with a fixed IP.',
+        run: function (ctx) {
+          scene(ctx, { S: ['Old server', '13.2.4.5 (down)'] });
+          return seq([
+            function () { return note(ctx, X.D, 'ops: A → 52.9.9.9', 'ok'); },
+            function () { return msg(ctx, 'B', 'R', 'A? api.shop.in', 'dns'); },
+            function () { return msg(ctx, 'R', 'B', '13.2.4.5 (cached, TTL 240 s left)', 'bad'); },
+            function () { return msg(ctx, 'B', 'S', 'SYN → old IP', 'bad', { log: 'Users still sent to the old IP until TTL expires', kind: 'bad' }); },
+            function () { return note(ctx, X.R, '… 240 s later: TTL expired', ''); },
+            function () { return msg(ctx, 'R', 'D', 'A? api.shop.in', 'dns'); },
+            function () { return msg(ctx, 'D', 'R', 'A 52.9.9.9  TTL 60', 'dns'); },
+            function () { return msg(ctx, 'R', 'B', '52.9.9.9', 'dns', { log: 'New IP served after the old TTL ran out', kind: 'ok' }); },
+          ]);
+        },
+      },
+    ],
+  });
+
+  var rtt = document.getElementById('rtt'), out = document.getElementById('rtt-out'), tls = document.getElementById('tls');
+  function apply() {
+    RTT = parseInt(rtt.value, 10);
+    TLS = tls.value;
+    out.textContent = RTT + ' ms';
+    var at = lab.current;
+    lab.goTo(at);
+  }
+  rtt.addEventListener('change', apply);
+  rtt.addEventListener('input', function () { out.textContent = rtt.value + ' ms'; });
+  tls.addEventListener('change', apply);
+})();
+</script>
+</body>
+</html>

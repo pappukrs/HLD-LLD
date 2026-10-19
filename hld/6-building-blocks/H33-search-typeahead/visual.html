@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H33 Search and typeahead</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .try label { font-size: 12px; color: var(--muted); }
+  .try input[type="text"] { font: 13px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 10em; max-width: 100%; }
+  .try .hint { font-size: 12px; color: var(--muted); flex-basis: 100%; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H33 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Search: inverted index and typeahead</h1>
+    <p class="lede">Left: documents are broken into terms, each term points to a sorted list of doc ids, and a query merges those lists. Right: a trie where every node already knows its top 3 completions, so each keystroke is a short walk.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Inverted index posting lists and a typeahead trie with cached top-k"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <label for="prefix-in">Try it: type a prefix</label>
+        <input type="text" id="prefix-in" maxlength="5" placeholder="e.g. car" autocomplete="off" spellcheck="false">
+        <span class="hint">Works at any step. The trie lights up the path and the panel shows the cached top 3. Trie words: car 90, cat 75, card 60, cart 40, cake 30, dog 50, door 20.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Indexed / cached</span>
+        <span><i style="background: var(--signal)"></i>Pointer / current node</span>
+        <span><i style="background: var(--ok)"></i>Match</span>
+        <span><i style="background: var(--bad)"></i>Not searchable yet</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Postgres is the source of truth; changes flow through the outbox and Kafka into Elasticsearch, about a second behind. Each term maps to a sorted posting list, an AND query is a merge of lists, and BM25 plus business boosts ranks the hits. For typeahead, a daily job builds a trie from query logs with the top 10 stored at every node, served from memory, with client debounce and CDN caching for short prefixes."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code">// AND = merge sorted posting lists
+while (i &lt; a.length &amp;&amp; j &lt; b.length) {
+  if (a[i] === b[j]) { out.push(a[i]); i++; j++; }
+  else if (a[i] &lt; b[j]) i++; else j++;
+}
+// typeahead = walk prefix, read cached list
+for (const ch of prefix) node = node.children.get(ch);
+return node.top;   // O(prefix + k)</pre>
+    </div>
+    <div class="note wide">
+      <h3>Which search tool?</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>B-tree LIKE 'abc%'</th><th>Postgres full-text (GIN)</th><th>Elasticsearch</th><th>Trie with top-k</th></tr></thead>
+          <tbody>
+            <tr><td>Matches</td><td>Prefix only</td><td>Words, stems</td><td>Words, stems, fuzzy, facets</td><td>Prefixes of past queries</td></tr>
+            <tr><td>Ranking</td><td>None</td><td>Basic (ts_rank)</td><td>BM25 + boosts + LTR</td><td>Count / recency</td></tr>
+            <tr><td>Freshness</td><td>Instant (same DB)</td><td>Instant</td><td>~1 s refresh, synced by CDC</td><td>Rebuilt hourly or daily</td></tr>
+            <tr><td>Use for</td><td>Small tables</td><td>Medium data, one less system</td><td>Product, log, content search</td><td>Search-box suggestions</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why must index time and query time use the same analyser?</summary><div>The index stores "run". If the query is not stemmed, "running" looks for a term that does not exist and nothing matches.</div></details>
+      <details class="qa"><summary>Why are posting lists kept sorted by doc id?</summary><div>So AND is a linear two-pointer merge that never goes back, and lists compress well (store gaps between ids).</div></details>
+      <details class="qa"><summary>A doc was written 200 ms ago and is not in results. Why?</summary><div>It is in the in-memory buffer. It becomes searchable at the next refresh, by default every 1 second.</div></details>
+      <details class="qa"><summary>What does caching top-k in each trie node cost?</summary><div>Memory (k entries per node) and slower updates, because every node on the path must be re-ranked. That is fine because the trie is rebuilt offline.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>ES refresh: 1 s by default (near-real-time)</li>
+        <li>Shards: about 10 to 50 GB each</li>
+        <li>Deep paging limit: 10,000 hits; use search_after</li>
+        <li>Typeahead: ~100 ms keystroke to screen, 100 to 200 ms debounce</li>
+        <li>BM25 defaults: k1 = 1.2, b = 0.75</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+    <a href="lab-trie/README.md">lab-trie (build it)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var TERMS = ['red', 'run', 'shoe', 'blue', 'jacket', 'sale'];
+  var ROW0 = 168, ROWH = 26, CHIP0 = 96, CHIPW = 44;
+  var QUERIES = { car: 90, cat: 75, card: 60, cart: 40, cake: 30, dog: 50, door: 20 };
+  var POS = {
+    '': [565, 62], c: [480, 110], d: [660, 110], ca: [480, 160], do: [660, 160],
+    car: [420, 210], cat: [490, 210], cak: [555, 210], dog: [625, 210], doo: [700, 210],
+    card: [390, 260], cart: [450, 260], cake: [555, 260], door: [700, 260],
+  };
+
+  function topK(prefix) {
+    return Object.keys(QUERIES).filter(function (q) { return q.indexOf(prefix) === 0; })
+      .sort(function (a, b) { return QUERIES[b] - QUERIES[a] || (a < b ? -1 : 1); }).slice(0, 3);
+  }
+  function rowY(term) { return ROW0 + TERMS.indexOf(term) * ROWH; }
+  function chipX(i) { return CHIP0 + i * CHIPW; }
+  function banner(ctx, text, kind) {
+    ctx.state.banner.textContent = text;
+    ctx.state.banner.setAttribute('class', 'title' + (kind ? ' fill-' + kind : ''));
+  }
+
+  function addChip(ctx, term, doc, cls) {
+    var s = ctx.state, list = s.post[term];
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: 0, y: -10, width: 38, height: 20, rx: 4, class: 'box ' + (cls || 'accent') }, g);
+    ctx.el('text', { x: 19, y: 4, 'text-anchor': 'middle', class: 'mono small', text: 'd' + doc }, g);
+    ctx.place(g, chipX(list.length), rowY(term));
+    list.push({ doc: doc, g: g, r: r });
+    return g;
+  }
+
+  function indexDoc(ctx, doc, terms, fromY) {
+    var chain = Promise.resolve();
+    terms.forEach(function (t) {
+      chain = chain.then(function () {
+        var x = chipX(ctx.state.post[t].length) + 19;
+        return ctx.packet([[200, fromY], [x, rowY(t)]], { ms: 450, cls: 'accent', r: 5 });
+      }).then(function () { addChip(ctx, t, doc); });
+    });
+    return chain;
+  }
+
+  function trieNode(ctx, key) {
+    return ctx.state.nodes[key];
+  }
+  function clearTrie(ctx) {
+    Object.keys(ctx.state.nodes).forEach(function (k) {
+      var n = ctx.state.nodes[k];
+      n.c.setAttribute('class', 'box' + (QUERIES[k] ? ' ok' : '') + (ctx.state.built ? '' : ' dim'));
+    });
+  }
+  function showPanel(ctx, prefix, list) {
+    ctx.state.panelTitle.textContent = 'node "' + prefix + '" top-3:';
+    ctx.state.panelList.textContent = list.length ? list.map(function (q) { return q + ' ' + QUERIES[q]; }).join(' · ') : '(no completions)';
+  }
+  function walk(ctx, prefix, animate) {
+    clearTrie(ctx);
+    var keys = [''];
+    for (var i = 1; i <= prefix.length; i++) keys.push(prefix.slice(0, i));
+    var known = keys.filter(function (k) { return POS[k]; });
+    var chain = Promise.resolve();
+    known.forEach(function (k, idx) {
+      chain = chain.then(function () {
+        if (animate && idx > 0) return ctx.packet([POS[known[idx - 1]], POS[k]], { ms: 350, r: 5 });
+      }).then(function () {
+        var n = trieNode(ctx, k);
+        n.c.setAttribute('class', 'box hl');
+        ctx.flash(n.c);
+      });
+    });
+    return chain.then(function () {
+      var found = known.length === keys.length;
+      var list = found ? topK(prefix) : [];
+      showPanel(ctx, prefix, list);
+      return { found: found, list: list, visited: known.length - 1 };
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three products, one search box',
+      say: 'On the left we build an inverted index for three product titles and answer a query. On the right is the typeahead trie built offline from query logs.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      s.post = {}; s.nodes = {}; s.built = false;
+      ctx.el('text', { x: 16, y: 22, class: 'title', text: 'Inverted index' });
+      ctx.el('line', { x1: 368, y1: 10, x2: 368, y2: 420, class: 'wire dashed' });
+      s.docs = [
+        ctx.el('text', { x: 16, y: 48, class: 'mono', text: 'd1: "Red Running Shoes"' }),
+        ctx.el('text', { x: 16, y: 66, class: 'mono', text: 'd2: "Blue Running Jacket"' }),
+        ctx.el('text', { x: 16, y: 84, class: 'mono', text: 'd3: "Red Jacket"' }),
+      ];
+      s.pipe = ctx.el('text', { x: 16, y: 112, class: 'mono small muted', text: 'analyse: tokenize > lowercase > stem' });
+      s.tokens = ctx.el('text', { x: 16, y: 132, class: 'mono small', text: '' });
+      ctx.el('text', { x: 16, y: 152, class: 'mono small muted', text: 'term     posting list (sorted ids)' });
+      TERMS.forEach(function (t) {
+        s.post[t] = [];
+        ctx.el('text', { x: 16, y: rowY(t) + 4, class: 'mono', text: t });
+        ctx.el('line', { x1: 90, y1: rowY(t) + 13, x2: 350, y2: rowY(t) + 13, class: 'wire', opacity: 0.4 });
+      });
+      s.query = ctx.el('text', { x: 16, y: 344, class: 'mono', text: '' });
+      s.result = ctx.el('text', { x: 16, y: 364, class: 'mono small', text: '' });
+      s.rank = ctx.el('text', { x: 16, y: 384, class: 'mono small', text: '' });
+      s.rank2 = ctx.el('text', { x: 16, y: 402, class: 'mono small muted', text: '' });
+      s.ptrA = ctx.group({ opacity: 0 }); ctx.el('path', { d: 'M0 0 L-6 9 L6 9 Z', class: 'fill-signal' }, s.ptrA);
+      s.ptrB = ctx.group({ opacity: 0 }); ctx.el('path', { d: 'M0 0 L-6 9 L6 9 Z', class: 'fill-signal' }, s.ptrB);
+
+      // trie
+      ctx.el('text', { x: 384, y: 22, class: 'title', text: 'Typeahead trie (top-3 per node)' });
+      Object.keys(POS).forEach(function (k) {
+        if (k === '') return;
+        var p = POS[k.slice(0, -1)], c = POS[k];
+        ctx.el('line', { x1: p[0], y1: p[1], x2: c[0], y2: c[1], class: 'wire' });
+      });
+      Object.keys(POS).forEach(function (k) {
+        var g = ctx.group();
+        var c = ctx.el('circle', { cx: POS[k][0], cy: POS[k][1], r: 14, class: 'box dim' + (QUERIES[k] ? ' ok' : '') }, g);
+        ctx.el('text', { x: POS[k][0], y: POS[k][1] + 4, 'text-anchor': 'middle', class: 'mono', text: k === '' ? '·' : k.slice(-1) }, g);
+        s.nodes[k] = { g: g, c: c };
+      });
+      ctx.el('rect', { x: 384, y: 290, width: 360, height: 46, rx: 8, class: 'box' });
+      s.panelTitle = ctx.el('text', { x: 396, y: 308, class: 'mono small muted', text: 'trie not built yet' });
+      s.panelList = ctx.el('text', { x: 396, y: 326, class: 'mono', text: '' });
+      // serving chain
+      s.serve = [['Browser cache', 384], ['CDN edge', 508], ['Suggest svc', 632]].map(function (b) {
+        var r = ctx.el('rect', { x: b[1], y: 356, width: 112, height: 40, rx: 8, class: 'box dim' });
+        var t = ctx.el('text', { x: b[1] + 56, y: 381, 'text-anchor': 'middle', class: 'small', text: b[0] });
+        return { r: r, t: t, x: b[1] };
+      });
+      s.banner = ctx.el('text', { x: 380, y: 444, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'Analyse and index d1',
+        say: '"Red Running Shoes" becomes the terms <code>red, run, shoe</code>. Each term gets d1 appended to its posting list. The index maps word to docs, like the index at the back of a book.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.docs[0].setAttribute('class', 'mono fill-accent');
+          s.tokens.textContent = 'd1 -> [red] [run] [shoe]';
+          ctx.log('analyse d1: Red Running Shoes -> red, run, shoe', 'info');
+          return indexDoc(ctx, 1, ['red', 'run', 'shoe'], 48);
+        },
+      },
+      {
+        title: 'Index d2 and d3',
+        say: 'Ids arrive in order, so every posting list stays sorted. "red" now points to d1 and d3; "jacket" to d2 and d3.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.docs[1].setAttribute('class', 'mono fill-accent');
+          s.tokens.textContent = 'd2 -> [blue] [run] [jacket]';
+          return indexDoc(ctx, 2, ['blue', 'run', 'jacket'], 66).then(function () {
+            s.docs[2].setAttribute('class', 'mono fill-accent');
+            s.tokens.textContent = 'd3 -> [red] [jacket]';
+            return indexDoc(ctx, 3, ['red', 'jacket'], 84);
+          }).then(function () { ctx.log('posting lists: red=[1,3] run=[1,2] jacket=[2,3]'); });
+        },
+      },
+      {
+        title: 'Query "Red jackets": same analyser',
+        say: 'The query goes through the same pipeline: "Red jackets" becomes <code>red, jacket</code>. We fetch only those two posting lists. No table scan.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.query.textContent = 'q: "Red jackets" -> red AND jacket';
+          s.post.red.concat(s.post.jacket).forEach(function (c) { c.r.setAttribute('class', 'box signal'); ctx.flash(c.r); });
+          ctx.log('query analysed -> red, jacket', 'info');
+          return ctx.wait(400);
+        },
+      },
+      {
+        title: 'Merge the lists with two pointers',
+        say: 'Compare d1 vs d2: d1 is smaller, move the red pointer. d3 vs d2: move the jacket pointer. d3 vs d3: a match. Cost is O(a + b), and the pointers never go back.',
+        run: function (ctx) {
+          var s = ctx.state, yA = rowY('red') + 12, yB = rowY('jacket') + 12;
+          ctx.place(s.ptrA, chipX(0) + 19, yA); ctx.place(s.ptrB, chipX(0) + 19, yB);
+          s.ptrA.setAttribute('opacity', 1); s.ptrB.setAttribute('opacity', 1);
+          ctx.log('d1 vs d2 -> advance red');
+          return ctx.wait(500).then(function () {
+            return ctx.move(s.ptrA, chipX(1) + 19, yA, 450);
+          }).then(function () {
+            ctx.log('d3 vs d2 -> advance jacket');
+            return ctx.move(s.ptrB, chipX(1) + 19, yB, 450);
+          }).then(function () {
+            s.post.red[1].r.setAttribute('class', 'box ok');
+            s.post.jacket[1].r.setAttribute('class', 'box ok');
+            ctx.flash(s.post.red[1].r); ctx.flash(s.post.jacket[1].r);
+            s.result.textContent = 'AND -> [d3]  (3 comparisons)';
+            s.result.setAttribute('class', 'mono small fill-ok');
+            ctx.log('d3 vs d3 -> match', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Rank with BM25',
+        say: 'For an OR query, d1 and d2 also match one term each. BM25 scores each doc: rare terms weigh more (IDF), repeats saturate, long docs are normalised. Then business boosts like rating and stock.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.ptrA.setAttribute('opacity', 0); s.ptrB.setAttribute('opacity', 0);
+          s.rank.textContent = 'OR ranked: d3 1.9 > d1 0.8 ~ d2 0.8';
+          s.rank.setAttribute('class', 'mono small fill-accent');
+          s.rank2.textContent = 'score = sum IDF(t) * saturated tf / length norm';
+          ctx.log('BM25: d3 (2 terms) above d1, d2 (1 term each)', 'info');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Near-real-time: refresh after ~1 s',
+        say: 'A new product d4 "Red Shoes Sale" arrives from the DB through CDC. It first sits in an in-memory buffer and is <b>not searchable</b>. The next refresh (default every 1 s) writes a segment and it appears.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.tokens.textContent = 'd4 "Red Shoes Sale" (via CDC) -> buffer';
+          s.tokens.setAttribute('class', 'mono small fill-bad');
+          var pend = ['red', 'shoe', 'sale'].map(function (t) { return addChip(ctx, t, 4, 'bad'); });
+          pend.forEach(function (g) { g.setAttribute('opacity', 0.45); });
+          ctx.log('d4 indexed into buffer: not visible to search', 'bad');
+          return ctx.wait(700).then(function () {
+            pend.forEach(function (g) { g.setAttribute('opacity', 1); g.firstChild.setAttribute('class', 'box accent'); ctx.flash(g.firstChild); });
+            s.tokens.textContent = 'refresh -> new segment, d4 searchable';
+            s.tokens.setAttribute('class', 'mono small fill-ok');
+            ctx.log('refresh (1 s): d4 now searchable', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Typeahead: build the trie offline',
+        say: 'A daily job counts last week\'s queries and builds a trie. Every node stores its top 3 completions. Green rings are nodes where a full query ends.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.built = true;
+          var keys = Object.keys(POS);
+          return keys.reduce(function (p, k, i) {
+            return p.then(function () {
+              s.nodes[k].c.setAttribute('class', 'box' + (QUERIES[k] ? ' ok' : ''));
+              return ctx.wait(60);
+            });
+          }, Promise.resolve()).then(function () {
+            s.panelTitle.textContent = 'node "" top-3:';
+            s.panelList.textContent = topK('').map(function (q) { return q + ' ' + QUERIES[q]; }).join(' · ');
+            ctx.log('trie built from logs: 7 queries, top-3 cached at each of 14 nodes', 'info');
+          });
+        },
+      },
+      {
+        title: 'User types "c"',
+        say: 'One step down from the root. The node "c" already holds <code>car, cat, card</code>. We return that list. No walk over the subtree.',
+        run: function (ctx) {
+          return walk(ctx, 'c', true).then(function (r) { ctx.log('"c" -> ' + r.list.join(', ') + ' (1 node visited)', 'ok'); });
+        },
+      },
+      {
+        title: 'User types "car"',
+        say: 'Three steps: c, a, r. The node "car" holds <code>car, card, cart</code>. Cost is O(prefix length + k), whatever the trie size.',
+        run: function (ctx) {
+          return walk(ctx, 'car', true).then(function (r) { ctx.log('"car" -> ' + r.list.join(', ') + ' (3 nodes visited)', 'ok'); });
+        },
+      },
+      {
+        title: 'Most keystrokes never reach the server',
+        say: 'The client debounces for about 150 ms and caches each prefix. The CDN caches popular 1 to 2 letter prefixes. Only misses reach the suggestion service, which answers from RAM in a few ms.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.serve.forEach(function (b) { b.r.setAttribute('class', 'box'); });
+          return ctx.packet([[440, 420], [440, 396]], { ms: 300 }).then(function () {
+            s.serve[0].r.setAttribute('class', 'box ok'); ctx.flash(s.serve[0].r);
+            ctx.log('"ca" again -> browser cache hit', 'ok');
+            return ctx.packet([[440, 376], [508, 376], [564, 376]], { ms: 450 });
+          }).then(function () {
+            s.serve[1].r.setAttribute('class', 'box ok');
+            ctx.log('"s" -> CDN hit (popular short prefix)', 'ok');
+            return ctx.packet([[564, 376], [632, 376], [688, 376]], { ms: 450, cls: 'accent' });
+          }).then(function () {
+            s.serve[2].r.setAttribute('class', 'box accent');
+            banner(ctx, 'Search: DB is truth, index is a rebuildable copy', 'ok');
+            ctx.log('"cart" -> suggest service, trie in RAM, ~2 ms', 'info');
+          });
+        },
+      },
+    ],
+  });
+
+  var input = document.getElementById('prefix-in');
+  input.addEventListener('input', function () {
+    var p = (input.value || '').trim().toLowerCase();
+    if (!lab.ctx.state.nodes) return;
+    if (!p) { clearTrie(lab.ctx); return; }
+    walk(lab.ctx, p, false).then(function (r) {
+      lab.ctx.log('try "' + p + '" -> ' + (r.found ? (r.list.join(', ') || 'none') : 'no such prefix'), r.found ? 'ok' : 'warn');
+    });
+  });
+})();
+</script>
+</body>
+</html>

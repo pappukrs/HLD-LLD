@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L03 Composition over inheritance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+
+  .stage .slot { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .try label { font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  .bars { margin-top: 10px; display: grid; gap: 6px; }
+  .bar { height: 18px; border-radius: 4px; min-width: 4px; transition: width .25s; }
+  .bar.inh { background: var(--bad); } .bar.comp { background: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L03 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Composition over inheritance</h1>
+    <p class="lede">A notifier needs channels (email, SMS, push) and optional features (retry, logging). First we build it with subclasses and watch the classes multiply. Then we give one object parts it can hold, combine and swap at runtime.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Inheritance tree growing versus a notifier composed of parts"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Concrete class / part</span>
+        <span><i style="background: var(--accent)"></i>Object with slots</span>
+        <span><i style="background: var(--bad)"></i>Duplicate / broken</span>
+        <span><i style="background: var(--ok)"></i>Works</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">// inheritance: one class per combination</span><span class="ln" data-l="1">class EmailWithRetryAndLogging extends EmailWithRetry { ... }</span><span class="ln" data-l="2">// composition: parts plugged in</span><span class="ln" data-l="3">interface Channel { send(to: string, msg: string): Promise&lt;void&gt;; }</span><span class="ln" data-l="4">interface SendPolicy { wrap(next: SendFn): SendFn; }</span><span class="ln" data-l="5">class Notifier {</span><span class="ln" data-l="6">  constructor(private channel: Channel, private policies: SendPolicy[] = []) {}</span><span class="ln" data-l="7">  setChannel(c: Channel) { this.channel = c; }    // swap at runtime</span><span class="ln" data-l="8">  send(to: string, msg: string) {</span><span class="ln" data-l="9">    const fn = this.policies.reduceRight((next, p) =&gt; p.wrap(next),</span><span class="ln" data-l="10">                (t, m) =&gt; this.channel.send(t, m));</span><span class="ln" data-l="11">    return fn(to, msg); }</span><span class="ln" data-l="12">}</span><span class="ln" data-l="13">const n = new Notifier(new EmailChannel(), [new Logging(), new Retry(3)]);</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: count the classes</h3>
+      <p>Move the sliders. Inheritance needs one class per combination; composition needs one class per part.</p>
+      <div class="try">
+        <label>Channels <input id="t-ch" type="range" min="1" max="6" value="3"> <b id="t-ch-v">3</b></label>
+        <label>Optional features <input id="t-f" type="range" min="0" max="5" value="3"> <b id="t-f-v">3</b></label>
+      </div>
+      <div class="try-out" id="try-out"></div>
+      <div class="bars"><div class="bar inh" id="bar-inh"></div><div class="bar comp" id="bar-comp"></div></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Notifications vary on two axes: the channel, and extra behaviour like retry and logging. Inheritance would give channels times feature combinations, so I make each axis an interface. The notifier holds one channel and a list of policies, so retry is written once, and I can switch a user to SMS at runtime. I keep <code>extends</code> for real, shallow IS-A relations."</p>
+    </div>
+    <div class="note wide">
+      <h3>Inheritance vs composition</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Inheritance</th><th>Composition</th></tr></thead>
+          <tbody>
+            <tr><td>Relation</td><td>IS-A, fixed when the object is created</td><td>HAS-A, chosen and changed at runtime</td></tr>
+            <tr><td>Classes for C channels, F features</td><td>C × 2^F</td><td>C + F + 1</td></tr>
+            <tr><td>Reuse a feature across types</td><td>No (one parent only): copy it</td><td>Yes: any class can hold a <code>RetryPolicy</code></td></tr>
+            <tr><td>Coupling</td><td>Child sees parent internals (fragile base class)</td><td>Only the part's public interface</td></tr>
+            <tr><td>Testing</td><td>Drags the whole parent in</td><td>Pass a fake part</td></tr>
+            <tr><td>Still right for</td><td>Custom errors, a shallow stable base, Template Method</td><td>Anything that varies independently</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did <code>CountingMap</code> report 0 writes after 2 entries?</summary><div>The <code>Map</code> constructor called <code>this.set()</code> before the child's field <code>writes = 0</code> was initialised, so the field reset the count afterwards. The child depended on a parent detail it could not see.</div></details>
+      <details class="qa"><summary>What is an "axis of change"?</summary><div>A thing that varies independently of the rest, like the channel, or the set of extra features. Each axis becomes its own interface and its own field.</div></details>
+      <details class="qa"><summary>Which patterns are just composition?</summary><div>Strategy, Decorator, State, Bridge, Composite. Each keeps another object in a field and delegates to it.</div></details>
+      <details class="qa"><summary>Is <code>extends</code> now banned?</summary><div>No. "Prefer" composition. A true subtype with a shallow, stable parent is fine: <code>class NotFoundError extends Error</code>.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+
+
+  // ---------- scenes ----------
+  function counter(ctx, g, label) {
+    ctx.el('rect', { x: 600, y: 40, width: 140, height: 56, rx: 8, class: 'box' }, g);
+    T(ctx, g, 670, 60, label, 'mono small muted', 'middle');
+    return T(ctx, g, 670, 86, '3', 'title', 'middle');
+  }
+
+  function sceneTree(ctx, g) {
+    T(ctx, g, 20, 28, 'Inheritance: a class for every combination', 'title');
+    var base = cls(ctx, g, 230, 50, 180, 'Notifier', ['send(to, msg)'], { cls: 'signal' });
+    var e = cls(ctx, g, 60, 150, 180, 'EmailNotifier', ['SMTP'], { cls: 'signal' });
+    var s = cls(ctx, g, 400, 150, 180, 'SmsNotifier', ['SMS API'], { cls: 'signal' });
+    arrow(ctx, g, 'M150,150 V125 H320 V' + base.b.bottom, 'inh');
+    arrow(ctx, g, 'M490,150 V125 H320 V' + base.b.bottom, 'inh');
+    var lvl2 = ctx.group({ opacity: 0 }, g);
+    var er = cls(ctx, lvl2, 60, 250, 180, 'EmailWithRetry', [{ t: 'retry loop', cls: 'fill-bad' }], { cls: 'bad' });
+    var sr = cls(ctx, lvl2, 400, 250, 180, 'SmsWithRetry', [{ t: 'retry loop (copy)', cls: 'fill-bad' }], { cls: 'bad' });
+    arrow(ctx, lvl2, 'M150,250 V' + e.b.bottom, 'inh');
+    arrow(ctx, lvl2, 'M490,250 V' + s.b.bottom, 'inh');
+    ctx.el('path', { d: 'M240,282 H400', class: 'uml red', 'stroke-dasharray': '4 4' }, lvl2);
+    T(ctx, lvl2, 320, 274, 'same code twice', 'mono small fill-bad', 'middle');
+    var lvl3 = ctx.group({ opacity: 0 }, g);
+    cls(ctx, lvl3, 20, 350, 260, 'EmailWithRetryAndLogging', [], { cls: 'bad' });
+    cls(ctx, lvl3, 360, 350, 260, 'SmsWithRetryAndLogging', [], { cls: 'bad' });
+    arrow(ctx, lvl3, 'M150,350 V' + er.b.bottom, 'inh');
+    arrow(ctx, lvl3, 'M490,350 V' + sr.b.bottom, 'inh');
+    var count = counter(ctx, g, 'classes');
+    ctx.state.tree = { lvl2: lvl2, lvl3: lvl3, count: count };
+  }
+
+  var COMBOS = ['plain', 'R', 'L', 'R+L', 'T', 'R+T', 'L+T', 'R+L+T'];
+  function sceneGrid(ctx, g) {
+    T(ctx, g, 20, 28, '3 channels × 2^3 feature combos', 'title');
+    T(ctx, g, 20, 50, 'R = retry, L = logging, T = rate limit', 'mono small muted');
+    ['Email', 'SMS', 'Push'].forEach(function (c, i) { T(ctx, g, 150 + i * 150, 78, c, 'b', 'middle'); });
+    var tiles = [];
+    COMBOS.forEach(function (k, r) {
+      T(ctx, g, 20, 106 + r * 38, k, 'mono small muted');
+      for (var c = 0; c < 3; c++) {
+        var tg = ctx.group({ opacity: 0 }, g);
+        ctx.el('rect', { x: 90 + c * 150, y: 90 + r * 38, width: 120, height: 28, rx: 5, class: 'box bad' }, tg);
+        T(ctx, tg, 150 + c * 150, 108 + r * 38, ['Email', 'Sms', 'Push'][c] + (r ? '+' + k : ''), 'mono small', 'middle');
+        tiles.push(tg);
+      }
+    });
+    var count = counter(ctx, g, 'classes');
+    count.textContent = '0';
+    ctx.state.grid = { tiles: tiles, count: count };
+  }
+
+  function sceneFrozen(ctx, g) {
+    T(ctx, g, 20, 28, 'An object cannot change its class', 'title');
+    var obj = cls(ctx, g, 260, 120, 260, 'notifier: EmailWithRetry', ['created at signup'], { cls: 'signal' });
+    var req = cls(ctx, g, 20, 300, 220, 'user settings', ['channel = SMS'], {});
+    ctx.state.frozen = { obj: obj, req: req, g: g };
+  }
+
+  function sceneFragile(ctx, g) {
+    T(ctx, g, 20, 28, 'Fragile base class: the parent calls you early', 'title');
+    var map = cls(ctx, g, 40, 60, 340, 'Map  (built-in parent)', ['constructor(entries) {', '  for (const [k, v] of entries) this.set(k, v);', '}'], { cls: 'signal' });
+    var child = cls(ctx, g, 40, 250, 340, 'CountingMap extends Map', ['writes = 0;            // field initialiser', 'set(k, v) { this.writes++; super.set(k, v) }'], { cls: 'signal' });
+    arrow(ctx, g, 'M210,250 V' + map.b.bottom, 'inh');
+    ctx.el('rect', { x: 480, y: 120, width: 240, height: 140, rx: 10, class: 'box' }, g);
+    T(ctx, g, 600, 148, 'new CountingMap([a, b])', 'mono small muted', 'middle');
+    var w = T(ctx, g, 600, 195, 'writes = (none)', 'mono b', 'middle');
+    var sz = T(ctx, g, 600, 230, 'size = 0', 'mono', 'middle');
+    ctx.state.fr = { map: map, child: child, w: w, sz: sz, g: g };
+  }
+
+  function sceneCompose(ctx, g) {
+    T(ctx, g, 20, 28, 'Composition: one object, parts in slots', 'title');
+    var box = ctx.el('rect', { x: 200, y: 56, width: 380, height: 110, rx: 10, class: 'box accent' }, g);
+    T(ctx, g, 390, 80, 'Notifier', 'b', 'middle');
+    [[220, 80, 'policy'], [310, 80, 'policy'], [400, 160, 'channel: Channel']].forEach(function (s) {
+      ctx.el('rect', { x: s[0], y: 106, width: s[1], height: 34, rx: 6, class: 'slot' }, g);
+      T(ctx, g, s[0] + s[1] / 2, 156, s[2], 'mono small muted', 'middle');
+    });
+    T(ctx, g, 20, 300, 'channels', 'mono small muted');
+    T(ctx, g, 20, 362, 'policies', 'mono small muted');
+    var parts = {
+      email: chip(ctx, g, 20, 320, 130, 'EmailChannel', 'signal'),
+      sms: chip(ctx, g, 165, 320, 130, 'SmsChannel', 'signal'),
+      push: chip(ctx, g, 310, 320, 130, 'PushChannel', 'signal'),
+      log: chip(ctx, g, 20, 382, 80, 'Logging', 'signal'),
+      retry: chip(ctx, g, 115, 382, 80, 'Retry(3)', 'signal'),
+    };
+    var fake = chip(ctx, g, 470, 320, 130, 'FakeChannel', 'ok');
+    fake.setAttribute('opacity', 0);
+    parts.fake = fake;
+    var inbox = cls(ctx, g, 640, 110, 100, 'inbox', [], {});
+    var count = counter(ctx, g, 'classes');
+    count.textContent = '3 + 2 + 1 = 6';
+    count.setAttribute('class', 'b');
+    ctx.state.cp = { parts: parts, box: box, inbox: inbox, g: g };
+  }
+
+  function sendThrough(ctx, ok, label) {
+    // Notifier → Logging → Retry → channel → inbox
+    return ctx.packet([[200, 90], [260, 123], [350, 123], [470, 123]], { cls: 'accent', label: label, ms: 900 }).then(function () {
+      if (ok) return null;
+      ctx.log('EmailChannel.send failed: SMTP timeout', 'bad');
+      return ctx.packet([[470, 123], [350, 123]], { cls: 'bad', label: '✗', ms: 500 }).then(function () {
+        ctx.log('RetryPolicy: attempt 2', 'warn');
+        return ctx.packet([[350, 123], [470, 123]], { cls: 'accent', ms: 500 });
+      });
+    }).then(function () { return ctx.packet([[470, 123], [690, 123]], { cls: 'ok', ms: 500 }); });
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Build a notifier twice', say: 'First with subclasses, then with parts. Watch the class counter and what each design can do at runtime.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneTree(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'Two channels, two subclasses',
+        say: 'Email and SMS each extend <code>Notifier</code>. Three classes. This looks clean, and it is, until a second kind of variation shows up.',
+        run: function (ctx) {
+          hl([0]);
+          ctx.log('Notifier ← EmailNotifier, SmsNotifier (3 classes)', 'info');
+          return ctx.wait(400);
+        },
+      },
+      {
+        title: 'Add retry: the same code, twice',
+        say: 'Product wants retries. A class has one parent, so we add <code>EmailWithRetry</code> and <code>SmsWithRetry</code>, and the retry loop is copied into both.',
+        run: function (ctx) {
+          var t = ctx.state.tree;
+          return ctx.fade(t.lvl2, 1, 500).then(function () {
+            t.count.textContent = '5';
+            ctx.flash(t.count);
+            ctx.log('+ EmailWithRetry, SmsWithRetry (retry loop copied)', 'bad');
+            return ctx.fade(t.lvl3, 1, 500);
+          }).then(function () {
+            hl([0, 1]);
+            t.count.textContent = '7';
+            ctx.flash(t.count);
+            ctx.log('+ ...WithRetryAndLogging ×2, and we have not added "logging only" yet', 'bad');
+          });
+        },
+      },
+      {
+        title: 'The explosion: C × 2^F classes',
+        say: 'Add a third channel (push) and a third feature (rate limit). Every channel needs a class for every on/off mix of features: 3 × 8 = <b>24 classes</b>.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneGrid(ctx, g); }).then(function () {
+            var gr = ctx.state.grid;
+            var chain = Promise.resolve();
+            gr.tiles.forEach(function (tile, i) {
+              chain = chain.then(function () { gr.count.textContent = String(i + 1); return ctx.fade(tile, 1, 60); });
+            });
+            return chain.then(function () { ctx.log('3 channels × 8 feature combos = 24 classes', 'bad'); });
+          });
+        },
+      },
+      {
+        title: 'Frozen: an object cannot switch class',
+        say: 'A user changes their preference to SMS. Our object is an <code>EmailWithRetry</code> for life. We must throw it away and build a different class.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneFrozen(ctx, g); }).then(function () {
+            var f = ctx.state.frozen;
+            return ctx.packet([[240, 330], [390, 200], [240, 330]], { cls: 'bad', label: 'switch to SMS', ms: 1100 });
+          }).then(function () {
+            var f = ctx.state.frozen;
+            f.obj.r.setAttribute('class', 'box bad');
+            ctx.flash(f.obj.r);
+            T(ctx, f.g, 260, 240, 'class is fixed at new: rebuild the object', 'mono small fill-bad');
+            ctx.log('Cannot change class of an existing object', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Fragile base class: the parent calls you too early',
+        say: '<code>CountingMap extends Map</code> counts writes. But <code>Map</code>\'s constructor calls <code>this.set()</code> before the child\'s field exists, then <code>writes = 0</code> runs and wipes the count. 2 entries, 0 writes.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneFragile(ctx, g); }).then(function () {
+            var f = ctx.state.fr;
+            var y1 = parseFloat(f.map.lines[1].getAttribute('y')) - 4;
+            var y2 = parseFloat(f.child.lines[1].getAttribute('y')) - 4;
+            var chain = Promise.resolve();
+            [1, 2].forEach(function (n) {
+              chain = chain.then(function () {
+                return ctx.packet([[60, y1], [30, y1], [30, y2], [60, y2]], { cls: 'accent', label: 'set', ms: 700 });
+              }).then(function () {
+                f.w.textContent = 'writes = NaN'; f.sz.textContent = 'size = ' + n;
+                ctx.log('Map ctor → this.set() #' + n + ': writes++ on undefined → NaN', 'warn');
+              });
+            });
+            return chain.then(function () {
+              var y0 = parseFloat(f.child.lines[0].getAttribute('y')) - 4;
+              return ctx.packet([[380, y0], [600, 190]], { cls: 'bad', label: 'writes = 0', ms: 700 });
+            }).then(function () {
+              f.w.textContent = 'writes = 0'; f.w.setAttribute('class', 'mono b fill-bad');
+              ctx.flash(f.w);
+              ctx.log('field initialiser runs after super(): writes = 0, size = 2. Wrong.', 'bad');
+            });
+          });
+        },
+      },
+      {
+        title: 'Composition: one object with slots',
+        say: 'Now the <code>Notifier</code> is one class with slots: a <code>Channel</code> and a list of <code>SendPolicy</code>. Each part is its own small class. 3 channels + 2 policies + 1 notifier = 6 classes, any combination.',
+        run: function (ctx) {
+          hl([2, 3, 4, 5, 6]);
+          return swap(ctx, function (g) { sceneCompose(ctx, g); }).then(function () {
+            ctx.log('interfaces: Channel, SendPolicy', 'info');
+            ctx.log('6 classes cover every combination', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Plug the parts in',
+        say: 'At creation we pass an <code>EmailChannel</code> and two policies: <code>Logging</code> and <code>Retry(3)</code>. The notifier does not know which concrete classes it holds.',
+        run: function (ctx) {
+          hl([13]);
+          var p = ctx.state.cp.parts;
+          return Promise.all([ctx.move(p.log, 220, 123, 700), ctx.move(p.retry, 310, 123, 800), ctx.move(p.email, 415, 123, 900)]).then(function () {
+            ctx.log('new Notifier(new EmailChannel(), [new Logging(), new Retry(3)])', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Send: the call flows through the parts',
+        say: 'The message passes logging, then retry, then the channel. The first SMTP call times out; the retry policy tries again and it goes through. Retry was written once and works for any channel.',
+        run: function (ctx) {
+          hl([8, 9, 10, 11]);
+          return sendThrough(ctx, false, 'send').then(function () {
+            ctx.flash(ctx.state.cp.inbox.r);
+            ctx.log('delivered by email on attempt 2', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Swap a part at runtime',
+        say: 'The user picks SMS. We call <code>setChannel(new SmsChannel())</code>. Same notifier object, same policies, new channel. No class was rebuilt.',
+        run: function (ctx) {
+          hl([7]);
+          var p = ctx.state.cp.parts;
+          return ctx.move(p.email, 20, 320, 600).then(function () { return ctx.move(p.sms, 415, 123, 700); }).then(function () {
+            ctx.log('setChannel(SmsChannel) on the same object', 'ok');
+            return sendThrough(ctx, true, 'send');
+          }).then(function () { ctx.log('delivered by SMS, still logged and retried', 'ok'); });
+        },
+      },
+      {
+        title: 'Tests plug in a fake part',
+        say: 'In a unit test we pass a <code>FakeChannel</code> that just records messages. No SMTP, no SMS API. With inheritance, the network code would come along with the parent.',
+        run: function (ctx) {
+          var p = ctx.state.cp.parts;
+          return ctx.fade(p.fake, 1, 300).then(function () {
+            return ctx.move(p.sms, 165, 320, 600);
+          }).then(function () { return ctx.move(p.fake, 415, 123, 700); }).then(function () {
+            return sendThrough(ctx, true, 'send');
+          }).then(function () { ctx.log("fake.sent = ['u1:hello']; no network in the test", 'ok'); });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var ch = document.getElementById('t-ch'), f = document.getElementById('t-f');
+  var out = document.getElementById('try-out');
+  function update() {
+    var c = +ch.value, k = +f.value;
+    var inh = c * Math.pow(2, k), comp = c + k + 1;
+    document.getElementById('t-ch-v').textContent = c;
+    document.getElementById('t-f-v').textContent = k;
+    out.textContent = 'Inheritance: ' + c + ' × 2^' + k + ' = ' + inh + ' classes\nComposition: ' + c + ' + ' + k + ' + 1 = ' + comp + ' classes';
+    document.getElementById('bar-inh').style.width = Math.min(100, inh / 192 * 100) + '%';
+    document.getElementById('bar-comp').style.width = Math.min(100, comp / 192 * 100) + '%';
+  }
+  ch.addEventListener('input', update); f.addEventListener('input', update);
+  update();
+})();
+</script>
+</body>
+</html>

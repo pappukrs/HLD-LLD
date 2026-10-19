@@ -93,6 +93,6 @@ How does `simplify` work? Compute each person's net balance. Repeat: the person 
 
 ## Concepts used
 
-- [Strategy](../../concepts/patterns/p10-strategy.md) · [Repository and DI](../../concepts/patterns/p18-repository-di.md) · [Concurrency in Node](../../concepts/06-concurrency-in-node.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- HLD link: [Payments domain (ledger, PSPs, reconciliation)](../../../hld/concepts/35-payments-domain.md)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy](../../4-behavioral/L20-strategy/README.md) · [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md) · [Concurrency in Node](../../5-machine-coding/L32-concurrency-in-node/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- HLD link: [Payments domain (ledger, PSPs, reconciliation)](../../../hld/6-building-blocks/H38-payments-domain/README.md)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H06 Proxies and API Gateway</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+  .chip { font: 12px var(--font-mono); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); }
+  .chip.pass { border-color: var(--ok); color: var(--ok); }
+  .chip.stop { border-color: var(--bad); color: var(--bad); font-weight: 600; }
+  .try-out { font: 12.5px/1.5 var(--font-mono); color: var(--muted); }
+  .try-out b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H06 · Basics</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Proxies, reverse proxies and the API gateway</h1>
+    <p class="lede">A forward proxy works for clients, a reverse proxy works for servers. An API gateway is a reverse proxy with a pipeline: each stage can stop a request before it ever reaches a service.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="Forward proxy, reverse proxy, and an API gateway pipeline in front of three services"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Passed / 2xx</span>
+        <span><i style="background: var(--bad)"></i>Stopped (4xx/5xx)</span>
+        <span><i style="background: var(--accent)"></i>Gateway stage</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The pipeline in code (highlighted with the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">const auth: Mw = async (c, next) =&gt; {</span><span class="ln" data-l="2">  const user = verifyJwt(c.headers.authorization);</span><span class="ln" data-l="3">  if (!user) return reply(c, 401);   // stop</span><span class="ln" data-l="4">  c.userId = user.sub; await next();</span><span class="ln" data-l="5">};</span><span class="ln" data-l="6">const rateLimit: Mw = async (c, next) =&gt; {</span><span class="ln" data-l="7">  if (!(await redisBucket(c.userId).take()))</span><span class="ln" data-l="8">    return reply(c, 429);            // stop</span><span class="ln" data-l="9">  await next();</span><span class="ln" data-l="10">};</span><span class="ln" data-l="11">const route: Mw = async (c) =&gt; {</span><span class="ln" data-l="12">  const up = routes.match(c.path);   // /v1/orders → order-svc</span><span class="ln" data-l="13">  return proxy(c, up, { timeoutMs: 800, breaker: true });</span><span class="ln" data-l="14">};</span><span class="ln" data-l="15">compose([tls, requestId, auth, rateLimit, route]);</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: send a request through the gateway</h3>
+      <div class="try">
+        <button class="btn primary" type="button" id="t-ok">GET /v1/orders (token)</button>
+        <button class="btn" type="button" id="t-notok">No token</button>
+        <button class="btn" type="button" id="t-bad">GET /v1/admin</button>
+        <label>limit <select id="t-limit"><option value="3" selected>3</option><option value="5">5</option><option value="10">10</option></select> / window</label>
+        <button class="btn" type="button" id="t-reset">New window</button>
+      </div>
+      <div class="chips" id="t-chips"></div>
+      <div class="try-out" id="t-out">Press the first button a few times until the rate limiter stops you.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Clients hit one domain. An L4 load balancer spreads traffic over stateless gateway instances in several zones. The gateway terminates TLS, adds a request id, verifies the JWT locally with cached keys, applies a per-user token bucket in Redis, and routes by path to the service with a timeout and a circuit breaker. Business logic stays in the services."</p>
+    </div>
+    <div class="note wide">
+      <h3>Forward proxy vs reverse proxy vs load balancer vs gateway</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Forward proxy</th><th>Reverse proxy</th><th>Load balancer</th><th>API gateway</th></tr></thead>
+          <tbody>
+            <tr><td>Works for</td><td>Clients</td><td>Servers</td><td>Servers</td><td>Servers (APIs)</td></tr>
+            <tr><td>Hides</td><td>Client IPs</td><td>Server IPs and layout</td><td>Server IPs</td><td>Service layout</td></tr>
+            <tr><td>Main jobs</td><td>Filter, cache, egress control</td><td>TLS, routing, caching, compression</td><td>Spread load, health checks</td><td>Auth, rate limits, versioning, transforms, metrics</td></tr>
+            <tr><td>Examples</td><td>Squid, corporate proxy, VPN</td><td>Nginx, HAProxy, Envoy</td><td>AWS ALB/NLB, HAProxy</td><td>Kong, AWS API Gateway, Apigee</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did the 401 and 429 never reach order-svc?</summary><div>Each stage can stop the request and reply itself. That is the point of the gateway: bad and excess traffic is rejected once, at the edge, instead of in every service.</div></details>
+      <details class="qa"><summary>Four gateway instances, limit 100/min. A user gets 400. Why?</summary><div>Each instance counted in its own memory. Keep the counter in Redis (atomic INCR or a Lua script), or hash each user to one instance.</div></details>
+      <details class="qa"><summary>What should never live in the gateway?</summary><div>Business rules (pricing, coupons, order checks). Otherwise the gateway becomes a new monolith that every team must deploy through.</div></details>
+      <details class="qa"><summary>Gateway vs BFF vs service mesh?</summary><div>Gateway: front door, north-south traffic. BFF: one thin backend per client type. Mesh: sidecar proxies for service-to-service (east-west) traffic.</div></details>
+    </div>
+    <div class="note">
+      <h3>Run it yourself</h3>
+      <ul>
+        <li><a href="hands-on/README.md">hands-on/</a>: the same Node API behind Nginx, Kong, Express Gateway and AWS API Gateway (LocalStack).</li>
+        <li>Related: <a href="../../2-scaling/H08-load-balancing/visual.html">H08 Load balancing</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  function box(ctx, x, y, w, h, label, sub, cls, parent) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: x + w / 2, y: y + (sub ? h / 2 - 2 : h / 2 + 4), 'text-anchor': 'middle', text: label }, g);
+    var s = ctx.el('text', { x: x + w / 2, y: y + h / 2 + 13, 'text-anchor': 'middle', class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, t: t, s: s };
+  }
+  function code(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+
+  // Pipeline geometry
+  var CH_Y = 286, CH_W = 64, CH_H = 40;
+  var STAGES = [
+    { id: 'tls', label: 'TLS', x: 196 },
+    { id: 'rid', label: 'req-id', x: 268 },
+    { id: 'auth', label: 'auth', x: 340 },
+    { id: 'limit', label: 'limit', x: 412 },
+    { id: 'route', label: 'route', x: 484 },
+  ];
+  var SVC = { order: [670, 220], payment: [670, 300], user: [670, 380] };
+  var PHONE = [52, 306];
+  var midY = CH_Y + CH_H / 2;
+  function cx(i) { return STAGES[i].x + CH_W / 2; }
+  function pathTo(i) { var pts = [PHONE, [170, midY]]; for (var k = 0; k <= i; k++) pts.push([cx(k), midY]); return pts; }
+
+  function resetChips(ctx) { STAGES.forEach(function (s) { ctx.state.chips[s.id].r.setAttribute('class', 'box accent'); }); }
+  function mark(ctx, id, cls) { var c = ctx.state.chips[id]; c.r.setAttribute('class', 'box ' + cls); ctx.flash(c.g); }
+
+  // Walk a request through stages [0..stopAt]; returns after the walk.
+  function walk(ctx, stopAt, label) {
+    resetChips(ctx);
+    var chain = ctx.packet([PHONE, [170, midY]], { ms: 450, label: label });
+    STAGES.slice(0, stopAt + 1).forEach(function (s, i) {
+      chain = chain.then(function () {
+        var from = i === 0 ? [170, midY] : [cx(i - 1), midY];
+        return ctx.packet([from, [cx(i), midY]], { ms: 260 });
+      }).then(function () { mark(ctx, s.id, 'ok'); });
+    });
+    return chain;
+  }
+  function toService(ctx, name, cls) {
+    var s = SVC[name];
+    return ctx.packet([[cx(4), midY], [575, midY], [575, s[1]], [s[0] - 60, s[1]]], { ms: 500, cls: cls || '' });
+  }
+  function back(ctx, fromX, label, cls) {
+    return ctx.packet([[fromX, midY + 14], [170, midY + 14], [PHONE[0], PHONE[1] + 14]], { ms: 550, cls: cls, label: label });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Whose side is the proxy on?',
+      say: 'Top: a forward proxy and a reverse proxy. Bottom: an API gateway with five stages in front of three services. Press Play.',
+    },
+    setup: function (ctx) {
+      code([]);
+      ctx.state.count = 0;
+      ctx.state.chips = {};
+      // Top band: forward vs reverse
+      ctx.el('text', { x: 20, y: 22, class: 'title', text: 'Forward proxy' });
+      ctx.el('text', { x: 400, y: 22, class: 'title', text: 'Reverse proxy' });
+      ['10.0.0.5', '10.0.0.6', '10.0.0.7'].forEach(function (ip, i) {
+        box(ctx, 20, 36 + i * 34, 76, 26, ip);
+      });
+      ctx.state.fwd = box(ctx, 140, 60, 92, 40, 'corp proxy', '52.1.1.1', 'accent');
+      box(ctx, 276, 60, 92, 40, 'example.com', '');
+      ['app-1', 'app-2', 'app-3'].forEach(function (n, i) { box(ctx, 660, 36 + i * 34, 76, 26, n); });
+      box(ctx, 400, 60, 80, 40, 'phone', '');
+      ctx.state.rev = box(ctx, 528, 60, 92, 40, 'nginx', '13.2.2.2', 'accent');
+      ctx.state.fwdNote = ctx.el('text', { x: 20, y: 150, class: 'mono small muted', text: '' });
+      ctx.state.revNote = ctx.el('text', { x: 400, y: 150, class: 'mono small muted', text: '' });
+      ctx.el('line', { x1: 20, y1: 166, x2: 740, y2: 166, class: 'wire dashed' });
+
+      // Bottom band: gateway
+      ctx.el('text', { x: 20, y: 192, class: 'title', text: 'API gateway pipeline' });
+      box(ctx, 20, 286, 64, 40, 'phone', '');
+      ctx.state.gw = box(ctx, 170, 214, 384, 200, '', '', '');
+      ctx.el('text', { x: 182, y: 234, class: 'mono small muted', text: 'gateway (stateless)' }, ctx.state.gw.g);
+      ctx.el('line', { x1: 84, y1: midY, x2: 170, y2: midY, class: 'wire' });
+      STAGES.forEach(function (s) { ctx.state.chips[s.id] = box(ctx, s.x, CH_Y, CH_W, CH_H, s.label, null, 'accent'); });
+      box(ctx, 340, 350, 64, 34, 'JWKS', 'cached', '');
+      ctx.state.redis = box(ctx, 412, 350, 64, 34, 'Redis', 'used: 0', '');
+      ctx.el('path', { d: 'M548 ' + midY + ' H575 V220 H610 M575 ' + midY + ' V380 H610 M575 300 H610', class: 'wire' });
+      ctx.state.svc = {};
+      Object.keys(SVC).forEach(function (k) { ctx.state.svc[k] = box(ctx, 610, SVC[k][1] - 20, 130, 40, k + '-svc', '', ''); });
+      ctx.state.status = ctx.el('text', { x: 20, y: 440, class: 'mono', text: '' });
+      ctx.state.spof = ctx.group({ opacity: 0 });
+    },
+    steps: [
+      {
+        title: 'Forward proxy: acts for the clients',
+        say: 'Three laptops reach the internet through a company proxy. The website only ever sees the proxy\'s IP. The proxy can filter sites, cache pages and log egress.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function (i) {
+            chain = chain.then(function () { return ctx.packet([[96, 49 + i * 34], [140, 80]], { ms: 300 }); });
+          });
+          return chain.then(function () { return ctx.packet([[232, 80], [276, 80]], { ms: 400 }); }).then(function () {
+            ctx.state.fwdNote.textContent = 'example.com sees 52.1.1.1, not 10.0.0.x';
+            ctx.log('Forward proxy: server sees only 52.1.1.1', 'info');
+          });
+        },
+      },
+      {
+        title: 'Reverse proxy: acts for the servers',
+        say: 'The phone calls one public address. Nginx terminates TLS, picks an app server and forwards the request. The client never learns the app servers exist. It adds <code>X-Forwarded-For</code> so apps still know the real client IP.',
+        run: function (ctx) {
+          return ctx.packet([[480, 80], [528, 80]], { ms: 400 }).then(function () {
+            return ctx.packet([[620, 80], [660, 83]], { ms: 400 });
+          }).then(function () {
+            ctx.state.revNote.textContent = 'phone sees 13.2.2.2 only; app reads X-Forwarded-For';
+            ctx.log('Reverse proxy: app-2 chosen, servers hidden', 'info');
+          });
+        },
+      },
+      {
+        title: 'A valid request walks every stage',
+        say: 'TLS is terminated, a request id is added, the JWT is checked locally against cached keys, the user\'s bucket in Redis has room, and <code>/v1/orders</code> routes to order-svc.',
+        run: function (ctx) {
+          code([2, 4, 7, 9, 12, 13]);
+          ctx.log('GET /v1/orders  Authorization: Bearer eyJ...');
+          return walk(ctx, 4, 'GET /v1/orders').then(function () {
+            ctx.state.count++;
+            ctx.state.redis.s.textContent = 'used: ' + ctx.state.count;
+            return toService(ctx, 'order');
+          }).then(function () {
+            ctx.flash(ctx.state.svc.order.g);
+            ctx.state.status.textContent = '200 OK from order-svc (x-request-id: 8f2a)';
+            ctx.log('200 OK, order-svc handled it', 'ok');
+            return back(ctx, cx(4), '200', 'ok');
+          });
+        },
+      },
+      {
+        title: 'No token: stopped at auth with 401',
+        say: 'The auth stage finds no valid token and replies itself. The request never reaches a service, and no service had to write its own JWT check.',
+        run: function (ctx) {
+          code([2, 3]);
+          ctx.log('GET /v1/orders  (no Authorization header)');
+          return walk(ctx, 1, 'no token').then(function () {
+            return ctx.packet([[cx(1), midY], [cx(2), midY]], { ms: 260 });
+          }).then(function () {
+            mark(ctx, 'auth', 'bad');
+            ctx.state.status.textContent = '401 Unauthorized (from the gateway)';
+            ctx.log('auth → 401, stopped at the edge', 'bad');
+            return back(ctx, cx(2), '401', 'bad');
+          });
+        },
+      },
+      {
+        title: 'A burst: the 4th call gets 429',
+        say: 'The limit is 3 per window per user. The counter lives in Redis, so every gateway instance sees the same number. Calls 2 and 3 pass; call 4 gets <code>429</code> with <code>Retry-After</code>.',
+        run: function (ctx) {
+          code([7, 8]);
+          var chain = Promise.resolve();
+          [2, 3].forEach(function (n) {
+            chain = chain.then(function () { return walk(ctx, 3, 'call ' + n); }).then(function () {
+              ctx.state.count++;
+              ctx.state.redis.s.textContent = 'used: ' + ctx.state.count;
+              ctx.flash(ctx.state.redis.g);
+              ctx.log('call ' + n + ': bucket ok (' + ctx.state.count + '/3)', 'ok');
+              return toService(ctx, 'order', 'ok');
+            });
+          });
+          return chain.then(function () { return walk(ctx, 2, 'call 4'); }).then(function () {
+            return ctx.packet([[cx(2), midY], [cx(3), midY]], { ms: 260 });
+          }).then(function () {
+            mark(ctx, 'limit', 'bad');
+            ctx.state.status.textContent = '429 Too Many Requests, Retry-After: 30';
+            ctx.log('call 4: bucket empty → 429', 'bad');
+            return back(ctx, cx(3), '429', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Route by path to the right service',
+        say: 'In a new window, <code>POST /v1/payments</code> goes to payment-svc and <code>GET /v1/users/7</code> goes to user-svc. Clients know one host; you can move a path to a new service without shipping a new app.',
+        run: function (ctx) {
+          code([12]);
+          ctx.state.count = 0;
+          ctx.state.redis.s.textContent = 'used: 0';
+          return walk(ctx, 4, 'POST /v1/payments').then(function () { return toService(ctx, 'payment'); }).then(function () {
+            ctx.flash(ctx.state.svc.payment.g);
+            ctx.log('/v1/payments → payment-svc', 'ok');
+            return walk(ctx, 4, 'GET /v1/users/7');
+          }).then(function () { return toService(ctx, 'user'); }).then(function () {
+            ctx.flash(ctx.state.svc.user.g);
+            ctx.state.status.textContent = 'one public host, routed by path prefix';
+            ctx.log('/v1/users → user-svc', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A slow upstream: timeout, then the breaker opens',
+        say: 'payment-svc hangs. The gateway waits 800 ms, gives up and returns <code>503</code>. After a few failures the circuit breaker opens, and later calls fail fast instead of piling up threads.',
+        run: function (ctx) {
+          code([13]);
+          var p = ctx.state.svc.payment;
+          p.r.setAttribute('class', 'box bad');
+          p.s.textContent = 'hanging'; p.t.setAttribute('y', 296);
+          return walk(ctx, 4, 'POST /v1/payments').then(function () {
+            return ctx.packet([[cx(4), midY], [575, midY], [575, 300], [592, 300]], { ms: 500, cls: 'warn' });
+          }).then(function () {
+            ctx.log('no answer in 800 ms → timeout', 'warn');
+            return ctx.wait(300);
+          }).then(function () {
+            ctx.state.status.textContent = '503, breaker OPEN for payment-svc (fail fast for 30 s)';
+            ctx.log('breaker opens: next calls get 503 in ~1 ms', 'bad');
+            return back(ctx, cx(4), '503', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Many instances, so the gateway is not a SPOF',
+        say: 'An L4 load balancer spreads clients over several identical gateway instances in different zones. They keep no state of their own: rate-limit counters are in Redis and JWTs are checked with cached keys. Losing one instance loses only its in-flight requests.',
+        run: function (ctx) {
+          code([15]);
+          var g = ctx.state.spof;
+          var shadows = ctx.group({ opacity: 0 });
+          ctx.el('rect', { x: 178, y: 206, width: 384, height: 200, rx: 8, class: 'box dim' }, shadows);
+          ctx.el('rect', { x: 186, y: 198, width: 384, height: 200, rx: 8, class: 'box dim' }, shadows);
+          ctx.svg.insertBefore(shadows, ctx.state.gw.g);
+          ctx.fade(shadows, 1, 500);
+          ctx.svg.appendChild(g);
+          ctx.el('rect', { x: 100, y: 250, width: 56, height: 110, rx: 8, class: 'box signal' }, g);
+          ctx.el('text', { x: 128, y: 300, 'text-anchor': 'middle', class: 'mono small', text: 'L4 LB' }, g);
+          ctx.el('text', { x: 186, y: 192, class: 'mono small muted', text: '× 3 instances, 2+ zones' }, g);
+          resetChips(ctx);
+          ctx.state.status.textContent = 'gateway: stateless, horizontally scaled, adds ~1–5 ms';
+          ctx.log('Gateway scaled out behind an L4 LB', 'info');
+          return ctx.fade(g, 1, 500);
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it (independent of the player) ----------
+  var used = 0;
+  var chipsEl = document.getElementById('t-chips'), out = document.getElementById('t-out');
+  var names = ['TLS', 'req-id', 'auth', 'limit', 'route'];
+  function render(stopAt, ok, msg) {
+    chipsEl.innerHTML = '';
+    names.forEach(function (n, i) {
+      var cls = i < stopAt || (ok && i === stopAt) ? 'chip pass' : i === stopAt ? 'chip stop' : 'chip';
+      Kit.html('span', { class: cls, text: n }, chipsEl);
+    });
+    out.innerHTML = msg;
+  }
+  function limit() { return parseInt(document.getElementById('t-limit').value, 10); }
+  document.getElementById('t-ok').addEventListener('click', function () {
+    if (used >= limit()) { render(3, false, '<b>429</b> Too Many Requests (used ' + used + '/' + limit() + '). Retry-After: 30'); return; }
+    used++;
+    render(4, true, '<b>200</b> from order-svc (used ' + used + '/' + limit() + ')');
+  });
+  document.getElementById('t-notok').addEventListener('click', function () { render(2, false, '<b>401</b> Unauthorized. Stopped at auth; no service was called.'); });
+  document.getElementById('t-bad').addEventListener('click', function () {
+    if (used >= limit()) { render(3, false, '<b>429</b> Too Many Requests (used ' + used + '/' + limit() + ')'); return; }
+    used++;
+    render(4, false, '<b>404</b> No route for /v1/admin (it still used a token: ' + used + '/' + limit() + ')');
+  });
+  document.getElementById('t-reset').addEventListener('click', function () { used = 0; render(-1, false, 'New window: bucket refilled.'); });
+  document.getElementById('t-limit').addEventListener('change', function () { used = 0; render(-1, false, 'Limit set to ' + limit() + ' per window.'); });
+  render(-1, false, out.textContent);
+})();
+</script>
+</body>
+</html>

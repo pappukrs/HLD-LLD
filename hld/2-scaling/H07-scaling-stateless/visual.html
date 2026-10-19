@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H07 Scaling and Stateless</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; margin-bottom: 10px; font-size: 14px; }
+  .try input[type="range"] { width: 100%; }
+  .try-out { font: 12.5px/1.6 var(--font-mono); color: var(--muted); }
+  .try-out b { color: var(--ink); }
+  .try-out .bad { color: var(--bad); }
+  .try-out .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H07 · Scaling</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Scale up, scale out, and why servers must be stateless</h1>
+    <p class="lede">A bigger box helps until it hits the ceiling or dies. More boxes help only if any box can serve any request. Watch a session get lost, then moved to Redis, then watch the bottleneck move to the database.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="One server scaling up, then three stateless app servers behind a load balancer with Redis and a database"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Failure</span>
+        <span><i style="background: var(--accent)"></i>Shared state</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Try it: how many instances?</h3>
+      <div class="try">
+        <label for="t-n">Instances</label><input type="range" id="t-n" min="1" max="100" value="3">
+        <label for="t-store">Sessions</label>
+        <select id="t-store"><option value="local">in each server's memory</option><option value="redis" selected>in Redis</option></select>
+        <label for="t-cron">Cron</label>
+        <select id="t-cron"><option value="each">setInterval in every instance</option><option value="lock" selected>Redis lock (SET NX)</option></select>
+        <label for="t-pool">DB pool / instance</label><input type="range" id="t-pool" min="5" max="50" value="20">
+      </div>
+      <div class="try-out" id="t-out"></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Short term I can scale up, but there's a ceiling and it stays a single point of failure, so the plan is to scale out behind a load balancer. That needs stateless app servers: sessions in Redis or short-lived JWTs, files in S3, counters in Redis, cron behind a lock. Statelessness relocates state, so the new home must be more reliable than the server was. Scaling out moves the bottleneck to the database, so I'd add PgBouncer and cap autoscaling."</p>
+    </div>
+    <div class="note wide">
+      <h3>Scale up vs scale out</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Vertical (up)</th><th>Horizontal (out)</th></tr></thead>
+          <tbody>
+            <tr><td>Code change</td><td>None</td><td>Stateless app + load balancer</td></tr>
+            <tr><td>Ceiling</td><td>Largest instance</td><td>Practically none for the stateless tier</td></tr>
+            <tr><td>One failure</td><td>Full outage</td><td>Lose 1/N of capacity</td></tr>
+            <tr><td>Growing</td><td>Usually a restart</td><td>Add instances live, autoscale</td></tr>
+            <tr><td>Best for</td><td>Early stage, DB primary</td><td>Web/API tier, workers</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did request 2 get a 401?</summary><div>The session lived in app1's memory. Round robin sent the next request to app2, which had never seen that session id.</div></details>
+      <details class="qa"><summary>Is sticky sessions a fix?</summary><div>A shortcut. It pins a user to one server, so load gets uneven and the user is logged out when that server dies. Never make correctness depend on it.</div></details>
+      <details class="qa"><summary>You moved sessions to one Redis node. What's the new risk?</summary><div>Redis is now a SPOF on every request. Give it a replica and automatic failover (Sentinel or cluster mode), and decide persistence and TTLs.</div></details>
+      <details class="qa"><summary>Why did the DB fail at 100 instances?</summary><div>Each instance opens its own pool: 100 × 20 = 2,000 connections. Use a pooler like PgBouncer or RDS Proxy and cap the autoscaling max.</div></details>
+    </div>
+    <div class="note">
+      <h3>Run it yourself</h3>
+      <ul>
+        <li><a href="hands-on/README.md">hands-on/</a>: Node cluster, PM2, Nginx, HAProxy, Envoy, Traefik, Kubernetes HPA, AWS ASG.</li>
+        <li>Next: <a href="../H08-load-balancing/visual.html">H08 Load balancing</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var APPS = [{ id: 'app1', y: 60 }, { id: 'app2', y: 160 }, { id: 'app3', y: 260 }, { id: 'app4', y: 360 }];
+  var APP_X = 420, APP_W = 140, APP_H = 76;
+  var USER = [258, 228], LB = [300, 168, 56, 120];
+
+  function box(ctx, x, y, w, h, label, sub, cls, parent) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: x + w / 2, y: y + 20, 'text-anchor': 'middle', text: label }, g);
+    var s = ctx.el('text', { x: x + w / 2, y: y + 36, 'text-anchor': 'middle', class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, t: t, s: s };
+  }
+  function appIn(i) { return [APP_X, APPS[i].y + APP_H / 2]; }
+  function viaLB(i) { return [USER, [LB[0], USER[1]], [LB[0] + LB[2], USER[1]], [APP_X - 20, APPS[i].y + APP_H / 2], appIn(i)]; }
+  function setMem(ctx, i, text, cls) { var m = ctx.state.apps[i].mem; m.textContent = text; m.setAttribute('class', 'mono small ' + (cls || '')); ctx.flash(m); }
+  function setStatus(ctx, text, cls) { var s = ctx.state.status; s.textContent = text; s.setAttribute('class', 'mono ' + (cls || '')); }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'One server, growing traffic', say: 'Left: a single server that we can make bigger. Right: the scale-out setup we will build. Press Play.' },
+    setup: function (ctx) {
+      ctx.state.emails = 0;
+      // Left: scale up
+      ctx.el('text', { x: 20, y: 24, class: 'title', text: 'Scale up' });
+      ctx.state.ceiling = ctx.el('line', { x1: 20, y1: 52, x2: 200, y2: 52, class: 'wire bad', opacity: 0 });
+      ctx.state.ceilText = ctx.el('text', { x: 20, y: 46, class: 'mono small fill-bad', text: 'largest instance', opacity: 0 });
+      ctx.state.big = ctx.el('rect', { x: 50, y: 110, width: 100, height: 70, rx: 8, class: 'box' });
+      ctx.state.bigLabel = ctx.el('text', { x: 100, y: 140, 'text-anchor': 'middle', text: '4 vCPU' });
+      ctx.state.bigSub = ctx.el('text', { x: 100, y: 158, 'text-anchor': 'middle', class: 'mono small muted', text: '16 GB' });
+      ctx.el('text', { x: 20, y: 222, class: 'mono small muted', text: 'CPU' });
+      ctx.el('rect', { x: 50, y: 212, width: 150, height: 12, rx: 3, class: 'box' });
+      ctx.state.cpu = ctx.el('rect', { x: 50, y: 212, width: 0, height: 12, rx: 3, class: 'fill-accent' });
+      ctx.state.cpuText = ctx.el('text', { x: 20, y: 244, class: 'mono small', text: '' });
+      ctx.el('line', { x1: 214, y1: 20, x2: 214, y2: 440, class: 'wire dashed' });
+      // cron panel
+      ctx.el('text', { x: 20, y: 320, class: 'title', text: 'Daily digest cron' });
+      ctx.state.mail = ctx.el('text', { x: 20, y: 346, class: 'mono', text: 'emails sent to user: 0' });
+      ctx.state.mailNote = ctx.el('text', { x: 20, y: 366, class: 'mono small muted', text: '' });
+
+      // Right: scale out (hidden until step 4)
+      var out = ctx.group({ opacity: 0 });
+      ctx.state.out = out;
+      ctx.el('text', { x: 230, y: 24, class: 'title', text: 'Scale out' }, out);
+      ctx.el('circle', { cx: USER[0], cy: USER[1], r: 14, class: 'dot' }, out);
+      ctx.el('text', { x: USER[0], y: USER[1] + 32, 'text-anchor': 'middle', class: 'mono small', text: 'user' }, out);
+      ctx.el('rect', { x: LB[0], y: LB[1], width: LB[2], height: LB[3], rx: 8, class: 'box signal' }, out);
+      ctx.el('text', { x: LB[0] + LB[2] / 2, y: LB[1] + 64, 'text-anchor': 'middle', class: 'mono small', text: 'LB' }, out);
+      ctx.el('text', { x: LB[0] + LB[2] / 2, y: LB[1] + 78, 'text-anchor': 'middle', class: 'mono small muted', text: 'RR' }, out);
+      ctx.state.apps = [];
+      APPS.forEach(function (a, i) {
+        var b = box(ctx, APP_X, a.y, APP_W, APP_H, a.id, 'memory:', '', out);
+        b.mem = ctx.el('text', { x: APP_X + APP_W / 2, y: a.y + 56, 'text-anchor': 'middle', class: 'mono small', text: '' }, b.g);
+        b.wire = ctx.el('line', { x1: LB[0] + LB[2], y1: LB[1] + LB[3] / 2, x2: APP_X, y2: a.y + APP_H / 2, class: 'wire' }, out);
+        b.wire.parentNode.insertBefore(b.wire, b.wire.parentNode.firstChild);
+        if (i === 3) { b.g.setAttribute('opacity', 0); b.wire.setAttribute('opacity', 0); }
+        ctx.state.apps.push(b);
+      });
+      // shared stores (hidden until step 7)
+      var shared = ctx.group({ opacity: 0 });
+      ctx.state.shared = shared;
+      ctx.state.redis = box(ctx, 610, 70, 130, 64, 'Redis', '', 'accent', shared);
+      ctx.state.db = box(ctx, 610, 300, 130, 64, 'Postgres', 'conns: 60', '', shared);
+      ctx.state.pool = box(ctx, 610, 210, 130, 50, 'PgBouncer', '', 'accent', shared);
+      ctx.state.pool.g.setAttribute('opacity', 0);
+      ctx.state.status = ctx.el('text', { x: 230, y: 448, class: 'mono', text: '' });
+    },
+    steps: [
+      {
+        title: 'Traffic grows on one server',
+        say: 'Users keep coming. The single 4 vCPU box climbs to 90% CPU. Latency starts rising because requests wait in the queue.',
+        run: function (ctx) {
+          ctx.state.cpuText.textContent = '90% · p95 latency 800 ms';
+          ctx.log('One box at 90% CPU', 'warn');
+          ctx.state.cpu.setAttribute('class', 'fill-bad');
+          return ctx.animate(ctx.state.cpu, { width: 135 }, 900);
+        },
+      },
+      {
+        title: 'Scale up: a bigger box',
+        say: 'Resize to 16 vCPU. No code change, CPU drops to 45%. But there is a ceiling (the largest instance), you pay for peak all day, and resizing needed a restart.',
+        run: function (ctx) {
+          ctx.state.bigLabel.textContent = '16 vCPU';
+          ctx.state.bigSub.textContent = '64 GB';
+          ctx.log('Resized 4 → 16 vCPU (restart needed)', 'info');
+          return Promise.all([
+            ctx.animate(ctx.state.big, { x: 30, y: 70, width: 140, height: 120 }, 800),
+            ctx.animate(ctx.state.bigLabel, { y: 126 }, 800),
+            ctx.animate(ctx.state.bigSub, { y: 144 }, 800),
+            ctx.fade(ctx.state.ceiling, 1, 600), ctx.fade(ctx.state.ceilText, 1, 600),
+          ]).then(function () {
+            ctx.state.cpu.setAttribute('class', 'fill-ok');
+            ctx.state.cpuText.textContent = '45% · ceiling is close';
+            return ctx.animate(ctx.state.cpu, { width: 68 }, 600);
+          });
+        },
+      },
+      {
+        title: 'One box is one failure',
+        say: 'A disk fails on the big box. Everything is down: there is no second server to take the traffic. This is why production tiers run at least two instances.',
+        run: function (ctx) {
+          ctx.state.big.setAttribute('class', 'box bad');
+          ctx.flash(ctx.state.big);
+          ctx.state.cpuText.textContent = 'DOWN · 100% of users hit';
+          ctx.state.cpuText.setAttribute('class', 'mono small fill-bad');
+          ctx.log('Big box crashed: full outage (SPOF)', 'bad');
+          return ctx.animate(ctx.state.cpu, { width: 0 }, 500);
+        },
+      },
+      {
+        title: 'Scale out: three servers behind a load balancer',
+        say: 'Three smaller servers sit behind a round-robin load balancer. If one dies, the other two keep serving. But this app still keeps sessions in each server\'s memory.',
+        run: function (ctx) {
+          ctx.log('LB + app1, app2, app3', 'info');
+          return ctx.fade(ctx.state.out, 1, 600);
+        },
+      },
+      {
+        title: 'Login stores the session in app1\'s memory',
+        say: 'The login request lands on app1. It creates session <code>sid:42</code> in a local <code>Map</code> and sets a cookie. Only app1 knows this session.',
+        run: function (ctx) {
+          ctx.log('POST /login → app1');
+          return ctx.packet(viaLB(0), { ms: 800, label: 'login' }).then(function () {
+            setMem(ctx, 0, 'sid:42 → pappu', 'fill-signal');
+            ctx.log('app1 memory: sid:42 → pappu', 'info');
+          });
+        },
+      },
+      {
+        title: 'Next request goes to app2: 401',
+        say: 'Round robin sends <code>GET /me</code> to app2. app2 has no <code>sid:42</code>, so the user looks logged out. With 3 servers, 2 out of 3 requests fail like this.',
+        run: function (ctx) {
+          ctx.log('GET /me (cookie sid:42) → app2');
+          return ctx.packet(viaLB(1), { ms: 800, label: 'GET /me' }).then(function () {
+            setMem(ctx, 1, '(no sid:42)', 'fill-bad');
+            ctx.state.apps[1].r.setAttribute('class', 'box bad');
+            setStatus(ctx, '401: session lives on app1 only', 'fill-bad');
+            ctx.log('app2: unknown session → 401', 'bad');
+            return ctx.packet([appIn(1), [LB[0] + LB[2], USER[1]], USER], { ms: 600, cls: 'bad', label: '401' });
+          });
+        },
+      },
+      {
+        title: 'Move the session to Redis',
+        say: 'Sessions now live in Redis with a 30 min TTL. Every server reads the same store, so app3 can serve the user. The servers are now stateless and interchangeable.',
+        run: function (ctx) {
+          ctx.state.apps.forEach(function (a, i) { a.r.setAttribute('class', 'box'); if (i < 3) { a.s.textContent = 'stateless'; a.mem.textContent = ''; } });
+          ctx.state.redis.s.textContent = 'sid:42 (TTL 30m)';
+          setStatus(ctx, '', '');
+          ctx.log('Sessions moved to Redis', 'info');
+          return ctx.fade(ctx.state.shared, 1, 500).then(function () {
+            return ctx.packet(viaLB(2), { ms: 700, label: 'GET /me' });
+          }).then(function () {
+            return ctx.packet([[APP_X + APP_W, APPS[2].y + 30], [610, 102]], { ms: 450, cls: 'accent' });
+          }).then(function () {
+            ctx.flash(ctx.state.redis.g);
+            setStatus(ctx, '200: any server can answer', 'fill-ok');
+            ctx.log('app3 reads sid:42 from Redis → 200', 'ok');
+            return ctx.packet([appIn(2), [LB[0] + LB[2], USER[1]], USER], { ms: 600, cls: 'ok', label: '200' });
+          });
+        },
+      },
+      {
+        title: 'Hidden state: the cron runs three times',
+        say: 'Each server has a <code>setInterval</code> that sends the daily digest. Three servers, three emails. The fix: only the server that wins <code>SET lock:digest NX EX 3600</code> in Redis runs the job.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function (i) {
+            chain = chain.then(function () {
+              ctx.flash(ctx.state.apps[i].g);
+              ctx.state.emails++;
+              ctx.state.mail.textContent = 'emails sent to user: ' + ctx.state.emails;
+              ctx.state.mail.setAttribute('class', 'mono ' + (ctx.state.emails > 1 ? 'fill-bad' : ''));
+              ctx.log(ctx.state.apps[i].t.textContent + ' cron fired → email #' + ctx.state.emails, ctx.state.emails > 1 ? 'bad' : '');
+              return ctx.wait(300);
+            });
+          });
+          return chain.then(function () {
+            ctx.state.mailNote.textContent = 'next day, with a Redis lock: 1 email';
+            ctx.state.redis.s.textContent = 'sid:42 · lock=app1';
+            return ctx.packet([[APP_X + APP_W, APPS[0].y + 30], [610, 102]], { ms: 450, cls: 'accent', label: 'SET NX' });
+          }).then(function () { ctx.log('Next run: app1 wins SET NX, app2/app3 skip', 'ok'); });
+        },
+      },
+      {
+        title: 'A server dies; autoscaling adds one',
+        say: 'app2 fails its health check. The load balancer stops sending it traffic and users notice nothing, because no state was on it. CPU on the rest rises, so autoscaling (target 60%) adds app4.',
+        run: function (ctx) {
+          var a2 = ctx.state.apps[1], a4 = ctx.state.apps[3];
+          a2.r.setAttribute('class', 'box bad');
+          a2.s.textContent = 'health check failed';
+          a2.wire.setAttribute('class', 'wire bad');
+          ctx.log('app2 unhealthy → removed from LB', 'bad');
+          return ctx.packet(viaLB(0), { ms: 600, cls: 'ok' }).then(function () {
+            ctx.log('Traffic continues on app1 and app3', 'ok');
+            a4.s.textContent = 'stateless (new)';
+            return Promise.all([ctx.fade(a4.g, 1, 500), ctx.fade(a4.wire, 1, 500), ctx.fade(a2.g, 0.35, 500)]);
+          }).then(function () {
+            ctx.log('Autoscaling launched app4 (ready in ~60 s)', 'info');
+            return ctx.packet(viaLB(3), { ms: 700, cls: 'ok' });
+          });
+        },
+      },
+      {
+        title: 'The bottleneck moves to the database',
+        say: 'At peak the app tier scales to 100 instances, each with a pool of 20 connections: 2,000 connections to Postgres, which is happiest with a few hundred. A pooler (PgBouncer) multiplexes them onto ~100 real connections.',
+        run: function (ctx) {
+          var db = ctx.state.db;
+          var n = { v: 60 };
+          return ctx.tween(900, function (t) { n.v = Math.round(60 + t * (2000 - 60)); db.s.textContent = 'conns: ' + n.v; }).then(function () {
+            db.r.setAttribute('class', 'box bad');
+            setStatus(ctx, '100 instances × 20 = 2,000 DB connections', 'fill-bad');
+            ctx.log('Postgres: too many connections', 'bad');
+            return ctx.fade(ctx.state.pool.g, 1, 500);
+          }).then(function () {
+            ctx.state.pool.s.textContent = '2,000 in → 100 out';
+            db.r.setAttribute('class', 'box ok');
+            db.s.textContent = 'conns: 100';
+            setStatus(ctx, 'PgBouncer + autoscaling max protect the DB', 'fill-ok');
+            ctx.log('PgBouncer added; autoscaling max set', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var out = document.getElementById('t-out');
+  function update() {
+    var n = +document.getElementById('t-n').value;
+    var store = document.getElementById('t-store').value;
+    var cron = document.getElementById('t-cron').value;
+    var pool = +document.getElementById('t-pool').value;
+    var ok = store === 'redis' ? 100 : Math.round(100 / n);
+    var emails = cron === 'lock' ? 1 : n;
+    var conns = n * pool;
+    var dbCls = conns <= 300 ? 'ok' : 'bad';
+    out.innerHTML =
+      '<b>' + n + '</b> instance' + (n > 1 ? 's' : '') + ' behind round robin<br>' +
+      'requests still logged in: <span class="' + (ok === 100 ? 'ok' : 'bad') + '">' + ok + '%</span><br>' +
+      'digest emails per day: <span class="' + (emails === 1 ? 'ok' : 'bad') + '">' + emails + '</span><br>' +
+      'one instance dies: lose <b>' + (n === 1 ? '100% (outage)' : Math.round(100 / n) + '% of capacity') + '</b><br>' +
+      'DB connections: <span class="' + dbCls + '">' + conns.toLocaleString() + (conns > 300 ? ' (add PgBouncer)' : '') + '</span>';
+  }
+  ['t-n', 't-store', 't-cron', 't-pool'].forEach(function (id) { document.getElementById(id).addEventListener('input', update); });
+  update();
+})();
+</script>
+</body>
+</html>

@@ -93,7 +93,7 @@ Relationships: RideService ◆— Driver, Ride. Ride ⟶ Driver (by id). RideSer
 
 ## Step 5: extensions interviewers ask after you finish
 
-1. **Finding nearby drivers fast.** Scanning all drivers is O(n). Index drivers by geohash cell (or a quadtree) and search the pickup cell plus its neighbours. See [Geospatial indexing](../../../hld/concepts/28-geospatial.md).
+1. **Finding nearby drivers fast.** Scanning all drivers is O(n). Index drivers by geohash cell (or a quadtree) and search the pickup cell plus its neighbours. See [Geospatial indexing](../../../hld/6-building-blocks/H34-geospatial/README.md).
 2. **Two requests pick the same driver** on two servers. Claim the driver atomically: `UPDATE drivers SET ride_id = ? WHERE id = ? AND ride_id IS NULL`, or a Redis `SET driver:d1 <rideId> NX`. If the claim fails, try the next candidate.
 3. **Driver accept/reject.** Add a `SEARCHING` state and an `OFFERED` step with a timeout. On reject or timeout, offer the next driver. The transition table grows; the code doesn't.
 4. **Surge pricing.** `SurgeFare(inner, multiplier)` wraps any fare strategy. The multiplier comes from demand/supply per area.
@@ -110,7 +110,7 @@ Relationships: RideService ◆— Driver, Ride. Ride ⟶ Driver (by id). RideSer
 
 ## Concepts used
 
-- [State pattern](../../concepts/patterns/p12-state.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [Observer](../../concepts/patterns/p11-observer.md) · [Decorator](../../concepts/patterns/p06-decorator.md)
-- Related problem: [Food Delivery](../18-food-delivery/) (the same shape: assign, track, complete)
-- HLD link: [Ride Hailing (Uber/Ola)](../../../hld/problems/10-ride-hailing/) · [Geospatial indexing](../../../hld/concepts/28-geospatial.md)
-- Visuals: [State machine](../../../visuals/v25-state-machine.html) · [Strategy + Factory](../../../visuals/v23-strategy-factory.html) · [Observer and pub-sub](../../../visuals/v24-observer-pubsub.html) · [Geohash and quadtree](../../../visuals/v17-geohash-quadtree.html)
+- [State pattern](../../4-behavioral/L22-state/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [Observer](../../4-behavioral/L21-observer/README.md) · [Decorator](../../3-structural/L14-decorator/README.md)
+- Related problem: [Food Delivery](../18-food-delivery) (the same shape: assign, track, complete)
+- HLD link: [Ride Hailing (Uber/Ola)](../../../hld/case-studies/10-ride-hailing) · [Geospatial indexing](../../../hld/6-building-blocks/H34-geospatial/README.md)
+- Visuals: [State machine](../../4-behavioral/L22-state/visual.html) · [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html) · [Observer and pub-sub](../../4-behavioral/L21-observer/visual.html) · [Geohash and quadtree](../../../hld/6-building-blocks/H34-geospatial/visual.html)

@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H14 SQL vs NoSQL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; margin-bottom: 10px; }
+  .try label { font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .try input[type="range"] { flex: 1; min-width: 0; }
+  .verdict { font: 600 15px var(--font-display); color: var(--accent); margin: 6px 0 2px; }
+  .why { color: var(--muted); margin: 0; font-size: 14px; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H14 · Databases</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>SQL vs NoSQL: choosing a database</h1>
+    <p class="lede">The same user-and-orders data stored two ways on three shards. Watch what a read, a write and a crash cost in each layout, then route real workloads to the store that fits their access pattern.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 526" role="img" aria-label="Relational and document layouts on three shards, then workloads routed to database types"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Read / query</span>
+        <span><i style="background: var(--accent)"></i>Write</span>
+        <span><i style="background: var(--bad)"></i>Broken invariant</span>
+        <span><i style="background: var(--ok)"></i>Safe</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>Try it: which store fits this workload?</h3>
+      <div class="try" id="try">
+        <label><input type="checkbox" id="t-money"> Money or inventory (needs ACID)</label>
+        <label><input type="checkbox" id="t-key"> Always read by an exact key</label>
+        <label><input type="checkbox" id="t-search"> Full-text / fuzzy search</label>
+        <label><input type="checkbox" id="t-graph"> Multi-hop relationships</label>
+        <label><input type="checkbox" id="t-flex"> Fields differ per record</label>
+        <label>Writes/s <input type="range" id="t-writes" min="0" max="6" step="1" value="1"> <code id="t-wv">1k</code></label>
+      </div>
+      <p class="verdict" id="t-out">Postgres (the default)</p>
+      <p class="why" id="t-why">Nothing pushes you out of relational, so keep ACID, joins and constraints.</p>
+    </div>
+
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I pick the store by access pattern, not hype. Default Postgres: ACID, joins, constraints, JSONB for flexible bits. I leave it for a specific reason: huge key-value traffic to DynamoDB or Redis, write volume beyond one cluster to Cassandra, a real graph to Neo4j, search to Elasticsearch fed by CDC."</p>
+      <p class="say">"NoSQL scales out because self-contained records avoid cross-shard joins. The price is duplicated data and usually eventual consistency, so money stays in SQL."</p>
+    </div>
+    <div class="note">
+      <h3>Same query, two ways</h3>
+      <pre class="code">-- relational: join at read time
+SELECT u.name, o.*
+FROM users u JOIN orders o
+  ON o.user_id = u.id
+WHERE u.id = 'u42';
+
+// document: one self-contained read
+db.users.findOne({ _id: 'u42' })
+// { name, orders: [ {...}, {...} ] }
+
+-- wide-column: one table per query
+PRIMARY KEY ((chat_id, month), msg_id)
+WITH CLUSTERING ORDER BY (msg_id DESC)</pre>
+    </div>
+    <div class="note wide">
+      <h3>The families at a glance</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Family</th><th>Model</th><th>Best at</th><th>Gives up</th><th>Examples</th></tr></thead>
+          <tbody>
+            <tr><td>Relational</td><td>Tables + joins</td><td>Transactions, constraints, ad-hoc queries</td><td>Easy horizontal write scale</td><td>Postgres, MySQL</td></tr>
+            <tr><td>Key-value</td><td>key → blob</td><td>Sub-ms get/put by key</td><td>Queries by anything but the key</td><td>Redis, DynamoDB</td></tr>
+            <tr><td>Document</td><td>key → JSON</td><td>Nested records read together</td><td>Joins, cross-doc invariants (cheaply)</td><td>MongoDB, Firestore</td></tr>
+            <tr><td>Wide-column</td><td>partition → sorted rows</td><td>Huge append writes, key + time range</td><td>Joins, flexible queries</td><td>Cassandra, ScyllaDB</td></tr>
+            <tr><td>Graph</td><td>nodes + edges</td><td>Multi-hop traversal</td><td>Easy sharding</td><td>Neo4j, Neptune</td></tr>
+            <tr><td>Search</td><td>inverted index</td><td>Full-text, facets, ranking</td><td>Being the source of truth</td><td>Elasticsearch</td></tr>
+            <tr><td>NewSQL</td><td>sharded SQL + consensus</td><td>Global SQL with strong consistency</td><td>Write latency, cost</td><td>Spanner, CockroachDB</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why are joins the enemy of sharding?</summary><div>After sharding, the rows a join needs live on different machines. The join becomes network hops and scatter-gather. Denormalised records put everything one read needs on one partition.</div></details>
+      <details class="qa"><summary>In step 5 the document store rewrote four copies. What is the general lesson?</summary><div>Denormalising moves the cost from reads to writes. Every duplicated fact must be updated everywhere, with no foreign key to help, often asynchronously, so readers can see old and new values for a while.</div></details>
+      <details class="qa"><summary>Is "MongoDB is AP, Postgres is CP" correct?</summary><div>Only roughly. MongoDB with majority write and read concerns behaves CP-like; a single Postgres node is not a distributed system at all. Talk about the configuration (replication mode, quorum), not the brand.</div></details>
+      <details class="qa"><summary>You need flexible product attributes but also orders with transactions. One DB or two?</summary><div>Often one: Postgres with a JSONB column (GIN index) for attributes, normal tables for orders. You keep joins and ACID. Move to a document store only if scale or workflow really needs it.</div></details>
+    </div>
+    <div class="note wide links">
+      <a href="README.md">README.md (full notes)</a>
+      <a href="demo.ts">demo.ts (runnable code)</a>
+      <a href="hands-on/README.md">hands-on/ (Postgres vs Mongo in Docker)</a>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CLIENT = [380, 56];
+  // shard x positions (left panel = relational, right panel = document)
+  var LX = [35, 150, 265], RX = [405, 520, 635], SY = 118, SW = 100, SH = 150;
+  var BINS = [
+    { id: 'pg', name: 'Postgres', sub: 'ACID, joins' },
+    { id: 'redis', name: 'Redis', sub: 'key → value' },
+    { id: 'cass', name: 'Cassandra', sub: 'wide-column' },
+    { id: 'es', name: 'Elasticsearch', sub: 'search index' },
+    { id: 'neo', name: 'Neo4j', sub: 'graph' },
+    { id: 'mongo', name: 'MongoDB / JSONB', sub: 'document' },
+  ];
+  function binX(i) { return 20 + i * 124; }
+  var BY = 400, BW = 112, BH = 92;
+
+  function txt(ctx, x, y, s, cls, parent, anchor) {
+    return ctx.el('text', { x: x, y: y, class: cls || 'mono small', text: s, 'text-anchor': anchor || 'start' }, parent);
+  }
+  function top(xs, i) { return [xs[i] + SW / 2, SY]; }
+  function go(ctx, xs, i, cls, ms) {
+    var t = top(xs, i);
+    return ctx.packet([CLIENT, [CLIENT[0], 84], [t[0], 84], t], { cls: cls, ms: ms || 650 });
+  }
+  function back(ctx, xs, i, cls) {
+    var t = top(xs, i);
+    return ctx.packet([t, [t[0], 84], [CLIENT[0], 84], CLIENT], { cls: cls, ms: 550 });
+  }
+  function setCounter(ctx, side) {
+    var c = ctx.state.count[side];
+    ctx.state.counterEl[side].textContent = 'read hops: ' + c.reads + '   ·   writes: ' + c.writes;
+  }
+
+  function drawPanels(ctx) {
+    var g = ctx.group();
+    ctx.state.panels = g;
+    // client
+    ctx.el('rect', { x: 310, y: 14, width: 140, height: 40, rx: 8, class: 'box accent' }, g);
+    txt(ctx, 380, 39, 'API service', 'title', g, 'middle');
+    // panel frames
+    ctx.el('rect', { x: 20, y: 92, width: 360, height: 220, rx: 10, class: 'box' }, g);
+    ctx.el('rect', { x: 390, y: 92, width: 350, height: 220, rx: 10, class: 'box' }, g);
+    txt(ctx, 30, 110, 'RELATIONAL · normalised, orders sharded by order_id', 'mono small muted', g);
+    txt(ctx, 400, 110, 'DOCUMENT · denormalised, sharded by user_id', 'mono small muted', g);
+    ctx.state.counterEl = {
+      L: txt(ctx, 35, 300, '', 'mono small', g),
+      R: txt(ctx, 405, 300, '', 'mono small', g),
+    };
+    ctx.state.shard = { L: [], R: [] };
+    [['L', LX], ['R', RX]].forEach(function (p) {
+      p[1].forEach(function (x, i) {
+        var r = ctx.el('rect', { x: x, y: SY, width: SW, height: SH, rx: 6, class: 'box' }, g);
+        txt(ctx, x + 6, SY + 15, 'shard ' + i, 'mono small muted', g);
+        ctx.state.shard[p[0]].push(r);
+      });
+    });
+    // contents (hidden until step 1)
+    var c = ctx.group({ opacity: 0 }, g);
+    ctx.state.contents = c;
+    var rows = ctx.state.rows = {};
+    // left shard 0: users + order o1
+    txt(ctx, LX[0] + 6, SY + 38, 'users', 'mono small muted', c);
+    rows.user = txt(ctx, LX[0] + 6, SY + 54, 'u42 Asha', 'mono small', c);
+    txt(ctx, LX[0] + 6, SY + 80, 'orders', 'mono small muted', c);
+    rows.o1 = txt(ctx, LX[0] + 6, SY + 96, 'o1 u42 p2', 'mono small', c);
+    // left shard 1: order o2 + products
+    txt(ctx, LX[1] + 6, SY + 38, 'orders', 'mono small muted', c);
+    rows.o2 = txt(ctx, LX[1] + 6, SY + 54, 'o2 u42 p2', 'mono small', c);
+    txt(ctx, LX[1] + 6, SY + 80, 'products', 'mono small muted', c);
+    rows.prod = txt(ctx, LX[1] + 6, SY + 96, 'p2 Laptop', 'mono small', c);
+    // left shard 2: order o3
+    txt(ctx, LX[2] + 6, SY + 38, 'orders', 'mono small muted', c);
+    rows.o3 = txt(ctx, LX[2] + 6, SY + 54, 'o3 u42 p1', 'mono small', c);
+    rows.o9 = txt(ctx, LX[2] + 6, SY + 70, 'o9 u7  p2', 'mono small', c);
+    // right: documents embed the product name
+    rows.d = [];
+    txt(ctx, RX[0] + 6, SY + 38, '{ _id: u7', 'mono small', c);
+    rows.d.push(txt(ctx, RX[0] + 14, SY + 54, 'o9 Laptop }', 'mono small', c));
+    txt(ctx, RX[1] + 6, SY + 38, '{ _id: u42', 'mono small', c);
+    txt(ctx, RX[1] + 14, SY + 54, 'name: Asha', 'mono small', c);
+    rows.d.push(txt(ctx, RX[1] + 14, SY + 70, 'o1 Laptop', 'mono small', c));
+    rows.d.push(txt(ctx, RX[1] + 14, SY + 86, 'o2 Laptop', 'mono small', c));
+    txt(ctx, RX[1] + 14, SY + 102, 'o3 Phone }', 'mono small', c);
+    txt(ctx, RX[2] + 6, SY + 38, '{ _id: u19', 'mono small', c);
+    rows.d.push(txt(ctx, RX[2] + 14, SY + 54, 'o5 Laptop }', 'mono small', c));
+    // balances (step 6+)
+    ctx.state.bal = {
+      L: txt(ctx, 35, 340, '', 'mono', g),
+      R: txt(ctx, 405, 340, '', 'mono', g),
+    };
+  }
+
+  function drawBins(ctx) {
+    var g = ctx.group({ opacity: 0 });
+    ctx.state.binsG = g;
+    ctx.state.binFill = {};
+    txt(ctx, 20, 516, 'Route each workload to the store that fits its access pattern', 'title', g);
+    BINS.forEach(function (b, i) {
+      var x = binX(i);
+      ctx.el('rect', { x: x, y: BY, width: BW, height: BH, rx: 8, class: 'box', id: 'bin-' + b.id }, g);
+      txt(ctx, x + BW / 2, BY + 18, b.name, 'mono small', g, 'middle');
+      txt(ctx, x + BW / 2, BY + 32, b.sub, 'mono small muted', g, 'middle');
+      ctx.state.binFill[b.id] = 0;
+    });
+  }
+
+  function routeCard(ctx, label, binId) {
+    var i = BINS.findIndex(function (b) { return b.id === binId; });
+    var g = ctx.group();
+    ctx.el('rect', { x: -56, y: -11, width: 112, height: 22, rx: 5, class: 'box signal' }, g);
+    txt(ctx, 0, 4, label, 'mono small', g, 'middle');
+    ctx.place(g, 380, 60);
+    var n = ctx.state.binFill[binId]++;
+    var tx = binX(i) + BW / 2, ty = BY + 52 + n * 24;
+    ctx.log(label + ' → ' + BINS[i].name, 'info');
+    return ctx.move(g, tx, 340, 450).then(function () { return ctx.move(g, tx, ty, 350); }).then(function () {
+      var r = document.getElementById('bin-' + binId);
+      if (r) { r.setAttribute('class', 'box ok'); ctx.flash(r); }
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One dataset, two layouts',
+      say: 'User u42 has three orders. On the left they live in normalised tables; on the right in one document per user. Both run on three shards.',
+    },
+    setup: function (ctx) {
+      ctx.state.count = { L: { reads: 0, writes: 0 }, R: { reads: 0, writes: 0 } };
+      drawPanels(ctx);
+      drawBins(ctx);
+      setCounter(ctx, 'L'); setCounter(ctx, 'R');
+    },
+    steps: [
+      {
+        title: 'Load the same data both ways',
+        say: 'Relational: each fact is stored once, and orders point to users and products by id. Document: u42 is one record with its orders embedded, and each order copies the product name.',
+        run: function (ctx) {
+          ctx.log('Relational: users, orders, products tables; orders sharded by order_id', 'info');
+          ctx.log('Document: one record per user, sharded by user_id', 'info');
+          return ctx.fade(ctx.state.contents, 1, 600);
+        },
+      },
+      {
+        title: 'Relational read: the join goes to every shard',
+        say: '"Show u42 with all orders" needs the user row plus orders that sit on any shard. That is a scatter-gather: four hops and a merge in the app or coordinator.',
+        run: function (ctx) {
+          var r = ctx.state.rows;
+          [r.user, r.o1, r.o2, r.o3].forEach(function (t) { t.setAttribute('class', 'mono small fill-signal'); });
+          return go(ctx, LX, 0).then(function () { return back(ctx, LX, 0); })
+            .then(function () {
+              ctx.state.count.L.reads = 1; setCounter(ctx, 'L');
+              return Promise.all([0, 1, 2].map(function (i) { return go(ctx, LX, i, '', 700); }));
+            })
+            .then(function () { return Promise.all([0, 1, 2].map(function (i) { return back(ctx, LX, i); })); })
+            .then(function () {
+              ctx.state.count.L.reads = 4; setCounter(ctx, 'L');
+              ctx.log('SQL read: 1 user hop + 3 order hops = 4 (scatter-gather)', 'warn');
+            });
+        },
+      },
+      {
+        title: 'Document read: one hop',
+        say: 'The document already holds everything the screen needs, and the shard key is user_id. One request to one shard. This is why denormalised stores scale out so easily.',
+        run: function (ctx) {
+          ctx.flash(ctx.state.shard.R[1]);
+          ctx.state.shard.R[1].setAttribute('class', 'box signal');
+          return go(ctx, RX, 1).then(function () { return back(ctx, RX, 1); }).then(function () {
+            ctx.state.count.R.reads = 1; setCounter(ctx, 'R');
+            ctx.log('Document read: 1 hop, no join', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Rename a product: SQL writes one row',
+        say: 'Rename "Laptop" to "Laptop Pro". Orders only store the id p2, so one row in products changes. Every future join sees the new name.',
+        run: function (ctx) {
+          ctx.state.shard.R[1].setAttribute('class', 'box');
+          return go(ctx, LX, 1, 'accent').then(function () {
+            var p = ctx.state.rows.prod;
+            p.textContent = 'p2 Laptop Pro';
+            p.setAttribute('class', 'mono small fill-accent');
+            ctx.flash(p);
+            ctx.state.count.L.writes = 1; setCounter(ctx, 'L');
+            ctx.log('SQL write: UPDATE products SET name=... WHERE id=p2 (1 row)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Rename a product: documents write every copy',
+        say: 'The name was copied into every order inside every user document. Now four copies on three shards must change. Until they all do, readers see old and new names mixed.',
+        run: function (ctx) {
+          var map = [0, 1, 1, 2];
+          var chain = Promise.resolve();
+          ctx.state.rows.d.forEach(function (t, k) {
+            chain = chain.then(function () {
+              return go(ctx, RX, map[k], 'accent', 450).then(function () {
+                t.textContent = t.textContent.replace('Laptop', 'Laptop Pro');
+                t.setAttribute('class', 'mono small fill-accent');
+                ctx.flash(t);
+                ctx.state.count.R.writes = k + 1; setCounter(ctx, 'R');
+              });
+            });
+          });
+          return chain.then(function () { ctx.log('Document write: 4 copies updated across 3 shards', 'warn'); });
+        },
+      },
+      {
+        title: 'Move Rs 500 from A to B, crash half-way: SQL',
+        say: 'Inside BEGIN ... COMMIT the debit is applied, then the process dies before COMMIT. The database rolls back. A + B is still 1000.',
+        run: function (ctx) {
+          var b = ctx.state.bal.L;
+          b.textContent = 'A=1000  B=0     total=1000';
+          b.setAttribute('class', 'mono');
+          return ctx.wait(300).then(function () {
+            b.textContent = 'BEGIN; A=500 ... CRASH';
+            b.setAttribute('class', 'mono fill-bad');
+            ctx.log('SQL: debit applied inside transaction, then crash', 'warn');
+            return ctx.wait(700);
+          }).then(function () {
+            b.textContent = 'ROLLBACK → A=1000 B=0 total=1000';
+            b.setAttribute('class', 'mono fill-ok');
+            ctx.flash(b);
+            ctx.log('SQL: no COMMIT, so rollback. Invariant holds', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Same crash with two separate writes',
+        say: 'Without a multi-item transaction, debit A and credit B are two independent writes. The first lands, the crash kills the second, and Rs 500 disappears. You would need a saga or an outbox to fix this in app code.',
+        run: function (ctx) {
+          var b = ctx.state.bal.R;
+          b.textContent = 'A=1000  B=0     total=1000';
+          b.setAttribute('class', 'mono');
+          return go(ctx, RX, 0, 'accent', 450).then(function () {
+            b.textContent = 'write 1: A=500 ... CRASH';
+            b.setAttribute('class', 'mono fill-warn');
+            return ctx.wait(600);
+          }).then(function () {
+            b.textContent = 'A=500  B=0   total=500  ✗';
+            b.setAttribute('class', 'mono fill-bad');
+            ctx.flash(b);
+            ctx.log('Two writes: A debited, B never credited. Rs 500 lost', 'bad');
+          });
+        },
+      },
+      {
+        title: 'So: choose by access pattern',
+        say: 'There is no winner. Each workload goes to the store whose strength matches its main query and its consistency need.',
+        run: function (ctx) {
+          return Promise.all([ctx.fade(ctx.state.panels, 0.18, 400), ctx.fade(ctx.state.binsG, 1, 500)]).then(function () {
+            return routeCard(ctx, 'Wallet ledger', 'pg');
+          }).then(function () { return routeCard(ctx, 'Sessions by id', 'redis'); })
+            .then(function () { return routeCard(ctx, 'IoT 100k w/s', 'cass'); });
+        },
+      },
+      {
+        title: 'Search, graphs and flexible shapes',
+        say: 'Full-text search needs an inverted index. Friends-of-friends needs graph traversal. A catalog where each category has different fields fits a document, or a Postgres JSONB column.',
+        run: function (ctx) {
+          return routeCard(ctx, 'Product search', 'es')
+            .then(function () { return routeCard(ctx, 'Friend graph', 'neo'); })
+            .then(function () { return routeCard(ctx, 'Catalog attrs', 'mongo'); })
+            .then(function () { return routeCard(ctx, 'Admin CRUD', 'pg'); });
+        },
+      },
+      {
+        title: 'Polyglot: Postgres stays the source of truth',
+        say: 'Real systems combine them. Postgres holds the truth; CDC streams changes into Elasticsearch; Redis caches hot reads (cache-aside). Search and cache can always be rebuilt from Postgres.',
+        run: function (ctx) {
+          var cx = function (i) { return binX(i) + BW / 2; };
+          var cdc = [[cx(0), BY], [cx(0), 372], [cx(3), 372], [cx(3), BY]];
+          var cache = [[cx(1), BY], [cx(1), 356], [cx(0) + 12, 356], [cx(0) + 12, BY]];
+          var line = function (pts) { return pts.map(function (p) { return p.join(','); }).join(' '); };
+          var w1 = ctx.el('polyline', { points: line(cdc), class: 'wire accent dashed', opacity: 0 });
+          var w2 = ctx.el('polyline', { points: line(cache), class: 'wire dashed', opacity: 0 });
+          txt(ctx, cx(2), 368, 'CDC stream', 'mono small', null, 'middle');
+          txt(ctx, cx(1) + 6, 352, 'cache-aside miss', 'mono small');
+          ctx.state.binsG.querySelector('text').textContent = 'Polyglot persistence: one system, many stores';
+          ctx.log('Postgres → CDC → Elasticsearch (rebuildable index)', 'info');
+          ctx.log('Redis miss → read Postgres → fill cache', 'info');
+          return Promise.all([ctx.fade(w1, 1, 300), ctx.fade(w2, 1, 300)])
+            .then(function () { return ctx.packet(cdc, { cls: 'accent', ms: 900 }); })
+            .then(function () { return ctx.packet(cache, { ms: 700 }); });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it (independent of the stage, survives Prev/Reset) ----
+  var W = [100, 1000, 5000, 20000, 50000, 100000, 500000];
+  function lbl(n) { return n >= 1000 ? (n / 1000) + 'k' : String(n); }
+  function decide() {
+    var g = function (id) { return document.getElementById(id); };
+    var w = W[+g('t-writes').value];
+    g('t-wv').textContent = lbl(w);
+    var out, why;
+    if (g('t-money').checked) { out = 'Postgres / MySQL'; why = 'Money needs atomic multi-row writes and constraints. Shard later (Vitess, Citus) if write volume demands it.'; }
+    else if (g('t-search').checked) { out = 'Elasticsearch, fed by CDC'; why = 'An inverted index handles full-text and ranking. Keep the source of truth in a primary DB.'; }
+    else if (g('t-graph').checked) { out = 'Graph DB (Neo4j / Neptune)'; why = 'Multi-hop traversal is the core query. For one-hop follows, SQL or wide-column is enough.'; }
+    else if (w >= 50000) { out = 'Cassandra / ScyllaDB'; why = 'Write volume is beyond one primary. LSM-tree storage makes appends cheap; partition by key + time bucket.'; }
+    else if (g('t-key').checked) { out = w >= 5000 ? 'DynamoDB' : 'Redis or DynamoDB'; why = 'Get/put by exact key. Redis if it fits in RAM and can be rebuilt; DynamoDB for durable data at any scale.'; }
+    else if (g('t-flex').checked) { out = 'MongoDB, or Postgres JSONB'; why = 'Flexible nested records. JSONB keeps joins and ACID if the rest of the data is relational.'; }
+    else { out = 'Postgres (the default)'; why = 'Nothing pushes you out of relational, so keep ACID, joins and constraints.'; }
+    g('t-out').textContent = out;
+    g('t-why').textContent = why;
+  }
+  document.getElementById('try').addEventListener('input', decide);
+  decide();
+})();
+</script>
+</body>
+</html>

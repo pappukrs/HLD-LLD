@@ -86,7 +86,7 @@ The other common design is an **overlay**: each transaction holds its own map of
 ## Step 5: extensions interviewers ask after you finish
 
 1. **Active expiry.** Lazy expiry leaves expired keys in memory if nobody reads them. Redis also samples keys with a TTL in the background and deletes expired ones. Keep a min-heap of `(expiresAt, key)` and pop expired keys on each operation, or on a timer.
-2. **Memory limit and eviction.** Add an LRU eviction policy (see [LRU / LFU Cache](../02-lru-cache/)). Make it a strategy so LFU can replace it.
+2. **Memory limit and eviction.** Add an LRU eviction policy (see [LRU / LFU Cache](../02-lru-cache)). Make it a strategy so LFU can replace it.
 3. **`count(value)`** (how many keys hold this value) in O(1). Keep a second map `value → count` and update it on every write and every undo.
 4. **Many clients.** Each client gets its own transaction stack. Now you need isolation: two clients writing the same key in open transactions. Options: a lock per key, or optimistic checks at commit (like Redis `WATCH`).
 5. **Persistence.** Append each committed write to a log file (like Redis AOF). On restart, replay the log. Snapshots make the replay shorter.
@@ -101,6 +101,6 @@ The other common design is an **overlay**: each transaction holds its own map of
 
 ## Concepts used
 
-- [Command (and Memento)](../../concepts/patterns/p13-command.md) · [TypeScript for LLD (generics)](../../concepts/05-ts-for-lld.md)
-- HLD link: [Distributed Key-Value Store](../../../hld/problems/04-key-value-store/) · [Distributed Cache (Redis)](../../../hld/problems/17-distributed-cache/)
-- Visual: [Command: undo and redo](../../../visuals/v27-command-undo-redo.html)
+- [Command (and Memento)](../../4-behavioral/L23-command/README.md) · [TypeScript for LLD (generics)](../../1-foundations/L01-classes-and-interfaces/README.md)
+- HLD link: [Distributed Key-Value Store](../../../hld/case-studies/04-key-value-store) · [Distributed Cache (Redis)](../../../hld/case-studies/17-distributed-cache)
+- Visual: [Command: undo and redo](../../4-behavioral/L23-command/visual.html)

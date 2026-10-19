@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L31 Repository and DI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try .btn.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L31 · Machine coding</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Repository and dependency injection</h1>
+    <p class="lede">A wallet service that builds its own DB pool and reads the real clock cannot be tested or changed. Pull the dependencies out, put storage behind an interface, and let one composition root wire them. Then swap storage live and watch the service not change.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Wallet service, repository interface, implementations and composition root"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Swap in at step 7</span>
+        <button class="btn" type="button" data-impl="PgWalletRepo">Postgres</button>
+        <button class="btn" type="button" data-impl="CachedWalletRepo">Cached (Redis + PG)</button>
+        <button class="btn" type="button" data-impl="DynamoWalletRepo">DynamoDB</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Interface / wiring</span>
+        <span><i style="background: var(--signal)"></i>Call in flight</span>
+        <span><i style="background: var(--ok)"></i>Saved / passing</span>
+        <span><i style="background: var(--bad)"></i>Hard-wired / conflict</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Key lines (highlighted with the step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">private db = new Pool(process.env.DATABASE_URL) // before</span><span class="ln" data-l="2">interface WalletRepository {</span><span class="ln" data-l="3">  findById(id): Promise&lt;Wallet | undefined&gt;</span><span class="ln" data-l="4">  save(w: Wallet): Promise&lt;void&gt; // version check</span><span class="ln" data-l="5">}</span><span class="ln" data-l="6">class WalletService {</span><span class="ln" data-l="7">  constructor(wallets, ledger, clock, ids) {}</span><span class="ln" data-l="8">}</span><span class="ln" data-l="9">// main.ts: composition root</span><span class="ln" data-l="10">new WalletService(new InMemoryRepo(), ledger, clock, ids)</span><span class="ln" data-l="11">findById(id) { return { ...this.rows.get(id) } } // copy</span><span class="ln" data-l="12">if (cur.version !== w.version - 1) throw Conflict</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Storage goes through a repository per aggregate. Today it's an in-memory map that returns copies; later it's Postgres with the same interface. The service gets its repositories, clock and id generator through the constructor, and main.ts is the only place that knows concrete classes."</p>
+      <p class="say">"Save is a conditional update on a version column, so a racing write fails and retries instead of losing money."</p>
+    </div>
+    <div class="note wide">
+      <h3>Ways to wire dependencies</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Hard-wired <code>new</code></th><th>Constructor injection + main.ts</th><th>DI container (NestJS)</th></tr></thead>
+          <tbody>
+            <tr><td>Testable with fakes</td><td>No</td><td>Yes, pass fakes</td><td>Yes, <code>overrideProvider</code></td></tr>
+            <tr><td>Swap storage</td><td>Edit the service</td><td>Change one line in main.ts</td><td>Change <code>useClass</code></td></tr>
+            <tr><td>Missing dependency found</td><td>n/a</td><td>Compile time</td><td>Runtime (on boot)</td></tr>
+            <tr><td>Setup cost</td><td>None</td><td>Low</td><td>Modules, tokens, decorators</td></tr>
+            <tr><td>Use in a 90-min round</td><td>No</td><td>Yes</td><td>Rarely</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why must the in-memory repo return copies?</summary><div>So a caller cannot change stored state without calling save. A real DB read returns a fresh object, so the fake must behave the same or tests lie.</div></details>
+      <details class="qa"><summary>Where should <code>new PgWalletRepo()</code> appear?</summary><div>Only in the composition root (main.ts or a Nest module). Never in a service.</div></details>
+      <details class="qa"><summary>How does Nest inject an interface?</summary><div>It cannot by type, because interfaces are erased. Bind a token: <code>{ provide: WALLET_REPO, useClass: PgWalletRepo }</code> and <code>@Inject(WALLET_REPO)</code>.</div></details>
+      <details class="qa"><summary>Two requests read v3 and both save. What happens?</summary><div>The first save moves the row to v4. The second save says "I am based on v3", the check fails, it throws a conflict, and the caller reloads and retries.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../problems/19-payment-wallet/README.md">19 Payment wallet</a></li>
+        <li><a href="../../problems/12-library-management/README.md">12 Library management</a></li>
+        <li>Next: <a href="../L32-concurrency-in-node/visual.html">L32 Concurrency in Node</a></li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var IMPL = 'PgWalletRepo';
+  var SVC = { x: 270, y: 120, w: 220, h: 96 };
+  var IFACE = { x: 270, y: 262, w: 220, h: 40 };
+  var IMPL_POS = { x: 270, y: 360, w: 220, h: 46 };
+
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+  function box(ctx, x, y, w, h, label, cls, sub, parent) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: 0, y: 0, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: w / 2, y: sub ? h / 2 - 2 : h / 2 + 4, 'text-anchor': 'middle', class: 'mono', text: label }, g);
+    var s = null;
+    if (sub) s = ctx.el('text', { x: w / 2, y: h / 2 + 13, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g);
+    ctx.place(g, x, y);
+    g._r = r; g._s = s;
+    return g;
+  }
+  function c(b, dx, dy) { return [b.x + b.w / 2 + (dx || 0), b.y + b.h / 2 + (dy || 0)]; }
+  function setRow(ctx, bal, ver) {
+    ctx.state.row.textContent = 'w1  balance=' + bal + '  v' + ver;
+    ctx.state.bal = bal; ctx.state.ver = ver;
+    ctx.flash(ctx.state.rowBox);
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: { title: 'A wallet service, hard-wired', say: 'The service creates its own Postgres pool, writes SQL inline and reads the real clock. Step through to pull those out and inject them.' },
+    setup: function (ctx) {
+      hl([]);
+      var svc = box(ctx, SVC.x, SVC.y, SVC.w, SVC.h, 'WalletService', '');
+      ctx.el('text', { x: SVC.w / 2, y: 20, 'text-anchor': 'middle', class: 'title', text: 'WalletService' }, svc);
+      svc.querySelector('text.mono').remove();
+      ctx.state.svc = svc;
+      ctx.state.chips = [['new Pool()', 10, 34], ['SQL strings', 112, 34], ['new Date()', 10, 64], ['credit rules', 112, 64]].map(function (d, i) {
+        var g = ctx.group({}, svc);
+        ctx.el('rect', { x: 0, y: 0, width: 98, height: 24, rx: 5, class: 'box ' + (i === 3 ? 'ok' : 'bad') }, g);
+        ctx.el('text', { x: 49, y: 16, 'text-anchor': 'middle', class: 'mono small', text: d[0] }, g);
+        ctx.place(g, d[1], d[2]);
+        return g;
+      });
+      ctx.state.rowBox = box(ctx, 560, 40, 170, 40, 'w1  balance=0  v1', 'accent');
+      ctx.state.row = ctx.state.rowBox.querySelector('text');
+      ctx.el('text', { x: 560, y: 30, class: 'mono small muted', text: 'stored row' });
+      ctx.state.bal = 0; ctx.state.ver = 1;
+      ctx.state.test = box(ctx, 40, 140, 120, 44, 'unit test', 'signal');
+      ctx.state.wires = ctx.group({ opacity: 0 });
+      ctx.state.extra = ctx.group({ opacity: 0 });
+    },
+    steps: [
+      {
+        title: 'Before: the service builds its own dependencies',
+        say: 'Pool, SQL and the real clock live inside WalletService next to the money rules. You cannot read its needs from the constructor.',
+        run: function (ctx) {
+          hl([1]);
+          ctx.state.chips.slice(0, 3).forEach(function (ch) { ctx.flash(ch); });
+          ctx.log('WalletService: new Pool(), inline SQL, new Date()', 'bad');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'A unit test hits a wall',
+        say: 'The test calls credit(). The call reaches the real Pool and needs a running Postgres. The timestamp is different every run.',
+        run: function (ctx) {
+          hl([1]);
+          return ctx.packet([[160, 162], [SVC.x + 59, SVC.y + 46]], { ms: 700 }).then(function () {
+            return ctx.packet([[SVC.x + 59, SVC.y + 46], [160, 172]], { ms: 600, cls: 'bad', label: 'ECONNREFUSED' });
+          }).then(function () {
+            ctx.state.test._r.setAttribute('class', 'box bad');
+            ctx.log('test: connect ECONNREFUSED 127.0.0.1:5432', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Extract: storage behind an interface, clock outside',
+        say: 'SQL and the pool move into a repository class. The service now talks to WalletRepository, an interface in domain words: findById and save.',
+        run: function (ctx) {
+          hl([2, 3, 4, 5]);
+          var ch = ctx.state.chips;
+          var iface = box(ctx, IFACE.x, IFACE.y, IFACE.w, IFACE.h, '«interface» WalletRepository', 'accent', null, ctx.state.extra);
+          iface._r.setAttribute('stroke-dasharray', '6 4');
+          var clk = box(ctx, 40, 262, 120, 40, 'Clock', 'accent', null, ctx.state.extra);
+          var ids = box(ctx, 40, 320, 120, 40, 'IdGen', 'accent', null, ctx.state.extra);
+          ctx.el('line', { x1: c(SVC)[0], y1: SVC.y + SVC.h, x2: c(SVC)[0], y2: IFACE.y, class: 'wire accent' }, ctx.state.wires);
+          ctx.el('line', { x1: c(IFACE)[0], y1: IFACE.y + IFACE.h, x2: c(IFACE)[0], y2: IMPL_POS.y, class: 'wire dashed' }, ctx.state.wires);
+          ctx.state.clk = clk; ctx.state.ids = ids;
+          return Promise.all([
+            ctx.move(ch[0], 20, 250, 700), ctx.move(ch[1], 112, 250, 700), ctx.move(ch[2], -230, 150, 700),
+            ctx.move(ch[3], 61, 50, 700),
+          ]).then(function () {
+            ch.slice(0, 3).forEach(function (x) { x.setAttribute('opacity', 0); });
+            ctx.state.impl = box(ctx, IMPL_POS.x, IMPL_POS.y, IMPL_POS.w, IMPL_POS.h, 'InMemoryWalletRepo', 'ok', 'Map<string, Wallet>');
+            ctx.state.impl.setAttribute('opacity', 0);
+            return Promise.all([ctx.fade(ctx.state.extra, 1, 400), ctx.fade(ctx.state.wires, 1, 400), ctx.fade(ctx.state.impl, 1, 400)]);
+          }).then(function () {
+            ctx.log('WalletRepository { findById, save }', 'info');
+            ctx.log('InMemoryWalletRepo implements it (round)');
+          });
+        },
+      },
+      {
+        title: 'Composition root wires everything',
+        say: 'main.ts is the only place that calls new on concrete classes. It hands the repo, clock and id generator to the service constructor.',
+        run: function (ctx) {
+          hl([7, 9, 10]);
+          var root = box(ctx, 40, 40, 150, 44, 'main.ts', 'signal', 'composition root');
+          root.setAttribute('opacity', 0);
+          ctx.state.root = root;
+          var from = [190, 62], to = [SVC.x, SVC.y + 30];
+          return ctx.fade(root, 1, 300)
+            .then(function () { return ctx.packet([from, [230, 62], [230, to[1]], to], { ms: 500, cls: 'accent', label: 'repo' }); })
+            .then(function () { return ctx.packet([from, [230, 62], [230, to[1] + 20], [SVC.x, to[1] + 20]], { ms: 500, cls: 'accent', label: 'clock' }); })
+            .then(function () { return ctx.packet([from, [230, 62], [230, to[1] + 40], [SVC.x, to[1] + 40]], { ms: 500, cls: 'accent', label: 'ids' }); })
+            .then(function () {
+              ctx.el('path', { d: 'M 190 62 L 380 62 L 380 120', class: 'wire dashed' }, ctx.state.wires);
+              ctx.el('path', { d: 'M 160 282 L 230 282 L 230 190 L 270 190', class: 'wire accent' }, ctx.state.wires);
+              ctx.el('path', { d: 'M 160 340 L 240 340 L 240 205 L 270 205', class: 'wire accent' }, ctx.state.wires);
+              ctx.log('new WalletService(repo, ledger, clock, ids)', 'ok');
+            });
+        },
+      },
+      {
+        title: 'credit(w1, 500): load a copy, apply rules, save v2',
+        say: 'The service asks the interface for w1. The repo returns a copy. The service applies the rule and saves with version 2. The stored row changes only on save.',
+        run: function (ctx) {
+          hl([3, 4, 11]);
+          var s = c(SVC, 0, 48), i = c(IFACE), m = c(IMPL_POS);
+          return ctx.packet([s, i, m], { ms: 600, label: 'findById(w1)' })
+            .then(function () { return ctx.packet([m, i, s], { ms: 600, cls: 'ok', label: 'copy v1' }); })
+            .then(function () { return ctx.packet([s, i, m], { ms: 600, label: 'save v2' }); })
+            .then(function () {
+              setRow(ctx, 500, 2);
+              ctx.log('credit 500 → stored w1 balance=500 v2', 'ok');
+              ctx.log('ledger.append(CREDIT 500 @ fixed clock)');
+            });
+        },
+      },
+      {
+        title: 'A copy is not a live reference',
+        say: 'A caller changes its copy to 1,000,000 but never calls save. The stored row does not move. Postgres works this way, so the fake must too.',
+        run: function (ctx) {
+          hl([11]);
+          var g = box(ctx, 560, 150, 170, 40, 'copy: balance=1000000', 'bad');
+          g.setAttribute('opacity', 0);
+          return ctx.fade(g, 1, 300).then(function () {
+            ctx.flash(ctx.state.rowBox);
+            ctx.log('copy edited, no save → stored balance still ' + ctx.state.bal, 'ok');
+            return ctx.wait(500);
+          }).then(function () { return ctx.fade(g, 0, 300); });
+        },
+      },
+      {
+        title: 'Swap the implementation; the service does not change',
+        say: 'Production needs a real store. One line in main.ts changes. WalletService and its rules stay byte-for-byte the same. Pick another target in Try it.',
+        run: function (ctx) {
+          hl([10]);
+          var old = ctx.state.impl;
+          var sub = { PgWalletRepo: 'UPDATE ... WHERE version=$3', CachedWalletRepo: 'Redis in front of PG', DynamoWalletRepo: 'ConditionExpression' }[IMPL];
+          return ctx.move(old, IMPL_POS.x + 300, IMPL_POS.y, 500).then(function () {
+            old.setAttribute('opacity', 0);
+            var nu = box(ctx, IMPL_POS.x - 260, IMPL_POS.y, IMPL_POS.w, IMPL_POS.h, IMPL, 'ok', sub);
+            ctx.state.impl = nu;
+            return ctx.move(nu, IMPL_POS.x, IMPL_POS.y, 600);
+          }).then(function () {
+            ctx.flash(ctx.state.svc);
+            ctx.log('main.ts: new ' + IMPL + '() → service unchanged', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Race: two credits read the same version',
+        say: 'Request A and request B both load w1 at v2. A saves v3 first. B also claims "I am based on v2", but the row is already v3, so save throws a conflict.',
+        run: function (ctx) {
+          hl([12]);
+          var m = c(IMPL_POS), i = c(IFACE);
+          var A = [i[0] - 60, IFACE.y - 10], B = [i[0] + 60, IFACE.y - 10];
+          return Promise.all([
+            ctx.packet([m, i, A], { ms: 600, cls: 'ok', label: 'A: v2' }),
+            ctx.packet([m, i, B], { ms: 600, cls: 'ok', label: 'B: v2' }),
+          ]).then(function () {
+            return ctx.packet([A, i, m], { ms: 500, label: 'A save v3' });
+          }).then(function () {
+            setRow(ctx, ctx.state.bal + 50, 3);
+            ctx.log('A: save(v3) based on v2 → ok', 'ok');
+            return ctx.packet([B, i, m], { ms: 500, label: 'B save v3' });
+          }).then(function () {
+            ctx.state.impl._r.setAttribute('class', 'box bad');
+            ctx.flash(ctx.state.impl);
+            return ctx.packet([m, i, B], { ms: 500, cls: 'bad', label: 'Conflict' });
+          }).then(function () {
+            ctx.log('B: save(v3) based on v2 → ConcurrencyError', 'bad');
+          });
+        },
+      },
+      {
+        title: 'B reloads and retries',
+        say: 'B reads the fresh row at v3, applies +70 and saves v4. Both credits land; nothing is lost. In SQL this is UPDATE ... WHERE id=$1 AND version=$2.',
+        run: function (ctx) {
+          hl([4, 12]);
+          var m = c(IMPL_POS), i = c(IFACE), B = [i[0] + 60, IFACE.y - 10];
+          ctx.state.impl._r.setAttribute('class', 'box ok');
+          return ctx.packet([m, i, B], { ms: 500, cls: 'ok', label: 'B: v3' })
+            .then(function () { return ctx.packet([B, i, m], { ms: 500, label: 'save v4' }); })
+            .then(function () {
+              setRow(ctx, ctx.state.bal + 70, 4);
+              ctx.log('B retry: save(v4) based on v3 → ok, balance ' + ctx.state.bal, 'ok');
+            });
+        },
+      },
+      {
+        title: 'The unit test now passes in milliseconds',
+        say: 'The test builds the service with an in-memory repo and a fixed clock. No Postgres, no mocks library, same result every run.',
+        run: function (ctx) {
+          hl([10]);
+          var t = ctx.state.test;
+          return ctx.packet([[160, 162], [SVC.x, SVC.y + 50]], { ms: 600 }).then(function () {
+            return ctx.packet([[SVC.x, SVC.y + 50], [160, 170]], { ms: 500, cls: 'ok', label: 'pass 3ms' });
+          }).then(function () {
+            t._r.setAttribute('class', 'box ok');
+            ctx.flash(t);
+            ctx.log('test: new WalletService(new InMemoryRepo(), fakeLedger, () => FIXED, seqIds) ✓', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  function syncTry() {
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-impl]'), function (b) { b.classList.toggle('sel', b.dataset.impl === IMPL); });
+  }
+  document.getElementById('try').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || !b.dataset.impl) return;
+    IMPL = b.dataset.impl;
+    syncTry();
+    lab.reset();
+  });
+  syncTry();
+})();
+</script>
+</body>
+</html>

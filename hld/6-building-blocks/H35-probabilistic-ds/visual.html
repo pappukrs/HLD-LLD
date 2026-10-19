@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H35 Bloom, Count-Min, HyperLogLog</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .try input[type="text"] { font: 13px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 12em; max-width: 100%; }
+  .try .hint { font-size: 12px; color: var(--muted); flex-basis: 100%; }
+  .try .mode { font: 12px var(--font-mono); color: var(--accent); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H35 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Bloom filter, Count-Min sketch, HyperLogLog</h1>
+    <p class="lede">Three tiny structures that trade a small, one-sided error for huge memory savings. Bloom: <b>"definitely not / maybe yes"</b>. Count-Min: <b>"about how many times, never less"</b>. HyperLogLog: <b>"about how many distinct"</b>.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Bloom filter bit array, Count-Min sketch table and HyperLogLog registers"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <b style="font-size:13px">Try it</b>
+        <span class="mode" id="try-mode">on: Bloom filter</span>
+        <input type="text" id="word-in" maxlength="16" placeholder="e.g. lion" autocomplete="off" spellcheck="false" aria-label="Item">
+        <button class="btn" type="button" id="btn-add">Add</button>
+        <button class="btn" type="button" id="btn-check">Check</button>
+        <span class="hint">Acts on whatever structure is on screen. Bloom: add a word, or check it. Count-Min: add one event, or estimate its count. HyperLogLog: add a user id and watch the estimate. Enter = check, Shift+Enter = add. Reset returns to the demo data.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Set bit / counter in use</span>
+        <span><i style="background: var(--signal)"></i>Being read now</span>
+        <span><i style="background: var(--ok)"></i>Correct answer</span>
+        <span><i style="background: var(--bad)"></i>Zero bit / error</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I'll put a Bloom filter in front of the database. For a key that does not exist, the filter says 'no' and we skip the read. It can give false positives but never false negatives. For 1% false positives I need about 10 bits per item and 7 hashes, so 1 billion keys fit in about 1.2 GB."</p>
+      <p class="say">"For trending hashtags I use a Count-Min sketch plus a min-heap of size k. The sketch can only overcount, by at most ε times the total. For unique visitors I keep one HyperLogLog per page per hour in Redis: 12 KB each, 0.81% error, and I merge hours into days with PFMERGE. Billing numbers stay exact in the batch path."</p>
+    </div>
+    <div class="note">
+      <h3>The one-sided error is the point</h3>
+      <ul>
+        <li><b>Bloom</b>: never a false "no". A "maybe" costs one real lookup.</li>
+        <li><b>Count-Min</b>: never undercounts. Collisions only add, so take the minimum row.</li>
+        <li><b>HyperLogLog</b>: two-sided but small, ±1.04/√m. Mergeable with a max per register.</li>
+        <li>Pick the structure whose wrong answer is cheap for your use case.</li>
+        <li>Never use them where money or a legal number depends on the result.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Which one, and what it costs</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Exact (hash set / map)</th><th>Bloom filter</th><th>Count-Min sketch</th><th>HyperLogLog</th></tr></thead>
+          <tbody>
+            <tr><td>Question</td><td>Anything</td><td>Is x in the set?</td><td>How often did x appear?</td><td>How many distinct items?</td></tr>
+            <tr><td>Error</td><td>None</td><td>False positives only</td><td>Overcount only, ≤ ε·N</td><td>±0.81% (Redis)</td></tr>
+            <tr><td>Memory, 1 B items</td><td>Tens of GB</td><td>~1.2 GB at 1%</td><td>~76 KB at ε = δ = 0.1%</td><td>12 KB</td></tr>
+            <tr><td>Delete</td><td>Yes</td><td>No (counting Bloom / cuckoo: yes)</td><td>Decrement is possible but breaks the guarantee if misused</td><td>No</td></tr>
+            <tr><td>Merge two</td><td>Union (big)</td><td>Bitwise OR (same m, k)</td><td>Add counters (same hashes)</td><td>Max per register</td></tr>
+            <tr><td>Used in</td><td>Small sets</td><td>Cassandra/RocksDB SSTables, crawler, cache penetration</td><td>Trending, top-k, abuse detection</td><td>DAU, unique visitors, Redis PFCOUNT</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why can a Bloom filter never say "no" for an item you added?</summary><div>Adding sets all k bits of the item to 1, and bits never go back to 0. A "no" needs at least one 0 bit among the item's k bits.</div></details>
+      <details class="qa"><summary>Count-Min says #diwali appeared 2 times, but it never appeared. Is the sketch broken?</summary><div>No. Every counter it read was shared with other tags. Collisions only add, so the estimate is an upper bound: the true count is between 0 and 2. Wider rows (more columns) make it tighter.</div></details>
+      <details class="qa"><summary>Why can you merge two HyperLogLogs but not add two distinct counts?</summary><div>Adding counts double-counts users seen in both hours. HLL merge takes the max per register, which is exactly the HLL of the union.</div></details>
+      <details class="qa"><summary>The Bloom filter is full and false positives hit 20%. What now?</summary><div>It cannot grow in place. Rebuild a bigger one from the source of truth, or use a scalable Bloom filter that adds a new, larger layer (RedisBloom supports this).</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="lab-bloom-filter/README.md">lab-bloom-filter</a>, <a href="lab-count-min/README.md">lab-count-min</a></li>
+        <li>Run it: <a href="hands-on/README.md">hands-on</a> (Express sign-up with a Bloom filter)</li>
+        <li>Used in: <a href="../../case-studies/13-web-crawler/README.md">Web crawler</a>, <a href="../../case-studies/20-ad-click-aggregation/README.md">Ad click aggregation</a>, <a href="../../case-studies/01-url-shortener/README.md">URL shortener</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- shared hashing: FNV-1a with a seed + a final mix (deterministic) ----------
+  var SEEDS = [0x811c9dc5, 0x01000193 ^ 0x5bd1e995, 0x9747b28c];
+  function fnv(s, seed) {
+    var h = seed >>> 0;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995) >>> 0; h ^= h >>> 15;
+    return h >>> 0;
+  }
+  function empty(g) { while (g.firstChild) g.removeChild(g.firstChild); return g; }
+  function banner(ctx, text, kind) {
+    var b = ctx.state.banner;
+    b.textContent = text;
+    b.setAttribute('class', 'title' + (kind ? ' fill-' + kind : ''));
+  }
+  function sideLines(ctx, title, lines) {
+    var g = empty(ctx.state.side);
+    ctx.el('text', { x: 418, y: 342, class: 'title', text: title }, g);
+    lines.forEach(function (l, i) {
+      ctx.el('text', { x: 418, y: 361 + i * 16, class: 'mono' + (l.cls ? ' ' + l.cls : ''), text: l.t || l }, g);
+    });
+  }
+  function leftLines(ctx, title, lines) {
+    var g = empty(ctx.state.leftPanel);
+    ctx.el('text', { x: 58, y: 338, class: 'title', text: title }, g);
+    lines.forEach(function (l, i) {
+      ctx.el('text', { x: 58, y: 361 + i * 18, class: 'mono' + (l.cls ? ' ' + l.cls : ''), text: l.t || l }, g);
+    });
+  }
+
+  // =====================================================================
+  // Scene 1: Bloom filter (m = 24 bits, k = 3)
+  // =====================================================================
+  var M = 24, K = 3;
+  var X0 = 44, PITCH = 28, CW = 26, CY = 196, CH = 32;
+  var WX = 380, WY = 76;
+  function positions(w) { return SEEDS.map(function (s) { return fnv(w, s) % M; }); }
+  function cellX(i) { return X0 + i * PITCH; }
+  function cellCenter(i) { return [cellX(i) + CW / 2, CY]; }
+
+  function setCell(ctx, i, mode) {
+    var c = ctx.state.cells[i], on = ctx.state.bits[i] === 1;
+    var cls = 'box' + (on ? ' accent' : '');
+    if (mode === 'check') cls += ' hl';
+    if (mode === 'zero') cls = 'box bad hl';
+    c.rect.setAttribute('class', cls);
+    c.text.textContent = on ? '1' : '0';
+    c.text.setAttribute('class', on ? 'mono' : 'mono muted');
+  }
+  function clearMarks(ctx) { for (var i = 0; i < M; i++) setCell(ctx, i); }
+  function updateStats(ctx) {
+    var s = ctx.state, set = 0;
+    s.bits.forEach(function (b) { set += b; });
+    var fill = set / M;
+    var list = s.items.join(', ');
+    leftLines(ctx, 'Filter state', [
+      'Items added: n = ' + s.items.length,
+      { t: list.length > 40 ? '…' + list.slice(list.length - 39) : (list || '(none)'), cls: 'small muted' },
+      'Bits set: ' + set + ' / ' + M + ' (' + Math.round(fill * 100) + '% full)',
+      { t: 'False-positive chance ≈ (' + set + '/' + M + ')³ = ' + (Math.pow(fill, K) * 100).toFixed(1) + '%', cls: 'small' },
+    ]);
+  }
+  function showWord(ctx, word) {
+    var s = ctx.state, pos = positions(word);
+    s.wordText.textContent = '"' + word + '"';
+    s.hashText.textContent = pos.map(function (p, i) { return 'h' + (i + 1) + ' → ' + p; }).join('  ·  ');
+    empty(s.probe);
+    pos.forEach(function (p) {
+      var c = cellCenter(p);
+      ctx.el('path', { d: 'M' + WX + ' ' + (WY + 56) + ' L' + c[0] + ' ' + (c[1] - 2), class: 'wire accent dashed' }, s.probe);
+    });
+    return pos;
+  }
+  function sendHashes(ctx, pos) {
+    if (ctx.instant) return Promise.resolve();
+    return Promise.all(pos.map(function (p) {
+      var c = cellCenter(p);
+      return ctx.packet([[WX, WY + 56], [c[0], c[1] - 4]], { ms: 550, cls: 'accent', r: 5 });
+    }));
+  }
+  function bloomAdd(ctx, word, animate) {
+    var st = ctx.state, pos = showWord(ctx, word);
+    clearMarks(ctx);
+    return (animate ? sendHashes(ctx, pos) : Promise.resolve()).then(function () {
+      if (ctx.state !== st) return;
+      var fresh = 0;
+      pos.forEach(function (i) { if (!st.bits[i]) fresh++; st.bits[i] = 1; });
+      pos.forEach(function (i) { setCell(ctx, i, 'check'); ctx.flash(st.cells[i].rect); });
+      if (st.items.indexOf(word) < 0) st.items.push(word);
+      updateStats(ctx);
+      banner(ctx, 'Added "' + word + '": bits ' + pos.join(', ') + ' set to 1', 'accent');
+      ctx.log('add "' + word + '" → bits ' + pos.join(',') + (fresh < pos.length ? ' (' + (pos.length - fresh) + ' already 1)' : ''), 'info');
+    });
+  }
+  function bloomCheck(ctx, word, animate) {
+    var st = ctx.state, pos = showWord(ctx, word);
+    clearMarks(ctx);
+    return (animate ? sendHashes(ctx, pos) : Promise.resolve()).then(function () {
+      if (ctx.state !== st) return;
+      var zeros = pos.filter(function (i) { return !st.bits[i]; });
+      pos.forEach(function (i) { setCell(ctx, i, st.bits[i] ? 'check' : 'zero'); });
+      var added = st.items.indexOf(word) >= 0;
+      if (zeros.length) {
+        if (added) {
+          banner(ctx, '"' + word + '": bit ' + zeros[0] + ' is 0, but it WAS added: false negative', 'bad');
+          ctx.log('check "' + word + '" → NO, but it was added: false negative', 'bad');
+        } else {
+          banner(ctx, '"' + word + '": bit ' + zeros[0] + ' is 0 → definitely NOT in the set', 'ok');
+          ctx.log('check "' + word + '" → bit ' + zeros[0] + ' is 0 → definitely not, skip the DB', 'ok');
+        }
+      } else if (added) {
+        banner(ctx, '"' + word + '": all 3 bits are 1 → maybe yes (true positive)', 'accent');
+        ctx.log('check "' + word + '" → maybe → DB confirms: true positive', 'ok');
+      } else {
+        banner(ctx, '"' + word + '": all 3 bits are 1 → maybe yes, but never added (false positive)', 'signal');
+        ctx.log('check "' + word + '" → maybe → DB says no: false positive', 'warn');
+      }
+    });
+  }
+
+  function drawBloom(ctx) {
+    var s = ctx.state, g = s.scene;
+    s.bits = []; s.cells = []; s.items = [];
+    for (var i = 0; i < M; i++) s.bits.push(0);
+    ctx.el('text', { x: X0, y: 30, class: 'title', text: 'Bloom filter: m = 24 bits, k = 3 hashes' }, g);
+    ctx.el('rect', { x: WX - 80, y: WY - 22, width: 160, height: 40, rx: 8, class: 'box signal' }, g);
+    s.wordText = ctx.el('text', { x: WX, y: WY + 4, 'text-anchor': 'middle', class: 'mono', style: 'font-size:14px', text: 'item' }, g);
+    s.hashText = ctx.el('text', { x: WX, y: WY + 42, 'text-anchor': 'middle', class: 'mono small muted', text: 'h1, h2, h3 → bit positions' }, g);
+    s.probe = ctx.group({}, g);
+    for (var j = 0; j < M; j++) {
+      var x = cellX(j);
+      var r = ctx.el('rect', { x: x, y: CY, width: CW, height: CH, rx: 4, class: 'box' }, g);
+      var t = ctx.el('text', { x: x + CW / 2, y: CY + 21, 'text-anchor': 'middle', class: 'mono muted', text: '0' }, g);
+      ctx.el('text', { x: x + CW / 2, y: CY + CH + 16, 'text-anchor': 'middle', class: 'mono small muted', text: String(j) }, g);
+      s.cells.push({ rect: r, text: t });
+    }
+    sideLines(ctx, 'Rules', ['add: set all k bits to 1', 'check: all k bits are 1 → maybe', 'check: any bit is 0 → definitely not', 'bits never go back to 0']);
+    updateStats(ctx);
+  }
+
+  // =====================================================================
+  // Scene 2: Count-Min sketch (d = 3 rows, w = 8 columns)
+  // =====================================================================
+  var D = 3, W = 8, GX = 214, GP = 58, GW = 52, GY0 = 82, GR = 50, GH = 38;
+  var SRC = [110, 140];
+  var STREAM = ['#ipl', '#rain', '#ipl', '#cricket', '#ipl', '#exam', '#rain', '#ipl', '#cat', '#cricket', '#rain', '#ipl'];
+  function cols(word) { return SEEDS.map(function (sd) { return fnv(word, sd) % W; }); }
+  function cmCenter(r, c) { return [GX + c * GP + GW / 2, GY0 + r * GR + GH / 2]; }
+
+  function drawCms(ctx) {
+    var s = ctx.state, g = empty(s.scene);
+    s.mode = 'cms';
+    s.cm = []; s.cmCells = []; s.truth = {}; s.total = 0;
+    ctx.el('text', { x: 44, y: 30, class: 'title', text: 'Count-Min sketch: d = 3 rows × w = 8 counters' }, g);
+    ctx.el('rect', { x: SRC[0] - 70, y: SRC[1] - 22, width: 140, height: 44, rx: 8, class: 'box signal' }, g);
+    s.cmWord = ctx.el('text', { x: SRC[0], y: SRC[1] + 5, 'text-anchor': 'middle', class: 'mono', style: 'font-size:14px', text: 'event' }, g);
+    ctx.el('text', { x: SRC[0], y: SRC[1] + 42, 'text-anchor': 'middle', class: 'mono small muted', text: 'hashtag stream' }, g);
+    for (var r = 0; r < D; r++) {
+      s.cm.push([]); s.cmCells.push([]);
+      ctx.el('text', { x: GX - 10, y: GY0 + r * GR + 24, 'text-anchor': 'end', class: 'mono small muted', text: 'h' + (r + 1) }, g);
+      for (var c = 0; c < W; c++) {
+        s.cm[r].push(0);
+        var x = GX + c * GP, y = GY0 + r * GR;
+        var rect = ctx.el('rect', { x: x, y: y, width: GW, height: GH, rx: 4, class: 'box' }, g);
+        var t = ctx.el('text', { x: x + GW / 2, y: y + 24, 'text-anchor': 'middle', class: 'mono muted', style: 'font-size:13px', text: '0' }, g);
+        s.cmCells[r].push({ rect: rect, text: t });
+      }
+    }
+    for (var c2 = 0; c2 < W; c2++) ctx.el('text', { x: GX + c2 * GP + GW / 2, y: GY0 - 8, 'text-anchor': 'middle', class: 'mono small muted', text: String(c2) }, g);
+    s.banner = ctx.el('text', { x: 380, y: 296, 'text-anchor': 'middle', class: 'title', text: '' }, g);
+    leftLines(ctx, 'Stream so far', ['N = 0 events']);
+    sideLines(ctx, 'Rules', ['add x: +1 at h_r(x) in every row', 'estimate x: MIN of its d counters', 'collisions only add → never under', 'error ≤ ε·N with w = ⌈e/ε⌉']);
+  }
+  function cmPaint(ctx, mark) {
+    var s = ctx.state;
+    for (var r = 0; r < D; r++) for (var c = 0; c < W; c++) {
+      var v = s.cm[r][c], cell = s.cmCells[r][c];
+      cell.text.textContent = String(v);
+      cell.text.setAttribute('class', v ? 'mono' : 'mono muted');
+      var cls = 'box' + (v ? ' accent' : '');
+      if (mark && mark[r] === c) cls += ' hl';
+      cell.rect.setAttribute('class', cls);
+    }
+  }
+  function cmStats(ctx) {
+    var s = ctx.state, keys = Object.keys(s.truth).sort(function (a, b) { return s.truth[b] - s.truth[a]; });
+    leftLines(ctx, 'Stream so far (true counts)', ['N = ' + s.total + ' events'].concat([{ t: keys.slice(0, 4).map(function (k) { return k + ' ×' + s.truth[k]; }).join('  '), cls: 'small' }, { t: (keys.length > 4 ? '+ ' + (keys.length - 4) + ' more tags; ' : '') + 'sketch size never changes', cls: 'small muted' }]));
+  }
+  function cmAdd(ctx, word, animate) {
+    var s = ctx.state, cs = cols(word);
+    s.cmWord.textContent = word;
+    var p = !animate || ctx.instant ? Promise.resolve() : Promise.all(cs.map(function (c, r) {
+      var e = cmCenter(r, c);
+      return ctx.packet([[SRC[0] + 70, SRC[1]], [GX - 20, e[1]], [e[0], e[1]]], { ms: 420, cls: 'accent', r: 5 });
+    }));
+    return p.then(function () {
+      if (ctx.state !== s) return;
+      cs.forEach(function (c, r) { s.cm[r][c]++; });
+      s.truth[word] = (s.truth[word] || 0) + 1; s.total++;
+      cmPaint(ctx, cs);
+      cs.forEach(function (c, r) { ctx.flash(s.cmCells[r][c].rect); });
+      cmStats(ctx);
+    });
+  }
+  function cmEstimate(ctx, word) {
+    var s = ctx.state, cs = cols(word);
+    var vals = cs.map(function (c, r) { return s.cm[r][c]; });
+    var est = Math.min.apply(null, vals), tru = s.truth[word] || 0;
+    s.cmWord.textContent = word;
+    cmPaint(ctx, cs);
+    return { cs: cs, vals: vals, est: est, tru: tru };
+  }
+
+  // =====================================================================
+  // Scene 3: HyperLogLog (m = 16 registers)
+  // =====================================================================
+  var HM = 16, HX = 44, HP = 42, HW = 38, HY = 214;
+  var hll = { alpha: 0.673 };
+  function hparts(id) {
+    var h = fnv(id, SEEDS[0]), b = h & (HM - 1), rest = h >>> 4;
+    return { h: h, bucket: b, rank: Math.clz32(rest) - 4 + 1, rest: rest };
+  }
+  function hllEstimate(R) {
+    var sum = 0, zeros = 0;
+    R.forEach(function (r) { sum += Math.pow(2, -r); if (!r) zeros++; });
+    var E = hll.alpha * HM * HM / sum;
+    if (E < 2.5 * HM && zeros) E = HM * Math.log(HM / zeros); // small-range correction
+    return E;
+  }
+  function drawHll(ctx) {
+    var s = ctx.state, g = empty(s.scene);
+    s.mode = 'hll';
+    s.R = []; s.hCells = []; s.users = {}; s.nUsers = 0;
+    ctx.el('text', { x: 44, y: 30, class: 'title', text: 'HyperLogLog: m = 16 registers (Redis uses 16,384)' }, g);
+    ctx.el('rect', { x: 230, y: 50, width: 300, height: 74, rx: 8, class: 'box signal' }, g);
+    s.hUser = ctx.el('text', { x: 380, y: 74, 'text-anchor': 'middle', class: 'mono', style: 'font-size:14px', text: 'user id' }, g);
+    s.hBits = ctx.el('text', { x: 380, y: 96, 'text-anchor': 'middle', class: 'mono small', text: 'hash → 4 bucket bits | 28 bits' }, g);
+    s.hRank = ctx.el('text', { x: 380, y: 114, 'text-anchor': 'middle', class: 'mono small muted', text: 'rank = leading zeros + 1' }, g);
+    for (var i = 0; i < HM; i++) {
+      s.R.push(0);
+      var x = HX + i * HP;
+      var rect = ctx.el('rect', { x: x, y: HY, width: HW, height: 38, rx: 4, class: 'box' }, g);
+      var t = ctx.el('text', { x: x + HW / 2, y: HY + 24, 'text-anchor': 'middle', class: 'mono muted', style: 'font-size:13px', text: '0' }, g);
+      ctx.el('text', { x: x + HW / 2, y: HY + 54, 'text-anchor': 'middle', class: 'mono small muted', text: String(i) }, g);
+      s.hCells.push({ rect: rect, text: t });
+    }
+    ctx.el('text', { x: HX, y: HY - 12, class: 'mono small muted', text: 'register = longest run of leading zeros seen in that bucket' }, g);
+    s.banner = ctx.el('text', { x: 380, y: 300, 'text-anchor': 'middle', class: 'title', text: '' }, g);
+    leftLines(ctx, 'Estimate', ['users added: 0']);
+    sideLines(ctx, 'Why it works', ['P(hash starts with 0000…0, r zeros) = 1/2^r', 'saw r = 10 → probably ~1,000 distinct', '16 buckets + harmonic mean → less noise', 'error ≈ 1.04 / √m']);
+  }
+  function hllPaint(ctx, hot) {
+    var s = ctx.state;
+    s.R.forEach(function (r, i) {
+      var c = s.hCells[i];
+      c.text.textContent = String(r);
+      c.text.setAttribute('class', r ? 'mono' : 'mono muted');
+      c.rect.setAttribute('class', 'box' + (r ? ' accent' : '') + (i === hot ? ' hl' : ''));
+    });
+  }
+  function hllStats(ctx) {
+    var s = ctx.state, E = hllEstimate(s.R), err = s.nUsers ? (E - s.nUsers) / s.nUsers * 100 : 0;
+    leftLines(ctx, 'Estimate', [
+      'true distinct users: ' + s.nUsers.toLocaleString(),
+      { t: 'HLL estimate: ' + Math.round(E).toLocaleString() + ' (' + (err >= 0 ? '+' : '') + err.toFixed(1) + '%)', cls: 'fill-accent' },
+      { t: 'memory: 16 registers × 6 bits = 12 bytes', cls: 'small muted' },
+    ]);
+    return E;
+  }
+  function hllAdd(ctx, id, animate) {
+    var s = ctx.state, p = hparts(id);
+    var bin = ('0000000000000000000000000000' + p.rest.toString(2)).slice(-28);
+    s.hUser.textContent = '"' + id + '"';
+    s.hBits.textContent = 'bucket ' + ('000' + p.bucket.toString(2)).slice(-4) + ' (' + p.bucket + ') | ' + bin.slice(0, 14) + '…';
+    s.hRank.textContent = 'leading zeros = ' + (p.rank - 1) + ' → rank ' + p.rank;
+    var cx = HX + p.bucket * HP + HW / 2;
+    var go = !animate || ctx.instant ? Promise.resolve() : ctx.packet([[380, 124], [380, 170], [cx, 170], [cx, HY]], { ms: 600, cls: 'accent', r: 5 });
+    return go.then(function () {
+      if (ctx.state !== s) return null;
+      var before = s.R[p.bucket];
+      if (p.rank > before) s.R[p.bucket] = p.rank;
+      if (!s.users[id]) { s.users[id] = 1; s.nUsers++; }
+      hllPaint(ctx, p.bucket);
+      ctx.flash(s.hCells[p.bucket].rect);
+      hllStats(ctx);
+      return { p: p, before: before };
+    });
+  }
+
+  // =====================================================================
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three questions, tiny memory',
+      say: 'First a Bloom filter (24 bits, 3 hashes) answers "seen it?". Then a Count-Min sketch counts hashtags. Last, a HyperLogLog counts distinct users. Each one gives up a little accuracy, always in a known direction.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      s.mode = 'bloom';
+      s.scene = ctx.group();
+      ctx.el('rect', { x: X0, y: 314, width: 340, height: 116, rx: 8, class: 'box' });
+      s.leftPanel = ctx.group();
+      ctx.el('rect', { x: 402, y: 314, width: 314, height: 116, rx: 8, class: 'box' });
+      s.side = ctx.group();
+      drawBloom(ctx);
+      s.banner = ctx.el('text', { x: WX, y: 288, 'text-anchor': 'middle', class: 'title', text: '' }, s.scene);
+      syncMode();
+    },
+    steps: [
+      {
+        title: 'Bloom: add "cat"',
+        say: 'Hash "cat" with 3 functions: bits 7, 18 and 8. Set them to 1. The word itself is not stored, only bits. That is why the filter is tiny.',
+        run: function (ctx) { return bloomAdd(ctx, 'cat', true).then(function () { return ctx.wait(300); }); },
+      },
+      {
+        title: 'Bloom: add "dog", "owl", "fox"',
+        say: '"fox" hashes to bits 3, 1 and 8. Bit 8 is already 1 because of "cat", so they share it. Sharing saves space, and it is also the source of false positives.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ['dog', 'owl', 'fox'].reduce(function (p, w) {
+            return p.then(function () { if (ctx.state === st) return bloomAdd(ctx, w, true); }).then(function () { return ctx.wait(300); });
+          }, Promise.resolve());
+        },
+      },
+      {
+        title: 'Bloom: check "cow" → definitely not',
+        say: '"cow" maps to bits 22, 11 and 1. Bit 22 is 0, so "cow" was never added. This answer is <b>always right</b>. We return "not found" without a database read. That is the whole win.',
+        run: function (ctx) {
+          return bloomCheck(ctx, 'cow', true).then(function () {
+            sideLines(ctx, 'Read path', ['GET key → check the filter first', { t: 'NO    → 404, no DB read', cls: 'fill-ok' }, 'MAYBE → read the DB', '(rare false positive = wasted read)']);
+            return ctx.wait(300);
+          });
+        },
+      },
+      {
+        title: 'Bloom: "dog" is a true positive, "bat" a false one',
+        say: 'All 3 bits of "dog" are 1: "maybe", and the DB confirms. "bat" maps to 4, 15, 0. We never added it, but "owl" and "dog" set those bits. "Maybe" again, and the DB says no. The cost is one wasted read, never a wrong "no".',
+        run: function (ctx) {
+          var st = ctx.state;
+          return bloomCheck(ctx, 'dog', true).then(function () { return ctx.wait(700); })
+            .then(function () { if (ctx.state === st) return bloomCheck(ctx, 'bat', true); })
+            .then(function () { return ctx.wait(300); });
+        },
+      },
+      {
+        title: 'Bloom: size it for an error rate',
+        say: 'False positives ≈ <code>(1 − e^(−kn/m))^k</code>, and they grow as the array fills. Pick the rate first: 1% needs about 9.6 bits per item with k = 7. One billion keys ≈ 1.2 GB.',
+        run: function (ctx) {
+          sideLines(ctx, 'Sizing', [
+            'p ≈ (1 − e^(−k·n/m))^k',
+            'm = −n·ln p / (ln 2)²   k = (m/n)·ln 2',
+            { t: 'p = 1%   → 9.6 bits/item, k = 7', cls: 'fill-accent' },
+            { t: 'p = 0.1% → 14.4 bits/item, k = 10', cls: 'fill-accent' },
+            '1 B items at 1% → about 1.2 GB',
+          ]);
+          banner(ctx, 'Here: n = 4, m = 24, k = 3 → p ≈ 6%', 'signal');
+          ctx.log('n=4, m=24, k=3 → p ≈ 6.1%', 'info');
+          ctx.log('production sizing: 1% → ~10 bits per item', 'info');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Bloom: why you cannot delete',
+        say: 'Try to delete "fox" by clearing bits 3, 1 and 8. Bit 8 also belongs to "cat", so "cat" now checks as "no": a false negative, which breaks the one promise. Need deletes? Use a counting Bloom filter (counters, ~4× memory) or a cuckoo filter.',
+        run: function (ctx) {
+          var st = ctx.state, pos = showWord(ctx, 'fox');
+          clearMarks(ctx);
+          banner(ctx, 'Delete "fox": clear bits 3, 1, 8', 'bad');
+          pos.forEach(function (i) { st.bits[i] = 0; setCell(ctx, i, 'zero'); ctx.flash(st.cells[i].rect); });
+          st.items = st.items.filter(function (w) { return w !== 'fox'; });
+          updateStats(ctx);
+          ctx.log('clear bits 3,1,8 to "delete" fox', 'warn');
+          sideLines(ctx, 'Counting Bloom filter', ['each slot is a 4-bit counter', 'add → +1   delete → −1', 'slot > 0 means "set"', 'cost: ~4× the memory']);
+          return ctx.wait(700).then(function () { if (ctx.state === st) return bloomCheck(ctx, 'cat', true); }).then(function () { return ctx.wait(300); });
+        },
+      },
+      {
+        title: 'Count-Min: stream 12 hashtag events',
+        say: 'New question: "how often did each hashtag appear?" A table of 3 rows × 8 counters. Each event adds 1 to one counter per row, chosen by that row\'s hash. 12 events, 5 different tags, only 24 counters, no tag names stored.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ctx.fade(st.scene, 0, 300).then(function () {
+            if (ctx.state !== st) return;
+            drawCms(ctx);
+            syncMode();
+            st.scene.setAttribute('opacity', 1);
+            ctx.log('switch: Count-Min sketch, d=3, w=8', 'info');
+            return STREAM.reduce(function (p, w, i) {
+              return p.then(function () { if (ctx.state === st) return cmAdd(ctx, w, i < 6); }).then(function () { return i < 6 ? ctx.wait(150) : null; });
+            }, Promise.resolve());
+          }).then(function () {
+            if (ctx.state !== st) return;
+            cmPaint(ctx);
+            banner(ctx, '12 events in, 24 counters touched 36 times', 'accent');
+            ctx.log('added 12 events: #ipl ×5, #rain ×3, #cricket ×2, #exam, #cat', 'info');
+          });
+        },
+      },
+      {
+        title: 'Count-Min: estimate = the minimum',
+        say: '#cat appeared once. Its counters read 1, 2 and 1. The 2 is a collision: #exam landed on the same counter in row 2. Collisions only ever <b>add</b>, so the smallest counter is the best guess.',
+        run: function (ctx) {
+          var e = cmEstimate(ctx, '#cat');
+          e.cs.forEach(function (c, r) { ctx.flash(ctx.state.cmCells[r][c].rect); });
+          banner(ctx, '#cat: min(' + e.vals.join(', ') + ') = ' + e.est + '   (true ' + e.tru + ')', 'ok');
+          ctx.log('estimate #cat = min(' + e.vals.join(',') + ') = ' + e.est + ', true ' + e.tru, 'ok');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Count-Min: it can overcount, never undercount',
+        say: '#diwali never appeared. But all 3 of its counters are shared with other tags, so the smallest still reads 2. The error is one-sided: the true count is between 0 and the estimate. Wider rows (w = ⌈e/ε⌉) shrink it.',
+        run: function (ctx) {
+          var e = cmEstimate(ctx, '#diwali');
+          e.cs.forEach(function (c, r) { ctx.flash(ctx.state.cmCells[r][c].rect); });
+          banner(ctx, '#diwali: min(' + e.vals.join(', ') + ') = ' + e.est + ', but true count is ' + e.tru + ': overcount', 'bad');
+          sideLines(ctx, 'Error bound', ['true ≤ estimate ≤ true + ε·N', 'with probability 1 − δ', 'w = ⌈e/ε⌉,  d = ⌈ln(1/δ)⌉', { t: 'ε = δ = 0.1% → 2,719 × 7 ≈ 76 KB', cls: 'fill-accent' }]);
+          ctx.log('estimate #diwali = ' + e.est + ', true 0: overcount by collisions', 'warn');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Count-Min + min-heap = top-k trending',
+        say: 'For "top 3 trending", keep a min-heap of size 3 next to the sketch. On each event: update the sketch, read the estimate, and push the tag if it beats the smallest in the heap. Memory stays fixed no matter how many tags exist.',
+        run: function (ctx) {
+          var s = ctx.state, tags = Object.keys(s.truth);
+          var ranked = tags.map(function (t) { return { t: t, est: cmEstimate(ctx, t).est }; }).sort(function (a, b) { return b.est - a.est; });
+          cmPaint(ctx);
+          var g = s.scene, x0 = 214, y0 = 236;
+          ctx.el('text', { x: x0, y: y0 - 4, class: 'mono small muted', text: 'min-heap (k = 3): smallest on top' }, g);
+          var bars = ranked.slice(0, 3).reverse();
+          var st = s;
+          return bars.reduce(function (p, b, i) {
+            return p.then(function () {
+              if (ctx.state !== st) return;
+              var bar = ctx.el('rect', { x: x0 + i * 150, y: y0 + 4, width: 0, height: 18, rx: 3, class: 'box accent' }, g);
+              ctx.el('text', { x: x0 + i * 150, y: y0 + 38, class: 'mono small', text: b.t + ' ≈ ' + b.est }, g);
+              return ctx.animate(bar, { width: 22 * b.est }, 350);
+            });
+          }, Promise.resolve()).then(function () {
+            if (ctx.state !== st) return;
+            banner(ctx, '', '');
+            ctx.log('top 3: ' + ranked.slice(0, 3).map(function (r) { return r.t + ' ' + r.est; }).join(', '), 'ok');
+          });
+        },
+      },
+      {
+        title: 'HyperLogLog: remember only the rarest hash',
+        say: 'Last question: "how many <b>distinct</b> users?" Hash each user id. The first 4 bits pick one of 16 registers. A register keeps the longest run of leading zeros it has seen. A run of r zeros happens once in 2^r hashes, so a long run means many users.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ctx.fade(st.scene, 0, 300).then(function () {
+            if (ctx.state !== st) return;
+            drawHll(ctx);
+            syncMode();
+            st.scene.setAttribute('opacity', 1);
+            ctx.log('switch: HyperLogLog, 16 registers', 'info');
+            return ['u0', 'u1', 'u2', 'u3'].reduce(function (p, id) {
+              return p.then(function () { if (ctx.state === st) return hllAdd(ctx, id, true); }).then(function (r) {
+                if (r && ctx.state === st) ctx.log(id + ' → bucket ' + r.p.bucket + ', rank ' + r.p.rank + (r.p.rank > r.before ? ' (new max)' : ' (no change)'), 'info');
+                return ctx.wait(300);
+              });
+            }, Promise.resolve());
+          });
+        },
+      },
+      {
+        title: 'HyperLogLog: 5,000 users, 12 bytes',
+        say: 'Fast-forward to 5,000 distinct users (repeats change nothing). The harmonic mean of 2^register gives the estimate. With 16 registers the error is about ±26%. Redis uses 16,384 registers: 12 KB, ±0.81%. Merge two HLLs by taking the max per register.',
+        run: function (ctx) {
+          var s = ctx.state;
+          for (var i = 4; i < 5000; i++) {
+            var p = hparts('u' + i);
+            if (p.rank > s.R[p.bucket]) s.R[p.bucket] = p.rank;
+            s.users['u' + i] = 1;
+          }
+          s.nUsers = Object.keys(s.users).length;
+          s.hUser.textContent = 'u4 … u4999';
+          s.hBits.textContent = 'each register = max rank seen in its bucket';
+          s.hRank.textContent = 'E = α·m² / Σ 2^(−register)';
+          hllPaint(ctx);
+          s.hCells.forEach(function (c) { ctx.flash(c.rect); });
+          var E = hllStats(ctx);
+          banner(ctx, 'Estimate ≈ ' + Math.round(E).toLocaleString() + ' for 5,000 real users', 'ok');
+          sideLines(ctx, 'In Redis', ['PFADD visits:home:2026-10-19:10 u42', 'PFCOUNT visits:home:2026-10-19:10', 'PFMERGE day h00 h01 … h23', { t: '12 KB per key, ±0.81%', cls: 'fill-accent' }]);
+          ctx.log('5,000 users → estimate ' + Math.round(E) + ' with 16 registers', 'ok');
+          ctx.log('merge = max per register = HLL of the union', 'info');
+          return ctx.wait(400);
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it: acts on the structure on screen ----------
+  var input = document.getElementById('word-in');
+
+  function syncMode() { var c = lab && lab.ctx; var m = c && c.state.mode || 'bloom'; var el = document.getElementById('try-mode'); if (el) el.textContent = { bloom: 'on: Bloom filter', cms: 'on: Count-Min sketch', hll: 'on: HyperLogLog' }[m]; }
+  function word() { return (input.value || '').trim().toLowerCase(); }
+  document.getElementById('btn-add').addEventListener('click', function () {
+    var w = word(), c = lab.ctx; if (!w) return;
+    if (c.state.mode === 'bloom') bloomAdd(c, w, false);
+    else if (c.state.mode === 'cms') { cmAdd(c, w, false); c.log('try: add ' + w, 'info'); }
+    else hllAdd(c, w, false).then(function (r) { if (r) c.log('try: ' + w + ' → bucket ' + r.p.bucket + ', rank ' + r.p.rank, 'info'); });
+    syncMode();
+  });
+  document.getElementById('btn-check').addEventListener('click', function () {
+    var w = word(), c = lab.ctx; if (!w) return;
+    if (c.state.mode === 'bloom') bloomCheck(c, w, false);
+    else if (c.state.mode === 'cms') {
+      var e = cmEstimate(c, w);
+      banner(c, w + ': min(' + e.vals.join(', ') + ') = ' + e.est + '   (true ' + e.tru + ')', e.est === e.tru ? 'ok' : 'bad');
+      c.log('try: estimate ' + w + ' = ' + e.est + ', true ' + e.tru, e.est === e.tru ? 'ok' : 'warn');
+    } else {
+      var p = hparts(w);
+      banner(c, w + ' → bucket ' + p.bucket + ', rank ' + p.rank + (c.state.users[w] ? ' (already counted)' : ' (not added yet)'), 'signal');
+    }
+    syncMode();
+  });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById(e.shiftKey ? 'btn-add' : 'btn-check').click(); }
+  });
+  document.getElementById('controls').addEventListener('click', function () { setTimeout(syncMode, 0); });
+  syncMode();
+})();
+</script>
+</body>
+</html>

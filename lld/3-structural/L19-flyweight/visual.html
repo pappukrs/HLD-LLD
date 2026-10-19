@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L19 Flyweight</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .seat { stroke-width: 1.5; }
+  .stage .t-rec { fill: var(--signal); }
+  .stage .t-gold { fill: var(--warn); }
+  .stage .t-sil { fill: var(--muted); }
+  .stage .seat.free { fill-opacity: 0.25; }
+  .stage .seat.booked { fill: var(--bad); fill-opacity: 0.9; }
+  .stage .s-rec { stroke: var(--signal); }
+  .stage .s-gold { stroke: var(--warn); }
+  .stage .s-sil { stroke: var(--muted); }
+  .stage .ref { stroke: var(--accent); stroke-width: 1; opacity: 0.35; fill: none; }
+  .stage .bar-bad { fill: var(--bad); }
+  .stage .bar-ok { fill: var(--ok); }
+  .try { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+  .try input { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .res { font: 12.5px/1.7 var(--font-mono); }
+  .res b.bad { color: var(--bad); } .res b.ok { color: var(--ok); }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L19 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Flyweight: share what is the same</h1>
+    <p class="lede">Forty seats each carry their own copy of the seat-type data. Only three types exist. A factory hands out one immutable <code>SeatType</code> per type, each seat keeps just row, column and status, and memory drops by over 90%.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="A seat map whose duplicated type objects collapse into three shared flyweights"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Recliner</span>
+        <span><i style="background: var(--warn)"></i>Gold</span>
+        <span><i style="background: var(--muted)"></i>Silver</span>
+        <span><i style="background: var(--accent)"></i>Shared reference</span>
+        <span><i style="background: var(--bad)"></i>Booked / bug</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Flyweight + factory + context</h3>
+<pre class="code">class SeatType {                       // flyweight: intrinsic, shared
+  constructor(readonly name: string, readonly basePrice: number,
+              readonly color: string, readonly icon: Uint8Array) {
+    Object.freeze(this);
+  }
+  render(row: string, col: number, status: SeatStatus) { ... }
+}
+
+class SeatTypeFactory {
+  private cache = new Map&lt;string, SeatType&gt;();
+  get(name: string, price: number, color: string) {
+    let t = this.cache.get(name);
+    if (!t) { t = new SeatType(name, price, color, loadIcon(name));
+              this.cache.set(name, t); }
+    return t;                            // same object every time
+  }
+}
+
+class Seat {                           // context: extrinsic only
+  priceOverride?: number;
+  constructor(readonly row: string, readonly col: number,
+              readonly type: SeatType, public status: SeatStatus) {}
+}</pre>
+    </div>
+    <div class="note">
+      <h3>Try it: is Flyweight worth it here?</h3>
+      <div class="try">
+        <label>Objects (seats, markers...) <input id="t-n" type="number" min="1" value="4000000"></label>
+        <label>Distinct kinds <input id="t-k" type="number" min="1" value="3"></label>
+        <label>Shared bytes per kind <input id="t-s" type="number" min="1" value="2048"></label>
+        <label>Per-object bytes <input id="t-e" type="number" min="1" value="40"></label>
+      </div>
+      <div class="res" id="t-res"></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A week of seat maps is about 4 million seat objects, but only three seat types. So SeatType is a flyweight: name, base price, colour and icon, immutable, one instance per type from a factory. Each Seat keeps only row, column, status and a reference. That is roughly 8 GB down to under 200 MB. Anything per seat, like a hold or a discount, is extrinsic and never goes into the shared object."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Is "status: BOOKED" intrinsic or extrinsic?</summary><div>Extrinsic. It differs per seat and per moment. If it lived in SeatType, every seat of that type would look booked.</div></details>
+      <details class="qa"><summary>Why freeze the flyweight?</summary><div>Thousands of seats share it. One accidental write (price = 0) changes all of them at once.</div></details>
+      <details class="qa"><summary>Flyweight vs object pool?</summary><div>Flyweights are immutable and used by many at the same time. Pooled objects are mutable, borrowed by one user, then reset and returned.</div></details>
+      <details class="qa"><summary>When is it not worth it?</summary><div>When objects are few, or the shared part is tiny. 300 seats with a 20-byte type saves almost nothing and adds a factory and a split API.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Intrinsic vs extrinsic in common problems</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Problem</th><th>Flyweight (intrinsic, shared)</th><th>Context (extrinsic, per object)</th></tr></thead>
+          <tbody>
+            <tr><td>BookMyShow seat map</td><td>Seat type: name, base price, colour, icon</td><td>Row, column, status, price override</td></tr>
+            <tr><td>Text editor</td><td>Glyph: character, font, size, outline</td><td>Position in the document</td></tr>
+            <tr><td>Ride sharing map</td><td>Vehicle marker sprite</td><td>Lat/lng, heading, driver id</td></tr>
+            <tr><td>Chess</td><td>Piece kind and move rules</td><td>Square, colour, has-moved</td></tr>
+            <tr><td>IoT fleet</td><td>Device model: limits, units, thresholds</td><td>Device id, last reading, socket</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var ROWS = ['A', 'B', 'C', 'D', 'E'], COLS = 8;
+  var TYPE = { A: 'rec', B: 'gold', C: 'gold', D: 'sil', E: 'sil' };
+  var TNAME = { rec: 'Recliner', gold: 'Gold', sil: 'Silver' };
+  var TPRICE = { rec: 450, gold: 250, sil: 180 };
+  var TY = { rec: 92, gold: 172, sil: 252 };
+  function sx(c) { return 40 + c * 36; }
+  function syy(r) { return 92 + r * 44; }
+  var OX = 590, OW = 150, OH = 64;
+
+  function bar(ctx, w, cls, label) {
+    ctx.state.memLabel.textContent = label;
+    ctx.state.memBar.setAttribute('class', cls);
+    return ctx.animate(ctx.state.memBar, { width: w }, 500);
+  }
+  function seatCenter(r, c) { return [sx(c) + 13, syy(r) + 11]; }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'A screen with 40 seats and 3 seat types', say: 'Row A is Recliner, rows B and C are Gold, rows D and E are Silver. Watch how many SeatType objects each design creates.' },
+    setup: function (ctx) {
+      ctx.state.seats = {};
+      ctx.state.refs = ctx.group();
+      ctx.el('text', { x: 20, y: 30, class: 'title', text: 'Screen 1 · seat map' });
+      ctx.el('rect', { x: 40, y: 58, width: 284, height: 8, rx: 4, class: 'fill-soft' });
+      ctx.el('text', { x: 182, y: 80, 'text-anchor': 'middle', class: 'mono small muted', text: 'screen this way' });
+      ROWS.forEach(function (row, r) {
+        ctx.el('text', { x: 22, y: syy(r) + 16, class: 'mono small muted', text: row });
+        for (var c = 0; c < COLS; c++) {
+          var g = ctx.group({ opacity: 0 });
+          var rect = ctx.el('rect', { x: sx(c), y: syy(r), width: 26, height: 22, rx: 5, class: 'seat free t-' + TYPE[row] + ' s-' + TYPE[row] }, g);
+          var lab = ctx.el('text', { x: sx(c) + 13, y: syy(r) + 36, 'text-anchor': 'middle', class: 'mono small', text: '' }, g);
+          ctx.state.seats[row + (c + 1)] = { g: g, rect: rect, lab: lab, r: r, c: c, t: TYPE[row] };
+        }
+      });
+      ctx.state.heapTitle = ctx.el('text', { x: 380, y: 30, class: 'title', text: 'Heap' });
+      ctx.state.pile = ctx.group();
+      ctx.state.fly = ctx.group({ opacity: 0 });
+      var f = ctx.state.fly;
+      ctx.el('rect', { x: 590, y: 328, width: 150, height: 50, rx: 8, class: 'box' }, f);
+      ctx.state.factoryR = ctx.el('rect', { x: 590, y: 328, width: 150, height: 50, rx: 8, class: 'box accent' }, f);
+      ctx.el('text', { x: 665, y: 347, 'text-anchor': 'middle', class: 'b', text: 'SeatTypeFactory' }, f);
+      ctx.state.factoryS = ctx.el('text', { x: 665, y: 367, 'text-anchor': 'middle', class: 'mono small muted', text: 'cache: {}' }, f);
+      ctx.state.objs = {};
+      ['rec', 'gold', 'sil'].forEach(function (t) {
+        var g = ctx.group({ opacity: 0 });
+        ctx.el('rect', { x: OX, y: TY[t], width: OW, height: OH, rx: 8, class: 'box' }, g);
+        g.r = ctx.el('rect', { x: OX, y: TY[t], width: OW, height: OH, rx: 8, class: 'box' }, g);
+        ctx.el('rect', { x: OX, y: TY[t], width: 8, height: OH, rx: 3, class: 't-' + t }, g);
+        ctx.el('text', { x: OX + 16, y: TY[t] + 18, class: 'b', text: TNAME[t] }, g);
+        g.p = ctx.el('text', { x: OX + 16, y: TY[t] + 36, class: 'mono small', text: 'basePrice ' + TPRICE[t] }, g);
+        ctx.el('text', { x: OX + 16, y: TY[t] + 54, class: 'mono small muted', text: 'icon 2 KB · frozen' }, g);
+        ctx.state.objs[t] = g;
+      });
+      ctx.state.card = ctx.group({ opacity: 0 });
+      ctx.el('text', { x: 20, y: 335, class: 'mono small muted', text: 'Seat D3 =' }, ctx.state.card);
+      ctx.el('rect', { x: 90, y: 320, width: 150, height: 24, rx: 5, class: 'box ok' }, ctx.state.card);
+      ctx.el('text', { x: 98, y: 336, class: 'mono small', text: 'row D, col 3, FREE' }, ctx.state.card);
+      ctx.el('text', { x: 246, y: 336, class: 'mono small muted', text: '+' }, ctx.state.card);
+      ctx.el('rect', { x: 258, y: 320, width: 240, height: 24, rx: 5, class: 'box signal' }, ctx.state.card);
+      ctx.el('text', { x: 266, y: 336, class: 'mono small', text: 'Silver, 180, #9aa5b1, icon 2 KB' }, ctx.state.card);
+      ctx.el('text', { x: 98, y: 360, class: 'mono small fill-ok', text: 'extrinsic: per seat' }, ctx.state.card);
+      ctx.el('text', { x: 266, y: 360, class: 'mono small fill-signal', text: 'intrinsic: same for all 16 Silver' }, ctx.state.card);
+      ctx.el('text', { x: 20, y: 400, class: 'mono small muted', text: 'memory for type data' });
+      ctx.el('rect', { x: 170, y: 389, width: 360, height: 16, rx: 3, class: 'box' });
+      ctx.state.memBar = ctx.el('rect', { x: 170, y: 389, width: 0, height: 16, rx: 3, class: 'bar-bad' });
+      ctx.state.memLabel = ctx.el('text', { x: 540, y: 402, class: 'mono small', text: '' });
+      ctx.state.note = ctx.el('text', { x: 20, y: 434, class: 'mono small', text: '' });
+    },
+    steps: [
+      {
+        title: 'Naive: every seat builds its own SeatType',
+        say: 'Each <code>new Seat()</code> also builds a full type object: name, price, colour and a 2 KB icon. 40 seats means 40 type objects in the heap.',
+        run: function (ctx) {
+          var chain = Promise.resolve(), n = 0;
+          ROWS.forEach(function (row, r) {
+            chain = chain.then(function () {
+              var ps = [];
+              for (var c = 0; c < COLS; c++) {
+                var s = ctx.state.seats[row + (c + 1)];
+                ps.push(ctx.fade(s.g, 1, 200));
+                var o = ctx.group({ opacity: 0 }, ctx.state.pile);
+                ctx.el('rect', { x: 380 + c * 45, y: 92 + r * 34, width: 38, height: 24, rx: 4, class: 'seat t-' + s.t + ' s-' + s.t, 'fill-opacity': 0.35 }, o);
+                ctx.el('text', { x: 399 + c * 45, y: 108 + r * 34, 'text-anchor': 'middle', class: 'mono small', text: TNAME[s.t].slice(0, 3) }, o);
+                s.copy = o;
+                ps.push(ctx.fade(o, 1, 200));
+                n++;
+              }
+              ctx.log('row ' + row + ': 8 seats, 8 new ' + TNAME[TYPE[row]] + ' objects', 'warn');
+              return Promise.all(ps);
+            });
+          });
+          return chain.then(function () {
+            ctx.state.heapTitle.textContent = 'Heap: 40 SeatType copies';
+            return bar(ctx, 360, 'bar-bad', '40 × 2 KB = 80 KB');
+          });
+        },
+      },
+      {
+        title: 'Spot the duplication',
+        say: 'All 16 Silver copies hold exactly the same data. So do the 16 Gold ones and the 8 Recliners. 40 objects, but only 3 distinct values.',
+        run: function (ctx) {
+          Object.keys(ctx.state.seats).forEach(function (k) {
+            var s = ctx.state.seats[k];
+            if (s.t === 'sil') { s.copy.firstChild.setAttribute('class', 'seat booked'); ctx.flash(s.copy); }
+          });
+          ctx.log('16 identical Silver objects', 'bad');
+          ctx.log('3 distinct values among 40 objects', 'bad');
+          return ctx.wait(400);
+        },
+      },
+      {
+        title: 'Split the state: intrinsic vs extrinsic',
+        say: 'Seat D3 is two things. Row, column and status are <b>extrinsic</b>: they belong to this seat. Type name, price, colour and icon are <b>intrinsic</b>: identical for all Silver seats. Only the intrinsic part can be shared.',
+        run: function (ctx) {
+          ctx.flash(ctx.state.seats.D3.rect);
+          ctx.state.seats.D3.rect.classList.add('hl');
+          ctx.log('D3 = {row, col, status} + {Silver data}', 'info');
+          return ctx.fade(ctx.state.card, 1, 400);
+        },
+      },
+      {
+        title: 'Introduce a factory with a cache',
+        say: 'Delete the 40 copies. Seats now ask <code>SeatTypeFactory.get("Recliner")</code>. The first request misses the cache, so the factory creates the Recliner object once and stores it.',
+        run: function (ctx) {
+          ctx.state.seats.D3.rect.classList.remove('hl');
+          return ctx.fade(ctx.state.pile, 0, 450).then(function () {
+            ctx.state.pile.remove();
+            ctx.state.heapTitle.textContent = 'Heap';
+            return ctx.fade(ctx.state.fly, 1, 350);
+          }).then(function () {
+            ctx.log("A1: factory.get('Recliner') -> MISS, create", 'warn');
+            return ctx.packet([seatCenter(0, 7), [560, 104], [560, 353], [590, 353]], { ms: 800, label: 'get' });
+          }).then(function () {
+            ctx.state.factoryS.textContent = 'cache: {Recliner}';
+            return ctx.packet([[665, 328], [665, TY.rec + OH]], { ms: 500, cls: 'ok' });
+          }).then(function () { return ctx.fade(ctx.state.objs.rec, 1, 300); });
+        },
+      },
+      {
+        title: 'Every other Recliner gets the same object',
+        say: 'A2 to A8 call <code>get("Recliner")</code> and get the cached object back. Eight seats, eight references, one object. <code>seatA1.type === seatA8.type</code> is true.',
+        run: function (ctx) {
+          ctx.log('A2..A8: cache HIT x7, same reference', 'ok');
+          for (var c = 0; c < COLS; c++) {
+            var p = seatCenter(0, c);
+            ctx.el('path', { d: 'M' + p[0] + ',' + p[1] + ' L' + OX + ',' + (TY.rec + 32), class: 'ref' }, ctx.state.refs);
+          }
+          ctx.flash(ctx.state.objs.rec.r);
+          return ctx.wait(300);
+        },
+      },
+      {
+        title: 'Gold and Silver: one object each',
+        say: 'The same happens for the other rows. The factory now holds 3 objects, and 40 seats point at them. Type memory drops from 80 KB to about 6 KB plus a small pointer per seat.',
+        run: function (ctx) {
+          ctx.state.factoryS.textContent = 'cache: {Rec, Gold, Sil}';
+          ctx.log("factory.get('Gold') -> create once, then HIT x15", 'ok');
+          ctx.log("factory.get('Silver') -> create once, then HIT x15", 'ok');
+          return Promise.all([ctx.fade(ctx.state.objs.gold, 1, 300), ctx.fade(ctx.state.objs.sil, 1, 300)]).then(function () {
+            [1, 2, 3, 4].forEach(function (r) {
+              var t = TYPE[ROWS[r]];
+              for (var c = 0; c < COLS; c++) {
+                var p = seatCenter(r, c);
+                ctx.el('path', { d: 'M' + p[0] + ',' + p[1] + ' L' + OX + ',' + (TY[t] + 32), class: 'ref' }, ctx.state.refs);
+              }
+            });
+            ctx.state.heapTitle.textContent = 'Heap: 3 SeatType objects';
+            return bar(ctx, 30, 'bar-ok', '3 × 2 KB + 40 × 8 B ≈ 6.4 KB');
+          });
+        },
+      },
+      {
+        title: 'Booking B4 changes only B4',
+        say: 'Status is extrinsic, so it lives on the seat. B4 becomes BOOKED; the shared Gold object does not change, and no other Gold seat is affected. To draw it, the seat passes its state in: <code>type.render("B", 4, "BOOKED")</code>.',
+        run: function (ctx) {
+          var s = ctx.state.seats.B4;
+          return ctx.packet([[OX, TY.gold + 32], seatCenter(1, 3)], { ms: 600, label: 'render(B,4,BOOKED)' }).then(function () {
+            s.rect.setAttribute('class', 'seat booked');
+            ctx.flash(s.rect);
+            ctx.log('B4.status = BOOKED (extrinsic)', 'ok');
+            ctx.log('Gold flyweight unchanged; B1..B8 others still FREE', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The bug: mutate a shared object',
+        say: 'Someone wants a discount on E1 and writes <code>seat.type.basePrice = 0</code>. Without protection, all 16 Silver seats now cost Rs 0, in every show that shares this object.',
+        run: function (ctx) {
+          ctx.state.objs.sil.p.textContent = 'basePrice 0  !!';
+          ctx.state.objs.sil.p.setAttribute('class', 'mono small fill-bad');
+          ctx.state.objs.sil.r.setAttribute('class', 'box bad');
+          ctx.flash(ctx.state.objs.sil.r);
+          Object.keys(ctx.state.seats).forEach(function (k) {
+            var s = ctx.state.seats[k];
+            if (s.t === 'sil') { s.lab.textContent = '0'; s.lab.setAttribute('class', 'mono small fill-bad'); }
+          });
+          ctx.log('silver.basePrice = 0 -> 16 seats now free', 'bad');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Freeze the flyweight; the discount is extrinsic',
+        say: '<code>Object.freeze(this)</code> in the constructor makes that write throw. The E1 discount goes on the seat: <code>E1.priceOverride = 90</code>. Only E1 changes; Silver stays 180 everywhere.',
+        run: function (ctx) {
+          ctx.state.objs.sil.p.textContent = 'basePrice 180';
+          ctx.state.objs.sil.p.setAttribute('class', 'mono small');
+          ctx.state.objs.sil.r.setAttribute('class', 'box ok');
+          Object.keys(ctx.state.seats).forEach(function (k) {
+            var s = ctx.state.seats[k];
+            if (s.t === 'sil') { s.lab.textContent = ''; }
+          });
+          ctx.log('TypeError: Cannot assign to read only property', 'warn');
+          var e1 = ctx.state.seats.E1;
+          e1.lab.textContent = '90';
+          e1.lab.setAttribute('class', 'mono small fill-ok');
+          ctx.flash(e1.rect);
+          ctx.log('E1.priceOverride = 90 (extrinsic)', 'ok');
+          return ctx.wait(300);
+        },
+      },
+      {
+        title: 'Scale it up',
+        say: 'At city scale: 2,000 shows a day × 300 seats × 7 days ≈ 4 million seats. Copies cost about 8 GB; flyweights cost about 190 MB. The saving grows with object count, not with the number of types.',
+        run: function (ctx) {
+          ctx.state.note.textContent = '4M seats: naive ≈ 8.0 GB · flyweight ≈ 0.19 GB (≈ 97% less)';
+          ctx.state.note.setAttribute('class', 'mono small fill-ok');
+          ctx.log('4M seats: 8.0 GB -> 0.19 GB', 'ok');
+          return bar(ctx, 9, 'bar-ok', 'at 4M seats: 2.3% of naive');
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: memory calculator ----
+  function fmt(b) { return b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : (b / 1024).toFixed(1) + ' KB'; }
+  function calc() {
+    var n = Math.max(1, +document.getElementById('t-n').value || 1);
+    var k = Math.max(1, +document.getElementById('t-k').value || 1);
+    var s = Math.max(1, +document.getElementById('t-s').value || 1);
+    var e = Math.max(1, +document.getElementById('t-e').value || 1);
+    var naive = n * (s + e), fly = k * s + n * (e + 8), save = Math.round((1 - fly / naive) * 100);
+    var verdict = save >= 50 ? '<b class="ok">worth it</b>' : save >= 15 ? 'maybe: measure first' : '<b class="bad">not worth the extra design</b>';
+    document.getElementById('t-res').innerHTML =
+      'naive: ' + n.toLocaleString() + ' × (' + s + ' + ' + e + ') B = <b class="bad">' + fmt(naive) + '</b><br>' +
+      'flyweight: ' + k + ' × ' + s + ' B + ' + n.toLocaleString() + ' × (' + e + ' + 8) B = <b class="ok">' + fmt(fly) + '</b><br>' +
+      'saving: ' + save + '% · ' + verdict;
+  }
+  ['t-n', 't-k', 't-s', 't-e'].forEach(function (id) { document.getElementById(id).addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

@@ -90,5 +90,5 @@ Common mistake: each command parses paths in its own way. Then `.` works in `ls`
 
 ## Concepts used
 
-- [Composite pattern](../../concepts/patterns/p09-composite.md) · [Iterator (tree walk)](../../concepts/patterns/p16-iterator.md) · [SOLID](../../concepts/02-solid.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Related HLD: [File Storage and Sync (Dropbox)](../../../hld/problems/15-file-storage/) · [Blob/object storage](../../../hld/concepts/26-blob-storage.md)
+- [Composite pattern](../../3-structural/L17-composite/README.md) · [Iterator (tree walk)](../../4-behavioral/L27-iterator/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Related HLD: [File Storage and Sync (Dropbox)](../../../hld/case-studies/15-file-storage) · [Blob/object storage](../../../hld/6-building-blocks/H32-blob-storage/README.md)

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H32 Blob storage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+  .try label { color: var(--muted); font-size: 12px; }
+  .try input[type="range"] { width: 12em; max-width: 100%; }
+  .try select { font: 13px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+  .try output { font-family: var(--font-mono); font-size: 12.5px; flex-basis: 100%; color: var(--ink); }
+  pre.code span { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code span.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H32 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Blob storage and large files</h1>
+    <p class="lede">The API signs a URL; the bytes go straight to the object store in parallel parts. A worker checks the file, the DB row flips to READY, a CDN serves reads, and lifecycle rules move old files to cheap tiers.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Presigned multipart upload to S3 with worker, CDN and lifecycle tiers"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <label for="size-in">Try it: file size</label>
+        <input type="range" id="size-in" min="1" max="400" value="100">
+        <label for="part-in">part size</label>
+        <select id="part-in"><option value="8">8 MB</option><option value="16" selected>16 MB</option><option value="64">64 MB</option><option value="512">512 MB</option></select>
+        <output id="try-out"></output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request / bytes in flight</span>
+        <span><i style="background: var(--accent)"></i>Signed / done</span>
+        <span><i style="background: var(--bad)"></i>Failed part / orphan</span>
+        <span><i style="background: var(--ok)"></i>Verified / READY</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Bytes go to S3, metadata goes to Postgres. The client gets a presigned PUT for one key, valid 15 minutes, and uploads directly. Big files use multipart with 16 MB parts in parallel, so a failed part is retried alone. An ObjectCreated event triggers a worker that verifies and scans the file and marks it READY. Reads go through a CDN or a short presigned GET, and lifecycle rules move old files to Glacier."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code" id="code"><span data-s="1">const key = `u/${user}/f/${id}/v1`  // server picks</span><span data-s="1">await db.insert({ id, key, status: 'UPLOADING' })</span><span data-s="2">return presignPut(key, { expiresIn: 900 })</span><span data-s="3">const n = Math.ceil(size / PART)  // 16 MB parts</span><span data-s="4">await pool(parts, 4, uploadPart)  // retry per part</span><span data-s="6">await s3.complete(uploadId, etags)</span><span data-s="7">onObjectCreated: head(key), scan, thumbnail</span><span data-s="8">await db.update(id, { status: 'READY' })</span><span data-s="9">return cdnUrl(key) or presignGet(key, 60)</span><span data-s="10">lifecycle: 30d -> IA, 90d -> GLACIER</span><span data-s="11">sweeper: expire UPLOADING &gt; 24h, delete orphans</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Where do the bytes go?</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Bytes in DB</th><th>Upload through API</th><th>Presigned direct to S3</th><th>Hashed blocks (Dropbox)</th></tr></thead>
+          <tbody>
+            <tr><td>API load</td><td>High</td><td>High (bandwidth, memory)</td><td>Tiny: signs a URL</td><td>Tiny: compares hashes</td></tr>
+            <tr><td>Resume after failure</td><td>No</td><td>Hard</td><td>Yes with multipart</td><td>Yes, per block</td></tr>
+            <tr><td>Dedup / delta sync</td><td>No</td><td>No</td><td>No</td><td>Yes</td></tr>
+            <tr><td>Good for</td><td>Tiny files in the same transaction</td><td>Inline transform of small files</td><td>Default for media and docs</td><td>Sync products, backups</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why is the object key chosen by the server, not the client?</summary><div>If the client picks the key it can overwrite another user's file. The server builds the key from the user id and a new file id, and signs only that key.</div></details>
+      <details class="qa"><summary>Why wait for the S3 event instead of the client's "done" call?</summary><div>The client can lie or crash. The event (or a HEAD on the key) proves the object exists and lets you check size and checksum before you mark it READY.</div></details>
+      <details class="qa"><summary>What does a lifecycle rule for incomplete multipart uploads fix?</summary><div>Parts of uploads that never completed are billed but invisible. "Abort incomplete multipart uploads after 7 days" deletes them.</div></details>
+      <details class="qa"><summary>How do you serve a private bank statement?</summary><div>Auth check in the API, then a presigned GET valid for about 60 seconds, or a signed CDN URL. Never a public bucket.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>S3: 11 nines durability, strong read-after-write since Dec 2020</li>
+        <li>Single PUT up to 5 GB; object up to 5 TB</li>
+        <li>Multipart: parts 5 MB to 5 GB, at most 10,000 parts</li>
+        <li>~3,500 writes/s and ~5,500 reads/s per key prefix</li>
+        <li>Erasure coding 6+3: 1.5x raw space vs 3x for replication</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var PARTS = 8;
+
+  function box(ctx, x, y, w, h, title, sub, cls) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: x + 10, y: y + 20, class: 'title', text: title }, g);
+    var s = ctx.el('text', { x: x + 10, y: y + 38, class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, s: s, x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2 };
+  }
+  function setBox(b, cls, sub, subCls) {
+    b.r.setAttribute('class', 'box ' + (cls || ''));
+    if (sub !== undefined) b.s.textContent = sub;
+    if (subCls !== undefined) b.s.setAttribute('class', 'mono small ' + subCls);
+  }
+  function banner(ctx, text, kind) {
+    var b = ctx.state.banner;
+    b.textContent = text;
+    b.setAttribute('class', 'title' + (kind ? ' fill-' + kind : ''));
+  }
+  function hl(step) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code span'), function (s) {
+      s.classList.toggle('on', s.getAttribute('data-s') === String(step));
+    });
+  }
+  function slotX(i) { return 292 + i * 25; }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A 128 MB video upload',
+      say: 'Six parts: client, API, metadata DB, S3 bucket, a worker fed by a queue, and a CDN. Watch where the bytes travel. They never pass through the API.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl(0);
+      ctx.el('text', { x: 20, y: 20, class: 'title', text: 'Presigned multipart upload' });
+      s.client = box(ctx, 20, 60, 150, 70, 'Client', 'video.mp4 128 MB');
+      s.api = box(ctx, 305, 40, 150, 56, 'API', 'signs URLs only');
+      s.db = box(ctx, 590, 34, 150, 84, 'Metadata DB', '(no rows)');
+      s.dbRow2 = ctx.el('text', { x: 600, y: 92, class: 'mono small muted', text: '' });
+      s.dbRow3 = ctx.el('text', { x: 600, y: 108, class: 'mono small muted', text: '' });
+      s.s3 = box(ctx, 280, 200, 220, 124, 'S3 bucket', 'flat keys, 11 nines');
+      s.worker = box(ctx, 590, 200, 150, 74, 'Queue + Worker', 'idle');
+      s.cdn = box(ctx, 20, 230, 150, 60, 'CDN edge', 'empty');
+      // wires
+      [[170, 85, 305, 68], [455, 68, 590, 70], [170, 110, 280, 250], [500, 240, 590, 237], [665, 200, 665, 118], [170, 260, 280, 270]].forEach(function (w) {
+        ctx.el('line', { x1: w[0], y1: w[1], x2: w[2], y2: w[3], class: 'wire dashed' });
+      });
+      // part slots inside S3
+      s.slots = [];
+      for (var i = 0; i < PARTS; i++) {
+        s.slots.push(ctx.el('rect', { x: slotX(i), y: 262, width: 20, height: 30, rx: 3, class: 'box dim' }));
+      }
+      s.obj = ctx.el('rect', { x: 292, y: 262, width: 0, height: 30, rx: 4, class: 'box accent', opacity: 0 });
+      s.objText = ctx.el('text', { x: 300, y: 282, class: 'mono small', text: '', opacity: 0 });
+      // client parts
+      s.parts = [];
+      for (var j = 0; j < PARTS; j++) {
+        s.parts.push(ctx.el('rect', { x: 30 + j * 16, y: 142, width: 12, height: 18, rx: 2, class: 'box', opacity: 0 }));
+      }
+      s.urlText = ctx.el('text', { x: 20, y: 182, class: 'mono small', text: '' });
+      // lifecycle tiers
+      ctx.el('text', { x: 20, y: 352, class: 'title', text: 'Lifecycle' });
+      s.tiers = [['S3 Standard', '$0.023/GB', 160], ['Standard-IA', '$0.0125/GB', 350], ['Glacier', '$0.0036/GB', 540]].map(function (t) {
+        var b = box(ctx, t[2], 334, 150, 50, t[0], t[1]);
+        return b;
+      });
+      ctx.el('line', { x1: 310, y1: 359, x2: 350, y2: 359, class: 'wire' });
+      ctx.el('line', { x1: 500, y1: 359, x2: 540, y2: 359, class: 'wire' });
+      s.chip = ctx.group({ opacity: 0 });
+      ctx.el('rect', { x: -26, y: -9, width: 52, height: 18, rx: 9, class: 'box accent' }, s.chip);
+      ctx.el('text', { x: 0, y: 4, 'text-anchor': 'middle', class: 'mono small', text: 'f/123' }, s.chip);
+      ctx.place(s.chip, 270, 392);
+      s.banner = ctx.el('text', { x: 380, y: 432, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'Ask the API for an upload slot',
+        say: 'The client sends only the name, size and type. The API picks the key <code>u/42/f/123/v1</code> and inserts a metadata row with status UPLOADING.',
+        run: function (ctx) {
+          var s = ctx.state; hl(1);
+          return ctx.packet([[170, 85], [305, 68]], { label: 'POST /uploads' }).then(function () {
+            return ctx.packet([[455, 68], [590, 70]]);
+          }).then(function () {
+            setBox(s.db, 'signal', 'f/123  UPLOADING', 'fill-signal');
+            ctx.flash(s.db.r);
+            ctx.log('POST /uploads {name, 128 MB, video/mp4}', 'info');
+            ctx.log('DB insert f/123 key=u/42/f/123/v1 status=UPLOADING');
+          });
+        },
+      },
+      {
+        title: 'Get a presigned URL back',
+        say: 'The API signs a URL with HMAC: one key, one verb, 15 minutes. No call to S3 is needed to sign. The URL is the permission.',
+        run: function (ctx) {
+          var s = ctx.state; hl(2);
+          return ctx.packet([[305, 68], [170, 85]], { cls: 'accent', label: 'signed URL' }).then(function () {
+            s.urlText.textContent = 'PUT u/42/f/123/v1?exp=15m&sig=cb8b..';
+            s.urlText.setAttribute('class', 'mono small fill-accent');
+            setBox(s.api, 'accent');
+            ctx.log('presigned PUT + uploadId, valid 900 s', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Split the file into parts',
+        say: '128 MB with 16 MB parts gives 8 parts. S3 allows 5 MB to 5 GB per part and up to 10,000 parts, so even a 5 TB file fits.',
+        run: function (ctx) {
+          var s = ctx.state; hl(3);
+          return Promise.all(s.parts.map(function (p, i) {
+            return ctx.wait(i * 60).then(function () { return ctx.fade(p, 1, 250); });
+          })).then(function () {
+            setBox(s.client, '', 'p1..p8 x 16 MB');
+            ctx.log('ceil(128 / 16) = 8 parts');
+          });
+        },
+      },
+      {
+        title: 'Upload 4 parts at a time, straight to S3',
+        say: 'Bytes go directly to the bucket in parallel. On the second wave, part 7 drops on a bad mobile link. Only that part failed; the others are safe.',
+        run: function (ctx) {
+          var s = ctx.state; hl(4);
+          function send(i, fail) {
+            var from = [36 + i * 16, 160], to = [slotX(i) + 10, 262];
+            var path = fail ? [from, [(from[0] + to[0]) / 2, 220]] : [from, [200, 240], to];
+            return ctx.packet(path, { ms: 700, cls: fail ? 'bad' : '' }).then(function () {
+              if (fail) { s.slots[i].setAttribute('class', 'box bad'); s.parts[i].setAttribute('class', 'box bad'); ctx.log('part 7 failed: connection reset', 'bad'); }
+              else { s.slots[i].setAttribute('class', 'box accent'); s.parts[i].setAttribute('class', 'box accent'); }
+            });
+          }
+          return Promise.all([0, 1, 2, 3].map(function (i) { return send(i, false); })).then(function () {
+            ctx.log('wave 1: parts 1-4 stored (ETags kept)', 'ok');
+            return Promise.all([4, 5, 6, 7].map(function (i) { return send(i, i === 6); }));
+          }).then(function () {
+            ctx.log('wave 2: parts 5, 6, 8 stored');
+            banner(ctx, '7 of 8 parts stored; 1 failed', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Retry only the failed part',
+        say: 'The client resends part 7: 16 MB, not 128 MB. A single PUT would have restarted the whole file. After a crash, ListParts tells the client what is already there.',
+        run: function (ctx) {
+          var s = ctx.state; hl(4);
+          return ctx.packet([[132, 160], [200, 240], [slotX(6) + 10, 262]], { ms: 700, cls: 'warn' }).then(function () {
+            s.slots[6].setAttribute('class', 'box accent'); s.parts[6].setAttribute('class', 'box accent');
+            ctx.flash(s.slots[6]);
+            banner(ctx, 'Retried 16 MB instead of 128 MB', 'ok');
+            ctx.log('retry part 7 -> stored', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Complete: S3 stitches one object',
+        say: 'CompleteMultipartUpload sends the 8 ETags. S3 joins the parts into one immutable object. Reads after this are strongly consistent.',
+        run: function (ctx) {
+          var s = ctx.state; hl(6);
+          s.slots.forEach(function (sl) { ctx.fade(sl, 0, 300); });
+          s.obj.setAttribute('opacity', 1);
+          return ctx.animate(s.obj, { width: 195 }, 600).then(function () {
+            s.objText.textContent = 'u/42/f/123/v1  128 MB';
+            s.objText.setAttribute('opacity', 1);
+            setBox(s.s3, 'accent', 'object complete');
+            banner(ctx, '', '');
+            ctx.log('CompleteMultipartUpload(8 ETags) -> 1 object', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Event to the worker, not the client',
+        say: 'S3 emits ObjectCreated into a queue. The worker does a HEAD, checks size and checksum against the row, scans for viruses and makes a thumbnail or HLS renditions.',
+        run: function (ctx) {
+          var s = ctx.state; hl(7);
+          return ctx.packet([[500, 240], [590, 237]], { label: 'ObjectCreated' }).then(function () {
+            setBox(s.worker, 'signal', 'HEAD, scan, thumb', 'fill-signal');
+            ctx.flash(s.worker.r);
+            ctx.log('queue -> worker: HEAD ok, size matches, scan clean', 'info');
+            return ctx.wait(400);
+          });
+        },
+      },
+      {
+        title: 'Mark the row READY',
+        say: 'Only now does the metadata row become READY. The file is visible to the user. The DB never held a single byte of the video.',
+        run: function (ctx) {
+          var s = ctx.state; hl(8);
+          return ctx.packet([[665, 200], [665, 118]], { cls: 'ok' }).then(function () {
+            setBox(s.db, 'ok', 'f/123  READY', 'fill-ok');
+            setBox(s.worker, 'ok', 'done', 'muted');
+            ctx.flash(s.db.r);
+            ctx.log('DB f/123 status=READY', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Read through the CDN',
+        say: 'GET /files/123 returns a CDN URL. The first viewer misses at the edge, the CDN fetches from S3 once, then every later viewer is a hit near them.',
+        run: function (ctx) {
+          var s = ctx.state; hl(9);
+          return ctx.packet([[95, 130], [95, 230]], { label: 'GET' }).then(function () {
+            setBox(s.cdn, 'signal', 'MISS', 'fill-signal');
+            ctx.log('viewer 1: CDN MISS -> origin S3', 'warn');
+            return ctx.packet([[170, 260], [280, 270]]);
+          }).then(function () {
+            return ctx.packet([[280, 270], [170, 260]], { cls: 'accent' });
+          }).then(function () {
+            setBox(s.cdn, 'ok', 'HIT (TTL 1 yr)', 'fill-ok');
+            ctx.log('viewer 2..N: CDN HIT, S3 not touched', 'ok');
+            return ctx.packet([[95, 230], [95, 130]], { cls: 'ok' });
+          });
+        },
+      },
+      {
+        title: 'Lifecycle moves old bytes to cheap tiers',
+        say: 'Nobody watches the video after a month. A rule moves it to Standard-IA at 30 days and Glacier at 90 days: about 6 times cheaper per GB. The row and key stay the same.',
+        run: function (ctx) {
+          var s = ctx.state; hl(10);
+          ctx.fade(s.chip, 1, 200);
+          setBox(s.tiers[0], 'accent');
+          ctx.log('day 0: Standard');
+          return ctx.move(s.chip, 425, 392, 700).then(function () {
+            setBox(s.tiers[0], ''); setBox(s.tiers[1], 'accent');
+            ctx.log('day 30: -> Standard-IA');
+            return ctx.move(s.chip, 615, 392, 700);
+          }).then(function () {
+            setBox(s.tiers[1], ''); setBox(s.tiers[2], 'accent');
+            ctx.log('day 90: -> Glacier (retrieval fee, min 90 days)', 'info');
+          });
+        },
+      },
+      {
+        title: 'Sweep orphans',
+        say: 'Another upload, f/124, never finished: its row is stuck in UPLOADING and some parts sit in S3. A sweeper expires rows older than 24 hours and aborts the multipart upload, so you stop paying for it.',
+        run: function (ctx) {
+          var s = ctx.state; hl(11);
+          s.dbRow2.textContent = 'f/124  UPLOADING 26h';
+          s.dbRow2.setAttribute('class', 'mono small fill-bad');
+          s.orphan = ctx.el('rect', { x: 292, y: 298, width: 30, height: 14, rx: 3, class: 'box bad' });
+          ctx.el('text', { x: 330, y: 309, class: 'mono small fill-bad', text: 'f/124 parts (orphan)' });
+          ctx.log('found f/124 UPLOADING for 26 h', 'bad');
+          return ctx.wait(500).then(function () {
+            return ctx.packet([[665, 118], [665, 160], [520, 160], [520, 305], [322, 305]], { cls: 'bad', label: 'sweeper' });
+          }).then(function () {
+            s.dbRow2.textContent = 'f/124  EXPIRED';
+            s.dbRow2.setAttribute('class', 'mono small muted');
+            return ctx.fade(s.orphan, 0.15, 400);
+          }).then(function () {
+            banner(ctx, 'DB and bucket agree again', 'ok');
+            ctx.log('AbortMultipartUpload f/124; row expired', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // Try it: pure calculator next to the scene. It does not touch the SVG, so Prev and Reset are unaffected.
+  var sizeIn = document.getElementById('size-in'), partIn = document.getElementById('part-in'), out = document.getElementById('try-out');
+  function sizeMB() { var v = parseInt(sizeIn.value, 10); return v <= 100 ? v * 10 : (v - 100) * 200 + 1000; } // 10 MB .. 61 GB
+  function fmt(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB'; }
+  function update() {
+    var mb = sizeMB(), part = parseInt(partIn.value, 10);
+    var n = Math.ceil(mb / part);
+    var msg = 'File ' + fmt(mb) + ': ';
+    if (mb <= 100) msg += 'one presigned PUT is fine (under ~100 MB). ';
+    else msg += 'multipart, ' + n + ' parts of ' + part + ' MB. ';
+    if (n > 10000) msg += 'Too many parts (max 10,000): use bigger parts. ';
+    if (mb > 5120 && mb > 100 && n <= 10000) msg += 'Single PUT is not even allowed above 5 GB. ';
+    msg += 'One dropped connection costs ' + fmt(mb <= 100 ? mb : Math.min(part, mb)) + ' to resend, not ' + fmt(mb) + '.';
+    out.textContent = msg;
+  }
+  sizeIn.addEventListener('input', update);
+  partIn.addEventListener('change', update);
+  update();
+  void lab;
+})();
+</script>
+</body>
+</html>

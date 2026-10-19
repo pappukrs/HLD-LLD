@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ref": "REF=1 vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "open": "tsx scripts/open.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

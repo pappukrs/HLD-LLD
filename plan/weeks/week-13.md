@@ -1,69 +1,70 @@
 # Week 13 · Real-time collaboration
 
 > Mon 11 Jan – Sun 17 Jan · Phase 3: Interview loop · ~10 h this week
-> **Goal:** Keep the skills warm while real interviews run. Friday is reserved for fixing what interviews exposed.
+> **Goal:** Interviews are running. Hard designs, advanced problems, and fix what each interview exposed.
 
 [← Week 12](week-12.md) · [All weeks](README.md) · [Week 14 →](week-14.md)
 
 ## Mon 11 Jan · Day 85 · 60 min
 
-- [ ] **LLD · 25 min**: In-memory File System: requirements + class diagram  
-  [24-file-system](../../lld/problems/24-file-system/README.md)  
-  _Do Step 1 and Step 3 on paper: entities, relationships, patterns. Don't code yet._
-- [ ] **HLD · 35 min**: Refresh: Kafka + Idempotency  
-  [concepts/18-kafka-deep-dive](../../hld/concepts/18-kafka-deep-dive.md) · [concepts/19-idempotency-delivery-semantics](../../hld/concepts/19-idempotency-delivery-semantics.md)  
-  _Self-test only. Answer every question on both cards from memory, then re-read only what you got wrong._
+- [ ] **LLD · 25 min**: Refresh: L05 + L06  
+  [demo.ts](../../lld/1-foundations/L05-solid-lsp-isp-dip/demo.ts) · [demo.ts](../../lld/1-foundations/L06-uml-relationships/demo.ts)  
+  _Write both patterns from memory (10 min each), then diff against demo.ts._
+- [ ] **HLD · 35 min**: Advanced: ETA and live location sharing (outline)  
+  [advanced-37.md](../../hld/case-studies/advanced-37.md) · [_template/my-design.md](../../hld/case-studies/_template/my-design.md)  
+  _Copy the template to hld/case-studies/advanced/<name>.md. 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md._
 
 ## Tue 12 Jan · Day 86 · 60 min
 
-- [ ] **LLD · 25 min**: In-memory File System: implement the core  
-  [24-file-system](../../lld/problems/24-file-system/README.md)  
-  _Code the main flow in starter.ts. Run the tests and get the first half green._
-- [ ] **HLD · 35 min**: Collaborative Editor: part 1 (steps 1–5)  
-  [25-collaborative-editor](../../hld/problems/25-collaborative-editor/README.md) · [25-collaborative-editor/my-design](../../hld/problems/25-collaborative-editor/my-design.md)  
-  _In my-design.md: requirements, estimates, API, data model, diagram. Don't open the hints._
+- [ ] **LLD · 25 min**: Redo sprint: Splitwise  
+  [09-splitwise/README.md](../../lld/problems/09-splitwise/README.md)  
+  _Empty file, 25 min. Rebuild the core classes and the main method from memory. Spaced repetition: this is what makes it stick._
+- [ ] **HLD · 35 min**: Advanced: Login and authentication system (outline)  
+  [advanced-37.md](../../hld/case-studies/advanced-37.md) · [_template/my-design.md](../../hld/case-studies/_template/my-design.md)  
+  _Copy the template to hld/case-studies/advanced/<name>.md. 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md._
 
 ## Wed 13 Jan · Day 87 · 60 min
 
-- [ ] **LLD · 25 min**: In-memory File System: finish + extensions  
-  [24-file-system](../../lld/problems/24-file-system/README.md)  
-  _Make all tests green. Then answer the Step 5 extensions out loud. Only now compare with reference.ts._
-- [ ] **HLD · 35 min**: Collaborative Editor: part 2 (deep dives + compare)  
-  [25-collaborative-editor](../../hld/problems/25-collaborative-editor/README.md) · [25-collaborative-editor/my-design](../../hld/problems/25-collaborative-editor/my-design.md)  
-  _Write the 2–3 deep dives. Then open every hint, compare, and fill in the Review section._
+- [ ] **LLD · 25 min**: Debrief fix  
+  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored concept._
+- [ ] **HLD · 35 min**: Debrief fix  
+  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored concept._
 
 ## Thu 14 Jan · Day 88 · 60 min
 
-- [ ] **LLD · 25 min**: Redo Splitwise from scratch (core only)  
-  [09-splitwise](../../lld/problems/09-splitwise/README.md)  
-  _Empty file, 25 min. Rebuild the core classes from memory. Spaced repetition: this is what makes it stick._
-- [ ] **HLD · 35 min**: Advanced: Surge pricing engine (outline)  
-  [problems/advanced-37](../../hld/problems/advanced-37.md) · [_template/my-design](../../hld/problems/_template/my-design.md)  
-  _Copy the template to hld/problems/advanced/<name>.md. Outline it in 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md._
+- [ ] **LLD · 25 min**: Elevator System: requirements + class diagram  
+  [10-elevator/README.md](../../lld/problems/10-elevator/README.md) · [L30-machine-coding-framework/README.md](../../lld/5-machine-coding/L30-machine-coding-framework/README.md)  
+  _Steps 1–3 on paper: clarify, list entities, draw the class diagram, name the patterns. No code yet._
+- [ ] **HLD · 35 min**: Live Comments: part 1 (requirements → diagram)  
+  [27-live-comments/README.md](../../hld/case-studies/27-live-comments/README.md) · [27-live-comments/my-design.md](../../hld/case-studies/27-live-comments/my-design.md)  
+  _In my-design.md: requirements, estimates, API, data model, high-level diagram. Don't open the hints._
 
 ## Fri 15 Jan · Day 89 · 60 min
 
-- [ ] **LLD · 25 min**: Debrief fix  
-  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored card._
-- [ ] **HLD · 35 min**: Debrief fix  
-  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored card._
+- [ ] **LLD · 25 min**: Elevator System: build the core  
+  [10-elevator/README.md](../../lld/problems/10-elevator/README.md)  
+  _Code the main flow in starter.ts. Run `npx vitest run lld/problems/10-elevator` and get the first tests green._
+- [ ] **HLD · 35 min**: Live Comments: part 2 (deep dives + compare)  
+  [27-live-comments/README.md](../../hld/case-studies/27-live-comments/README.md) · [27-live-comments/my-design.md](../../hld/case-studies/27-live-comments/my-design.md)  
+  _Write 2–3 deep dives and the trade-offs. Then open every hint, compare, and fill in the Review section._
 
 ## Sat 16 Jan · Day 90 · 150 min
 
-- [ ] **MOCK · 90 min**: Mock machine-coding round  
-  [concepts/04-lld-interview-framework](../../lld/concepts/04-lld-interview-framework.md)  
-  _Someone else (your brother, a friend, Pramp) picks any finished LLD problem and plays the interviewer. 90 min, full round. Write a debrief._
+- [ ] **LLD · 90 min**: Elevator System: finish + timed redo  
+  [10-elevator/README.md](../../lld/problems/10-elevator/README.md)  
+  _Finish starter.ts until all tests pass (40 min). Then answer the extension questions out loud. Only now open reference.ts and write down 3 differences._
 - [ ] **MOCK · 60 min**: Mock HLD round  
-  [concepts/01-how-to-approach-hld](../../hld/concepts/01-how-to-approach-hld.md)  
-  _Ask a friend, or use Pramp / interviewing.io peers. Pick a problem you have not designed in the last 2 weeks. 45 min + feedback. Write a debrief._
+  [H01-approach-hld-round/README.md](../../hld/1-basics/H01-approach-hld-round/README.md)  
+  _Ask a friend, or use Pramp / interviewing.io peers. Pick a case study you haven't done in 2 weeks. 45 min + feedback. Write a debrief._
 
 ## Sun 17 Jan · Day 91 · 120 min
 
-- [ ] **HLD · 75 min**: Live Comments and Viewer Count: full design  
-  [27-live-comments](../../hld/problems/27-live-comments/README.md) · [27-live-comments/my-design](../../hld/problems/27-live-comments/my-design.md)  
-  _45 min on a timer in my-design.md, talking out loud as if to an interviewer. Then 30 min comparing with the hints and filling in the Review._
+- [ ] **HLD · 75 min**: Collaborative Editor: full design  
+  [25-collaborative-editor/README.md](../../hld/case-studies/25-collaborative-editor/README.md) · [25-collaborative-editor/my-design.md](../../hld/case-studies/25-collaborative-editor/my-design.md) · [H01-approach-hld-round/README.md](../../hld/1-basics/H01-approach-hld-round/README.md)  
+  _45 min on a timer in my-design.md, talking out loud as if to an interviewer (do it as a mock if someone is free). Then 30 min comparing with the hints and filling in the Review._
 - [ ] **REV · 45 min**: Weekly review  
-  _Update the pipeline. Turn every debrief gap into a task for next Friday. Then run /daily week._
+  [L34-testing-designs/README.md](../../lld/5-machine-coding/L34-testing-designs/README.md) · [H34-geospatial/README.md](../../hld/6-building-blocks/H34-geospatial/README.md) · [H35-probabilistic-ds/README.md](../../hld/6-building-blocks/H35-probabilistic-ds/README.md) · [H36-batch-stream/README.md](../../hld/6-building-blocks/H36-batch-stream/README.md)  
+  _Score yourself 1–5 on each concept module. Redo the self-test of the two lowest, and update your weak list in plan/notes.md. Then run /daily week._
 
 ## Notes
 

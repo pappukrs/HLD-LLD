@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L05 LSP, ISP and DIP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+
+  .stage .zone { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .stage .slot { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .stage .shape { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .stage .shape.bad { fill: none; stroke: var(--bad); }
+  .stage .uml.red { stroke: var(--bad); }
+  .try label { font-size: 14px; display: flex; gap: 6px; align-items: center; }
+  .try select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L05 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>SOLID part 2: LSP, ISP and DIP</h1>
+    <p class="lede">A refund job crashes on a gift card, a square breaks a rectangle, and a payment service cannot be tested without Postgres. Three principles fix three real failures: keep subtypes honest, keep interfaces small, and plug details in from outside.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Payment classes refactored by Liskov, interface segregation and dependency inversion"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Interface / abstraction</span>
+        <span><i style="background: var(--signal)"></i>Concrete class</span>
+        <span><i style="background: var(--bad)"></i>Broken promise / bad arrow</span>
+        <span><i style="background: var(--ok)"></i>Works</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">interface Payable { pay(amount: number): Promise&lt;string&gt;; }</span><span class="ln" data-l="1">interface Refundable { refund(txnId: string): Promise&lt;void&gt;; }</span><span class="ln" data-l="2">class CardPayment implements Payable, Refundable { ... }</span><span class="ln" data-l="3">class GiftCardPayment implements Payable { ... }   // no refund promise</span><span class="ln" data-l="4">function refundAll(items: Refundable[]) { ... }    // gift card: compile error</span><span class="ln" data-l="5">interface PaymentRepo { save(p: Payment): Promise&lt;void&gt;; }   // owned by the domain</span><span class="ln" data-l="6">interface Notifier { send(to: string, msg: string): Promise&lt;void&gt;; }</span><span class="ln" data-l="7">class PaymentService {</span><span class="ln" data-l="8">  constructor(private repo: PaymentRepo, private notifier: Notifier) {}</span><span class="ln" data-l="9">}</span><span class="ln" data-l="10">// main.ts: the composition root</span><span class="ln" data-l="11">const svc = new PaymentService(new PostgresRepo(pool), new SmtpNotifier(cfg));</span><span class="ln" data-l="12">// payment-service.test.ts</span><span class="ln" data-l="13">const svc = new PaymentService(new InMemoryRepo(), new FakeNotifier());</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: wire the service</h3>
+      <p>Choose what to inject. <code>PaymentService</code> never changes; only the wiring does.</p>
+      <div class="try">
+        <label>repo <select id="t-repo"><option value="pg">PostgresRepo</option><option value="mem">InMemoryRepo</option></select></label>
+        <label>notifier <select id="t-not"><option value="smtp">SmtpNotifier</option><option value="fake">FakeNotifier</option></select></label>
+        <button class="btn primary" type="button" id="t-run">Run svc.pay(card, 499)</button>
+      </div>
+      <div class="try-out" id="try-out">Pick the parts and press Run.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Gift cards can't be refunded, so <code>refund()</code> is not on the base interface. I split it into <code>Payable</code> and <code>Refundable</code>; the refund job takes <code>Refundable[]</code>, so a gift card there is a compile error. The service depends on <code>PaymentRepo</code> and <code>Notifier</code> interfaces it owns; <code>main.ts</code> injects Postgres and SMTP, and tests inject in-memory fakes."</p>
+    </div>
+    <div class="note wide">
+      <h3>The three principles: smell and fix</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Principle</th><th>Rule</th><th>Smell you can see</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>L: Liskov substitution</td><td>A subtype keeps every promise of its parent</td><td>Subclass throws "not supported", no-op overrides, callers use <code>instanceof</code></td><td>Promise only what all subtypes can do; split the interface or compose</td></tr>
+            <tr><td>I: Interface segregation</td><td>Clients depend only on methods they use</td><td>Classes implement methods they cannot honour; fat <code>IService</code></td><td>Small role interfaces: <code>Payable</code>, <code>Refundable</code></td></tr>
+            <tr><td>D: Dependency inversion</td><td>Policy and details both depend on abstractions owned by the policy</td><td><code>new PostgresRepo()</code> inside business logic; tests need a real DB</td><td>Constructor injection; one composition root</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Does compiling mean LSP holds?</summary><div>No. TypeScript checks method names and types. LSP is about behaviour: no new exceptions, no stronger input rules, no weaker results, invariants kept.</div></details>
+      <details class="qa"><summary>Why did <code>Square</code> give area 16?</summary><div><code>setHeight(4)</code> also set the width to 4. Code written for <code>Rectangle</code> expects the two to be independent, so it expected 5 × 4 = 20.</div></details>
+      <details class="qa"><summary>Who owns <code>PaymentRepo</code>?</summary><div>The domain, next to <code>PaymentService</code>, in the words the service needs. Postgres implements it. The arrow from the detail points up to the abstraction: that is the inversion.</div></details>
+      <details class="qa"><summary>DIP or DI?</summary><div>DIP is the principle; DI (passing dependencies in) is the technique; a container like NestJS is a tool for DI.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+
+  function badArrow(ctx, parent, d) {
+    return ctx.el('path', { d: d, class: 'uml red', 'marker-end': 'url(#m-open)' }, parent);
+  }
+
+  // ---------- scenes ----------
+  function sceneLSP(ctx, g) {
+    T(ctx, g, 20, 28, 'L: a subtype that breaks the promise', 'title');
+    var job = cls(ctx, g, 20, 66, 230, 'RefundJob', ['refundAll(ms: PaymentMethod[])'], { cls: 'signal' });
+    var itf = cls(ctx, g, 330, 50, 200, 'PaymentMethod', ['pay(amt)', { t: 'refund(id)', cls: 'fill-accent' }], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M' + job.b.right + ',' + (job.b.y + 30) + ' H' + itf.b.x, 'assoc');
+    var specs = [['CardPayment', ['pay(amt)', 'refund(id)'], 'signal'], ['UpiPayment', ['pay(amt)', 'refund(id)'], 'signal'], ['GiftCardPayment', ['pay(amt)', { t: 'refund() { throw }', cls: 'fill-bad' }], 'bad']];
+    var impls = specs.map(function (s, i) {
+      var c = cls(ctx, g, 200 + i * 185, 250, 170, s[0], s[1], { cls: s[2] });
+      arrow(ctx, g, 'M' + c.b.cx + ',250 V200 H' + itf.b.cx + ' V' + itf.b.bottom, 'real');
+      return c;
+    });
+    var err = ctx.group({ opacity: 0 }, g);
+    T(ctx, err, impls[2].b.cx, 345, 'Error: cannot refund', 'mono fill-bad', 'middle');
+    T(ctx, err, 20, 395, '3 a.m.: the job trusted the interface; one subtype broke that trust.', 'small');
+    var rules = ctx.group({ opacity: 0 }, g);
+    ctx.el('rect', { x: 20, y: 150, width: 160, height: 92, rx: 8, class: 'box' }, rules);
+    var rl = ['inputs: no stricter', 'outputs: no weaker', 'no new exceptions', 'invariants kept'].map(function (r, i) { return T(ctx, rules, 30, 170 + i * 20, '✓ ' + r, 'mono small fill-ok'); });
+    ctx.state.lsp = { itf: itf, impls: impls, err: err, rules: rules, rl: rl };
+  }
+
+  function sceneSquare(ctx, g) {
+    T(ctx, g, 20, 28, 'L, the classic: Square extends Rectangle', 'title');
+    T(ctx, g, 190, 70, 'resize(new Rectangle(1, 1))', 'mono small', 'middle');
+    T(ctx, g, 570, 70, 'resize(new Square(1, 1))', 'mono small', 'middle');
+    ctx.el('line', { x1: 380, x2: 380, y1: 60, y2: 400, class: 'sep' }, g);
+    var U = 34;
+    var r1 = ctx.el('rect', { x: 60, y: 110, width: U, height: U, class: 'shape' }, g);
+    var r2 = ctx.el('rect', { x: 440, y: 110, width: U, height: U, class: 'shape' }, g);
+    var a1 = T(ctx, g, 190, 340, 'w=1 h=1', 'mono', 'middle');
+    var a2 = T(ctx, g, 570, 340, 'w=1 h=1', 'mono', 'middle');
+    var res1 = T(ctx, g, 190, 375, '', 'mono b', 'middle');
+    var res2 = T(ctx, g, 570, 375, '', 'mono b', 'middle');
+    T(ctx, g, 380, 420, 'resize(r) { r.setWidth(5); r.setHeight(4); return r.area(); }  // expects 20', 'mono small muted', 'middle');
+    ctx.state.sq = { r1: r1, r2: r2, a1: a1, a2: a2, res1: res1, res2: res2, U: U };
+  }
+
+  function sceneISP(ctx, g) {
+    T(ctx, g, 20, 28, 'I: small interfaces, each one honest', 'title');
+    var co = cls(ctx, g, 20, 66, 200, 'CheckoutService', ['pay(m: Payable)'], { cls: 'signal' });
+    var job = cls(ctx, g, 540, 66, 200, 'RefundJob', ['refundAll(rs: Refundable[])'], { cls: 'signal' });
+    var pay = cls(ctx, g, 250, 50, 130, 'Payable', ['pay(amt)'], { stereo: 'interface', cls: 'accent' });
+    var ref = cls(ctx, g, 400, 50, 130, 'Refundable', ['refund(id)'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M220,96 H250', 'assoc');
+    arrow(ctx, g, 'M540,96 H530', 'assoc');
+    var specs = [['CardPayment', ['pay(amt)', 'refund(id)'], [pay, ref]], ['UpiPayment', ['pay(amt)', 'refund(id)'], [pay, ref]], ['GiftCardPayment', ['pay(amt)'], [pay]]];
+    var impls = specs.map(function (s, i) {
+      var c = cls(ctx, g, 130 + i * 190, 260, 170, s[0], s[1], { cls: i === 2 ? 'ok' : 'signal' });
+      s[2].forEach(function (t) { arrow(ctx, g, 'M' + c.b.cx + ',' + c.b.y + ' L' + t.b.cx + ',' + t.b.bottom, 'real'); });
+      return c;
+    });
+    var note = ctx.group({ opacity: 0 }, g);
+    T(ctx, note, impls[2].b.cx, 345, 'never asked to refund', 'mono small fill-ok', 'middle');
+    T(ctx, note, 20, 395, 'refundAll([giftCard]) is now a compile error, not a runtime crash.', 'small');
+    T(ctx, note, 20, 417, 'Splitting the fat interface also fixed the Liskov problem.', 'small muted');
+    ctx.state.isp = { co: co, job: job, pay: pay, ref: ref, impls: impls, note: note, g: g };
+  }
+
+  function sceneDIPBad(ctx, g) {
+    T(ctx, g, 20, 28, 'D: business logic builds its own tools', 'title');
+    T(ctx, g, 20, 80, 'high-level policy', 'mono small muted');
+    var svc = cls(ctx, g, 250, 56, 280, 'PaymentService', ['constructor() {', '  this.repo = new PostgresRepo();', '  this.mail = new SmtpMailer();', '}', 'pay(m: Payable, user, amt)'], { cls: 'bad' });
+    T(ctx, g, 20, 300, 'low-level details', 'mono small muted');
+    var pg = cls(ctx, g, 160, 280, 170, 'PostgresRepo', ['save(p)'], { cls: 'signal' });
+    var smtp = cls(ctx, g, 450, 280, 170, 'SmtpMailer', ['send(to, msg)'], { cls: 'signal' });
+    badArrow(ctx, g, 'M' + (svc.b.cx - 50) + ',' + svc.b.bottom + ' L' + pg.b.cx + ',' + pg.b.y);
+    badArrow(ctx, g, 'M' + (svc.b.cx + 50) + ',' + svc.b.bottom + ' L' + smtp.b.cx + ',' + smtp.b.y);
+    var test = cls(ctx, g, 20, 140, 170, 'payment.test.ts', ['expect(...)'], {});
+    ctx.state.dbad = { svc: svc, pg: pg, test: test, g: g };
+  }
+
+  function sceneDIPGood(ctx, g) {
+    T(ctx, g, 20, 28, 'D: depend on interfaces you own; inject the details', 'title');
+    ctx.el('rect', { x: 210, y: 44, width: 540, height: 170, rx: 12, class: 'zone' }, g);
+    T(ctx, g, 222, 62, 'domain (owns the interfaces)', 'mono small muted');
+    ctx.el('rect', { x: 210, y: 250, width: 540, height: 180, rx: 12, class: 'zone' }, g);
+    T(ctx, g, 222, 268, 'infrastructure (details)', 'mono small muted');
+    var svc = ctx.el('rect', { x: 225, y: 76, width: 245, height: 120, rx: 8, class: 'box ok' }, g);
+    T(ctx, g, 347, 96, 'PaymentService', 'b', 'middle');
+    ctx.el('rect', { x: 237, y: 116, width: 105, height: 30, rx: 6, class: 'slot' }, g);
+    ctx.el('rect', { x: 352, y: 116, width: 105, height: 30, rx: 6, class: 'slot' }, g);
+    T(ctx, g, 290, 164, 'repo', 'mono small muted', 'middle');
+    T(ctx, g, 405, 164, 'notifier', 'mono small muted', 'middle');
+    var repo = cls(ctx, g, 490, 74, 120, 'PaymentRepo', ['save(p)'], { stereo: 'interface', cls: 'accent' });
+    var notif = cls(ctx, g, 620, 74, 120, 'Notifier', ['send(to, m)'], { stereo: 'interface', cls: 'accent' });
+    var impl = ctx.group({ opacity: 0 }, g);
+    var specs = [['PostgresRepo', 300, repo], ['InMemoryRepo', 300, repo], ['SmtpNotifier', 530, notif], ['FakeNotifier', 530, notif]];
+    specs.forEach(function (s, i) {
+      var y = i % 2 === 0 ? 290 : 360;
+      var b = cls(ctx, impl, s[1], y, 150, s[0], [], { cls: i % 2 === 0 ? 'signal' : 'ok' });
+      arrow(ctx, impl, 'M' + (s[1] + (i % 2 === 0 ? 120 : 140)) + ',' + y + ' L' + s[2].b.cx + ',' + s[2].b.bottom, 'real');
+    });
+    var main = cls(ctx, g, 15, 250, 180, 'main.ts', ['composition root'], { cls: 'signal' });
+    var test = cls(ctx, g, 15, 350, 180, 'payment.test.ts', ['test wiring'], {});
+    var chips = {
+      pg: chip(ctx, g, 20, 322, 85, 'Postgres', 'signal'),
+      smtp: chip(ctx, g, 112, 322, 80, 'SMTP', 'signal'),
+      mem: chip(ctx, g, 20, 420, 85, 'InMemory', 'ok'),
+      fake: chip(ctx, g, 112, 420, 80, 'Fake', 'ok'),
+    };
+    chips.pg.setAttribute('opacity', 0); chips.smtp.setAttribute('opacity', 0);
+    chips.mem.setAttribute('opacity', 0); chips.fake.setAttribute('opacity', 0);
+    ctx.state.dgood = { svc: svc, impl: impl, chips: chips, g: g };
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Three failures, three fixes', say: 'Liskov keeps subtypes honest, interface segregation keeps contracts small, and dependency inversion lets you plug in real or fake details.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneLSP(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'L: the refund job crashes on a gift card',
+        say: 'The interface promises <code>refund()</code>. Gift cards cannot refund, so <code>GiftCardPayment.refund()</code> throws. The job trusted the interface and dies on the third item.',
+        run: function (ctx) {
+          var s = ctx.state.lsp;
+          var chain = Promise.resolve();
+          s.impls.forEach(function (c, i) {
+            chain = chain.then(function () {
+              return ctx.packet([[s.itf.b.cx, s.itf.b.bottom], [s.itf.b.cx, 225], [c.b.cx, 225], [c.b.cx, c.b.y]], { ms: 600, cls: i === 2 ? 'bad' : 'ok', label: 'refund' });
+            }).then(function () {
+              if (i === 2) { ctx.flash(c.r); ctx.log('GiftCardPayment.refund() threw: cannot refund', 'bad'); return ctx.fade(s.err, 1, 300); }
+              ctx.log(['Card', 'UPI'][i] + ' refund ok', 'ok');
+            });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Check the four substitution rules',
+        say: 'A subtype must accept at least the same inputs, give at least the same results, throw no new errors and keep the invariants. The gift card fails <b>"no new exceptions"</b>.',
+        run: function (ctx) {
+          var s = ctx.state.lsp;
+          return ctx.fade(s.rules, 1, 400).then(function () {
+            s.rl[2].textContent = '✗ no new exceptions';
+            s.rl[2].setAttribute('class', 'mono small fill-bad');
+            ctx.flash(s.rl[2]);
+            ctx.log('Rule broken: throws where PaymentMethod never does', 'bad');
+          });
+        },
+      },
+      {
+        title: 'The classic: Square extends Rectangle',
+        say: 'Code for <code>Rectangle</code> sets width 5, then height 4, and expects area 20. The square keeps itself square, so setting the height also shrinks the width. Area 16. A square IS-A rectangle in maths, but not in behaviour.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneSquare(ctx, g); }).then(function () {
+            var q = ctx.state.sq, U = q.U;
+            q.a1.textContent = 'setWidth(5)'; q.a2.textContent = 'setWidth(5)';
+            return Promise.all([ctx.animate(q.r1, { width: 5 * U }, 600), ctx.animate(q.r2, { width: 5 * U, height: 5 * U }, 600)]);
+          }).then(function () {
+            var q = ctx.state.sq, U = q.U;
+            q.a1.textContent = 'setHeight(4)'; q.a2.textContent = 'setHeight(4)';
+            return Promise.all([ctx.animate(q.r1, { height: 4 * U }, 600), ctx.animate(q.r2, { width: 4 * U, height: 4 * U }, 600)]);
+          }).then(function () {
+            var q = ctx.state.sq;
+            q.a1.textContent = 'w=5 h=4'; q.a2.textContent = 'w=4 h=4';
+            q.res1.textContent = 'area = 20 ✓'; q.res1.setAttribute('class', 'mono b fill-ok');
+            q.res2.textContent = 'area = 16 ✗'; q.res2.setAttribute('class', 'mono b fill-bad');
+            q.r2.setAttribute('class', 'shape bad');
+            ctx.log('Rectangle: 20 (as expected)', 'ok');
+            ctx.log('Square: 16. setHeight changed width too: invariant broken', 'bad');
+          });
+        },
+      },
+      {
+        title: 'I: split the fat interface',
+        say: 'Split into <code>Payable</code> and <code>Refundable</code>. Card and UPI implement both; gift card only <code>Payable</code>. <code>RefundJob</code> asks for <code>Refundable[]</code>, so the compiler stops the bad call.',
+        run: function (ctx) {
+          hl([0, 1, 2, 3, 4]);
+          return swap(ctx, function (g) { sceneISP(ctx, g); }).then(function () {
+            var s = ctx.state.isp;
+            return Promise.all(s.impls.slice(0, 2).map(function (c) {
+              return ctx.packet([[640, 120], [s.ref.b.cx, s.ref.b.bottom], [c.b.cx, c.b.y]], { ms: 900, cls: 'ok', label: 'refund' });
+            }));
+          }).then(function () {
+            var s = ctx.state.isp;
+            ctx.log('RefundJob → Refundable: Card ok, UPI ok', 'ok');
+            return ctx.packet([[s.impls[2].b.cx, s.impls[2].b.y], [s.impls[2].b.cx, 200], [s.impls[2].b.cx, s.impls[2].b.y]], { ms: 700, cls: 'bad', label: 'refundAll([giftCard])' });
+          }).then(function () {
+            ctx.log('refundAll([giftCard]) → compile error: refund is missing', 'bad');
+            return ctx.fade(ctx.state.isp.note, 1, 400);
+          });
+        },
+      },
+      {
+        title: 'Each client sees only its slice',
+        say: 'Checkout needs only <code>pay</code>, so it depends on <code>Payable</code> and works with all three methods. Neither client depends on a method it does not use.',
+        run: function (ctx) {
+          var s = ctx.state.isp;
+          return Promise.all(s.impls.map(function (c, i) {
+            return ctx.wait(i * 150).then(function () {
+              return ctx.packet([[120, 120], [s.pay.b.cx, s.pay.b.bottom], [c.b.cx, c.b.y]], { ms: 900, cls: 'accent', label: i === 0 ? 'pay' : '' });
+            });
+          })).then(function () { ctx.log('CheckoutService → Payable: card, upi, giftcard all pay', 'ok'); });
+        },
+      },
+      {
+        title: 'D: the service builds its own dependencies',
+        say: 'The constructor calls <code>new PostgresRepo()</code> and <code>new SmtpMailer()</code>. Policy points down at details. A unit test cannot run without a real database, and moving to SES edits payment code.',
+        run: function (ctx) {
+          hl([7, 8, 9]);
+          return swap(ctx, function (g) { sceneDIPBad(ctx, g); }).then(function () {
+            var s = ctx.state.dbad;
+            return ctx.packet([[190, 170], [250, 150], [245, 280]], { cls: 'bad', label: 'run test', ms: 1000 });
+          }).then(function () {
+            var s = ctx.state.dbad;
+            ctx.flash(s.pg.r);
+            T(ctx, s.g, 20, 400, 'test: ECONNREFUSED 127.0.0.1:5432', 'mono fill-bad');
+            ctx.log('PaymentService → new PostgresRepo (concrete)', 'bad');
+            ctx.log('unit test fails: no database on the CI box', 'bad');
+          });
+        },
+      },
+      {
+        title: 'D: flip the arrows',
+        say: 'The domain defines <code>PaymentRepo</code> and <code>Notifier</code> in its own words. Postgres, SMTP and the fakes implement them. Now the details point <b>up</b> at the abstractions. That is the inversion.',
+        run: function (ctx) {
+          hl([5, 6, 7, 8, 9]);
+          return swap(ctx, function (g) { sceneDIPGood(ctx, g); }).then(function () {
+            return ctx.fade(ctx.state.dgood.impl, 1, 600);
+          }).then(function () {
+            ctx.log('interfaces live in the domain; 4 classes implement them', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Production wiring in the composition root',
+        say: '<code>main.ts</code> is the only file that writes <code>new PostgresRepo()</code>. It passes the real parts into the constructor. The service only sees the interfaces.',
+        run: function (ctx) {
+          hl([10, 11]);
+          var c = ctx.state.dgood.chips;
+          ctx.fade(c.pg, 1, 200); ctx.fade(c.smtp, 1, 200);
+          return Promise.all([ctx.move(c.pg, 247, 131, 900), ctx.move(c.smtp, 365, 131, 900)]).then(function () {
+            ctx.log('new PaymentService(new PostgresRepo(pool), new SmtpNotifier(cfg))', 'ok');
+            return ctx.packet([[347, 196], [375, 300]], { cls: 'accent', label: 'save → 12 ms', ms: 700 });
+          }).then(function () { ctx.log('pay(): INSERT into Postgres, email via SMTP', 'info'); });
+        },
+      },
+      {
+        title: 'Test wiring: same service, fake parts',
+        say: 'The test passes <code>InMemoryRepo</code> and <code>FakeNotifier</code>. Not one line of <code>PaymentService</code> changed. The test runs in under a millisecond with no network.',
+        run: function (ctx) {
+          hl([12, 13]);
+          var c = ctx.state.dgood.chips;
+          return Promise.all([ctx.move(c.pg, 20, 322, 600), ctx.move(c.smtp, 112, 322, 600)]).then(function () {
+            ctx.fade(c.mem, 1, 200); ctx.fade(c.fake, 1, 200);
+            return Promise.all([ctx.move(c.mem, 247, 131, 900), ctx.move(c.fake, 365, 131, 900)]);
+          }).then(function () {
+            ctx.flash(ctx.state.dgood.svc);
+            ctx.log('new PaymentService(new InMemoryRepo(), new FakeNotifier())', 'ok');
+            ctx.log('test: 0.4 ms, PASS, no database, no SMTP', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  document.getElementById('t-run').addEventListener('click', function () {
+    var r = document.getElementById('t-repo').value, n = document.getElementById('t-not').value;
+    var out = document.getElementById('try-out');
+    var ms = (r === 'pg' ? 12 : 0.2) + (n === 'smtp' ? 180 : 0.1);
+    var lines = [
+      'new PaymentService(' + (r === 'pg' ? 'new PostgresRepo(pool)' : 'new InMemoryRepo()') + ', ' + (n === 'smtp' ? 'new SmtpNotifier(cfg)' : 'new FakeNotifier()') + ')',
+      'card.pay(499) → card_499',
+      'repo.save → ' + (r === 'pg' ? "INSERT INTO payments ... (needs a running DB)" : 'rows.push(...) in memory'),
+      'notifier.send → ' + (n === 'smtp' ? 'SMTP to pappu@x.in (needs network)' : "sent = ['pappu@x.in|Paid 499']"),
+      'time ≈ ' + ms.toFixed(1) + ' ms   ·   PaymentService.ts lines changed: 0',
+      (r === 'mem' && n === 'fake') ? '→ ideal for unit tests: fast and deterministic' : '→ production-like wiring',
+    ];
+    out.textContent = lines.join('\n');
+  });
+})();
+</script>
+</body>
+</html>

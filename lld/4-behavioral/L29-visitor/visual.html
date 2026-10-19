@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L29 Visitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .cell { fill: transparent; stroke: var(--line); stroke-width: 1; }
+  .stage .cell.on { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .stage .cell.bad { fill: transparent; stroke: var(--bad); stroke-width: 2; stroke-dasharray: 5 4; }
+  .stage .cell.fixed { stroke: var(--ok); stroke-width: 2; }
+  .stage .token { fill: var(--signal); }
+  .stage .dline { fill: var(--muted); }
+  .stage .dline.on { fill: var(--accent); font-weight: 600; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L29 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Visitor: new operations on a fixed tree</h1>
+    <p class="lede">The file and folder classes never change. Each new operation (size, search, export) is a visitor that walks the tree. Two calls, <code>node.accept(v)</code> then <code>v.visitFile(this)</code>, pick the code by both the node type and the operation.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="File tree, a visitor panel, the double dispatch calls and a node-by-operation table"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Visitor walking the tree</span>
+        <span><i style="background: var(--accent)"></i>Current dispatch / table cell</span>
+        <span><i style="background: var(--ok)"></i>Match / handled</span>
+        <span><i style="background: var(--bad)"></i>Must be written</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Try different visitors">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 300" role="img" aria-label="Interactive visitor runner"></svg>
+      </div>
+      <div class="controls">
+        <label>Visitor <select id="try-vis">
+          <option value="size">SizeVisitor</option>
+          <option value="md">FindVisitor('.md')</option>
+          <option value="count">CountFilesVisitor</option>
+          <option value="depth">MaxDepthVisitor</option>
+        </select></label>
+        <button class="btn primary" type="button" id="try-run">root.accept(visitor)</button>
+        <button class="btn" type="button" id="try-add">add notes.md to src/</button>
+        <button class="btn" type="button" id="try-reset">Reset tree</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Same tree, many operations</h2>
+        <p>Pick a visitor and run it. Each node shows what the visitor returned for it. Notice that switching the operation never touches the node classes; only the visitor changes.</p>
+      </section>
+      <section class="log">
+        <h3>Run log</h3>
+        <ol id="try-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Node types here are stable, file and folder, but operations keep growing, so I'd use a Visitor. Each node's <code>accept(v)</code> calls back <code>v.visitFile(this)</code> or <code>v.visitFolder(this)</code>. That's double dispatch: the code depends on both the node type and the operation. A new operation is one new class. The cost is that a new node type touches every visitor. In TS with plain data I'd use a discriminated union plus an exhaustive switch instead."</p>
+    </div>
+    <div class="note">
+      <h3>The code (highlights follow the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">class FileNode {</span><span class="ln" data-l="2">  accept&lt;R&gt;(v: FsVisitor&lt;R&gt;) { return v.visitFile(this); }</span><span class="ln" data-l="3">}</span><span class="ln" data-l="4">class FolderNode {</span><span class="ln" data-l="5">  accept&lt;R&gt;(v: FsVisitor&lt;R&gt;) { return v.visitFolder(this); }</span><span class="ln" data-l="6">}</span><span class="ln" data-l="7">class SizeVisitor implements FsVisitor&lt;number&gt; {</span><span class="ln" data-l="8">  visitFile(f)   { return f.bytes; }</span><span class="ln" data-l="9">  visitFolder(d) { return sum(d.children.map(c =&gt; c.accept(this))); }</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">class FindVisitor implements FsVisitor&lt;string[]&gt; {</span><span class="ln" data-l="12">  visitFile(f)   { return f.name.endsWith(this.ext) ? [f.name] : []; }</span><span class="ln" data-l="13">  visitFolder(d) { return d.children.flatMap(c =&gt; c.accept(this)); }</span><span class="ln" data-l="14">}</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Classic Visitor vs polymorphic methods vs union + switch</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Method on each class</th><th>Classic Visitor</th><th>Discriminated union + <code>assertNever</code></th></tr></thead>
+          <tbody>
+            <tr><td>Add an operation</td><td>Edit every class</td><td>One new visitor class</td><td>One new function</td></tr>
+            <tr><td>Add an element type</td><td>One new class</td><td>Edit every visitor</td><td>Edit every switch (tsc lists them)</td></tr>
+            <tr><td>Boilerplate</td><td>Low</td><td><code>accept</code> + interface</td><td>Low</td></tr>
+            <tr><td>Fits</td><td>Few, stable operations</td><td>Class-based trees: AST, composite UI, file system</td><td>Plain data: API JSON, events, parsed ASTs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>What is double dispatch?</summary><div>Picking code by two runtime types. <code>node.accept(v)</code> picks by node type, then <code>v.visitFile(this)</code> picks by visitor type.</div></details>
+      <details class="qa"><summary>You add SymlinkNode. What breaks?</summary><div>The visitor interface gets <code>visitSymlink</code>, and every visitor must implement it. The compiler lists each one.</div></details>
+      <details class="qa"><summary>You add "count files". What changes?</summary><div>One new <code>CountVisitor</code> class. Zero node edits.</div></details>
+      <details class="qa"><summary>Why not <code>if (n instanceof FileNode)</code> in one function?</summary><div>A new type silently falls through to the default. The visitor interface (or <code>assertNever</code>) makes the compiler catch it.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/24-file-system/README.md">24 File System</a></li>
+        <li>Same idea: <a href="../../problems/20-ecommerce-cart-coupons/README.md">20 Cart and Coupons</a> (price per item kind), <a href="../../problems/22-text-editor/README.md">22 Text Editor</a> (export formats)</li>
+        <li>Pairs with: <a href="../../3-structural/L17-composite/README.md">L17 Composite</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var W = 92, H = 40;
+  function makeTree() {
+    function F(name, bytes, x, y) { return { kind: 'file', name: name, bytes: bytes, x: x, y: y }; }
+    function D(name, x, y, children) { return { kind: 'folder', name: name, x: x, y: y, children: children }; }
+    return D('project/', 200, 16, [
+      F('README.md', 1200, 14, 96),
+      D('src/', 200, 96, [F('index.ts', 3400, 110, 176), F('util.ts', 900, 210, 176)]),
+      D('docs/', 360, 96, [F('guide.md', 5000, 310, 176), D('img/', 410, 176, [F('logo.png', 20480, 410, 256)])]),
+    ]);
+  }
+  function all(n, out) { out = out || []; out.push(n); (n.children || []).forEach(function (c) { all(c, out); }); return out; }
+  function fmt(b) { return b >= 1000 ? (b / 1000).toFixed(1) + ' kB' : b + ' B'; }
+
+  // Draw the tree. mk(tag, attrs, parent).
+  function drawTree(mk, root, tree) {
+    (function edges(n) {
+      (n.children || []).forEach(function (c) {
+        mk('path', { d: 'M' + (n.x + W / 2) + ',' + (n.y + H) + ' L' + (c.x + W / 2) + ',' + c.y, class: 'wire' }, root);
+        edges(c);
+      });
+    })(tree);
+    all(tree).forEach(function (n) {
+      n.box = mk('rect', { x: n.x, y: n.y, width: W, height: H, rx: n.kind === 'folder' ? 4 : 10, class: 'box' }, root);
+      mk('text', { x: n.x + W / 2, y: n.y + 17, 'text-anchor': 'middle', class: 'b small', text: n.name }, root);
+      n.val = mk('text', { x: n.x + W / 2, y: n.y + 33, 'text-anchor': 'middle', class: 'mono small muted', text: n.kind === 'file' ? fmt(n.bytes) : '' }, root);
+    });
+  }
+
+  // ---------- guided lab ----------
+  var VP = { x: 520, y: 12, w: 228, h: 140 };      // visitor panel
+  var DP = { x: 520, y: 162, w: 228, h: 92 };      // dispatch panel
+  var TB = { x: 14, y: 306, colW: 150, rowH: 28, labelW: 110 };
+  var COLS = ['SizeVisitor', 'FindVisitor', 'JsonExporter'];
+  var ROWS = ['FileNode', 'FolderNode', 'SymlinkNode'];
+  var CELL = {
+    'FileNode.SizeVisitor': 'f.bytes', 'FolderNode.SizeVisitor': 'sum(children)',
+    'FileNode.FindVisitor': 'match name', 'FolderNode.FindVisitor': 'flatMap(children)',
+    'FileNode.JsonExporter': "{type:'file'}", 'FolderNode.JsonExporter': "{type:'dir',…}",
+    'SymlinkNode.SizeVisitor': '?', 'SymlinkNode.FindVisitor': '?', 'SymlinkNode.JsonExporter': '?',
+  };
+
+  function code(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(Number(n.getAttribute('data-l'))) >= 0);
+    });
+  }
+
+  function buildPanels(ctx) {
+    var s = ctx.state;
+    ctx.el('rect', { x: VP.x, y: VP.y, width: VP.w, height: VP.h, rx: 10, class: 'box signal' });
+    s.vName = ctx.el('text', { x: VP.x + 14, y: VP.y + 26, class: 'title', text: 'no visitor yet' });
+    s.vL1 = ctx.el('text', { x: VP.x + 14, y: VP.y + 52, class: 'mono small', text: '' });
+    s.vL2 = ctx.el('text', { x: VP.x + 14, y: VP.y + 72, class: 'mono small', text: '' });
+    ctx.el('text', { x: VP.x + 14, y: VP.y + 102, class: 'mono small muted', text: 'result' });
+    s.vRes = ctx.el('text', { x: VP.x + 14, y: VP.y + 124, class: 'mono b', text: '—' });
+    ctx.el('rect', { x: DP.x, y: DP.y, width: DP.w, height: DP.h, rx: 10, class: 'box' });
+    ctx.el('text', { x: DP.x + 14, y: DP.y + 22, class: 'mono small muted', text: 'double dispatch' });
+    s.d1 = ctx.el('text', { x: DP.x + 14, y: DP.y + 46, class: 'mono small dline', text: '1  node.accept(v)' });
+    s.d2 = ctx.el('text', { x: DP.x + 14, y: DP.y + 70, class: 'mono small dline', text: '2  v.visit…(this)' });
+    // table
+    s.cells = {}; s.cellText = {}; s.rowG = {};
+    COLS.forEach(function (c, j) {
+      ctx.el('text', { x: TB.x + TB.labelW + j * TB.colW + TB.colW / 2, y: TB.y, 'text-anchor': 'middle', class: 'mono small muted', text: c });
+    });
+    ROWS.forEach(function (r, i) {
+      var g = ctx.group({ opacity: r === 'SymlinkNode' ? 0 : 1 });
+      s.rowG[r] = g;
+      var y = TB.y + 8 + i * TB.rowH;
+      ctx.el('text', { x: TB.x, y: y + 19, class: 'b small', text: r }, g);
+      COLS.forEach(function (c, j) {
+        var x = TB.x + TB.labelW + j * TB.colW;
+        s.cells[r + '.' + c] = ctx.el('rect', { x: x + 2, y: y, width: TB.colW - 4, height: TB.rowH - 4, rx: 4, class: 'cell' }, g);
+        s.cellText[r + '.' + c] = ctx.el('text', { x: x + TB.colW / 2, y: y + 17, 'text-anchor': 'middle', class: 'mono small', text: CELL[r + '.' + c] }, g);
+      });
+    });
+    s.token = ctx.group({});
+    ctx.el('circle', { r: 11, class: 'token' }, s.token);
+    ctx.el('text', { x: 0, y: 4, 'text-anchor': 'middle', class: 'mono small b', text: 'V' }, s.token);
+    ctx.place(s.token, VP.x + VP.w / 2, VP.y - 30);
+    s.token.setAttribute('opacity', 0);
+  }
+
+  function setCell(ctx, key) {
+    Object.keys(ctx.state.cells).forEach(function (k) {
+      var cls = ctx.state.cells[k].getAttribute('class');
+      if (cls === 'cell on') ctx.state.cells[k].setAttribute('class', 'cell');
+    });
+    if (key) ctx.state.cells[key].setAttribute('class', 'cell on');
+  }
+  function dispatchHi(ctx, which, method) {
+    ctx.state.d1.setAttribute('class', 'mono small dline' + (which === 1 ? ' on' : ''));
+    ctx.state.d2.setAttribute('class', 'mono small dline' + (which === 2 ? ' on' : ''));
+    if (method) ctx.state.d2.textContent = '2  v.' + method + '(this)';
+  }
+
+  // Visit one node with the current visitor (recursive). Returns the node's result.
+  function visit(ctx, n, opts) {
+    var s = ctx.state, vis = s.visitor;
+    var row = n.kind === 'file' ? 'FileNode' : 'FolderNode';
+    var method = n.kind === 'file' ? 'visitFile' : 'visitFolder';
+    return ctx.move(s.token, n.x + W + 4, n.y + 6, opts.fast ? 220 : 450).then(function () {
+      dispatchHi(ctx, 1, method);
+      code(n.kind === 'file' ? [2] : [5]);
+      return ctx.wait(opts.fast ? 80 : 250);
+    }).then(function () {
+      dispatchHi(ctx, 2, method);
+      setCell(ctx, row + '.' + vis);
+      if (vis === 'SizeVisitor') code(n.kind === 'file' ? [8] : [9]); else code(n.kind === 'file' ? [12] : [13]);
+      if (n.kind === 'file') {
+        var r = vis === 'SizeVisitor' ? n.bytes : (/\.md$/.test(n.name) ? [n.name] : []);
+        if (vis === 'SizeVisitor') { n.val.textContent = fmt(r); n.box.setAttribute('class', 'box accent'); }
+        else { n.box.setAttribute('class', 'box' + (r.length ? ' ok' : ' dim')); n.val.textContent = r.length ? 'match' : '—'; }
+        ctx.flash(n.box);
+        if (opts.logFiles) ctx.log('  ' + method + '(' + n.name + ') → ' + (vis === 'SizeVisitor' ? r : JSON.stringify(r)), r.length === 0 ? '' : 'ok');
+        return ctx.wait(opts.fast ? 60 : 200).then(function () { return r; });
+      }
+      var acc = vis === 'SizeVisitor' ? 0 : [];
+      var chain = Promise.resolve();
+      n.children.forEach(function (c) {
+        chain = chain.then(function () { return visit(ctx, c, opts); }).then(function (r) { acc = vis === 'SizeVisitor' ? acc + r : acc.concat(r); });
+      });
+      return chain.then(function () {
+        return ctx.move(s.token, n.x + W + 4, n.y + 6, opts.fast ? 180 : 350);
+      }).then(function () {
+        if (vis === 'SizeVisitor') { n.val.textContent = 'Σ ' + fmt(acc); n.box.setAttribute('class', 'box accent'); }
+        else n.val.textContent = acc.length + ' found';
+        ctx.flash(n.box);
+        ctx.log('  ' + method + '(' + n.name + ') → ' + (vis === 'SizeVisitor' ? acc : JSON.stringify(acc)), 'info');
+        return acc;
+      });
+    });
+  }
+
+  function useVisitor(ctx, name) {
+    var s = ctx.state;
+    s.visitor = name;
+    s.vName.textContent = name + (name === 'FindVisitor' ? "('.md')" : '');
+    s.vL1.textContent = name === 'SizeVisitor' ? 'visitFile(f)   → f.bytes' : 'visitFile(f)   → ends .md?';
+    s.vL2.textContent = name === 'SizeVisitor' ? 'visitFolder(d) → Σ children' : 'visitFolder(d) → flatMap kids';
+    s.vRes.textContent = '—';
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'A fixed tree, growing operations', say: 'The tree uses two element classes, <code>FileNode</code> and <code>FolderNode</code> (a Composite). We will run two different operations on it without editing either class.' },
+    setup: function (ctx) {
+      ctx.state.tree = makeTree();
+      drawTree(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg, ctx.state.tree);
+      buildPanels(ctx);
+      code([]);
+    },
+    steps: [
+      {
+        title: 'Two element classes, each with accept()',
+        say: 'Every node has exactly one extra method: <code>accept(v)</code>. A file calls <code>v.visitFile(this)</code>, a folder calls <code>v.visitFolder(this)</code>. That is all the nodes ever know about operations.',
+        run: function (ctx) {
+          code([1, 2, 3, 4, 5, 6]);
+          all(ctx.state.tree).forEach(function (n) { ctx.flash(n.box); });
+          ctx.log('FileNode.accept → v.visitFile(this)', 'info');
+          ctx.log('FolderNode.accept → v.visitFolder(this)', 'info');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'A SizeVisitor arrives',
+        say: 'The client calls <code>root.accept(new SizeVisitor())</code>. The visitor carries the operation; the tree carries the data.',
+        run: function (ctx) {
+          var s = ctx.state;
+          useVisitor(ctx, 'SizeVisitor');
+          code([7, 8, 9, 10]);
+          s.token.setAttribute('opacity', 1);
+          ctx.log('root.accept(new SizeVisitor())', 'info');
+          return ctx.move(s.token, s.tree.x + W + 4, s.tree.y + 6, 600);
+        },
+      },
+      {
+        title: 'Dispatch 1, then dispatch 2',
+        say: '<code>project/</code> is a <code>FolderNode</code>, so its <code>accept</code> runs (call 1). It calls <code>v.visitFolder(this)</code>, and the visitor is a <code>SizeVisitor</code> (call 2). The table cell shows the pair that was chosen.',
+        run: function (ctx) {
+          dispatchHi(ctx, 1, 'visitFolder');
+          code([5]);
+          ctx.log('1: FolderNode.accept(v)', 'info');
+          return ctx.wait(500).then(function () {
+            dispatchHi(ctx, 2, 'visitFolder');
+            setCell(ctx, 'FolderNode.SizeVisitor');
+            code([9]);
+            ctx.log('2: SizeVisitor.visitFolder(project/)', 'info');
+            return ctx.wait(400);
+          });
+        },
+      },
+      {
+        title: 'Walk the first subtrees',
+        say: '<code>visitFolder</code> calls <code>child.accept(this)</code> for each child. Each file returns its bytes; <code>src/</code> returns the sum of its files.',
+        run: function (ctx) {
+          var t = ctx.state.tree, o = { logFiles: true };
+          return visit(ctx, t.children[0], o).then(function (a) { ctx.state.part = a; return visit(ctx, t.children[1], o); })
+            .then(function (b) { ctx.state.part += b; });
+        },
+      },
+      {
+        title: 'Recursion goes as deep as the tree',
+        say: '<code>docs/</code> holds a folder inside a folder. The same two methods handle any depth; the visitor never asks "what type is this?".',
+        run: function (ctx) {
+          var t = ctx.state.tree;
+          return visit(ctx, t.children[2], { logFiles: true }).then(function (c) { ctx.state.part += c; });
+        },
+      },
+      {
+        title: 'Back at the root: one number',
+        say: 'The root folder sums its three children: 30,980 bytes. No size logic lives in the node classes.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.move(s.token, s.tree.x + W + 4, s.tree.y + 6, 400).then(function () {
+            s.tree.val.textContent = 'Σ ' + fmt(s.part);
+            s.tree.box.setAttribute('class', 'box accent');
+            s.vRes.textContent = s.part + ' bytes';
+            ctx.flash(s.tree.box); ctx.flash(s.vRes);
+            setCell(ctx, null); dispatchHi(ctx, 0);
+            ctx.log('SizeVisitor result = ' + s.part + ' bytes', 'ok');
+          });
+        },
+      },
+      {
+        title: 'New operation = new class, zero node edits',
+        say: 'Product wants "find all Markdown files". We write <code>FindVisitor</code>. <code>FileNode</code> and <code>FolderNode</code> are untouched: open for extension, closed for modification.',
+        run: function (ctx) {
+          var s = ctx.state;
+          all(s.tree).forEach(function (n) { n.box.setAttribute('class', 'box'); n.val.textContent = n.kind === 'file' ? fmt(n.bytes) : ''; });
+          useVisitor(ctx, 'FindVisitor');
+          code([11, 12, 13, 14]);
+          ctx.flash(s.vName);
+          ctx.log('new class FindVisitor; FileNode/FolderNode unchanged', 'ok');
+          return ctx.move(s.token, s.tree.x + W + 4, s.tree.y + 6, 500);
+        },
+      },
+      {
+        title: 'Same walk, different column',
+        say: 'The dispatch path is identical, but now the <code>FindVisitor</code> column of the table is used. Markdown files light up; the rest are skipped.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return visit(ctx, s.tree, { fast: true, logFiles: false }).then(function (r) {
+            s.vRes.textContent = JSON.stringify(r);
+            setCell(ctx, null); dispatchHi(ctx, 0);
+            ctx.log('FindVisitor result = ' + JSON.stringify(r), 'ok');
+          });
+        },
+      },
+      {
+        title: 'The cost: a new element type',
+        say: 'Now add <code>SymlinkNode</code>. That is a new row, and every visitor (every column) needs a <code>visitSymlink</code>. Visitor makes operations cheap and new types expensive.',
+        run: function (ctx) {
+          var s = ctx.state;
+          code([]);
+          return ctx.fade(s.rowG.SymlinkNode, 1, 500).then(function () {
+            COLS.forEach(function (c) { s.cells['SymlinkNode.' + c].setAttribute('class', 'cell bad'); });
+            ctx.log('add SymlinkNode → 3 visitors must change', 'bad');
+          });
+        },
+      },
+      {
+        title: 'The compiler finds every gap',
+        say: 'Because each visitor implements <code>FsVisitor</code>, <code>tsc</code> errors on every class missing <code>visitSymlink</code>. With a discriminated union, <code>assertNever</code> in each <code>switch</code> gives the same safety. Now try other visitors below.',
+        run: function (ctx) {
+          var s = ctx.state, chain = Promise.resolve();
+          COLS.forEach(function (c) {
+            chain = chain.then(function () {
+              ctx.log('tsc: ' + c + ' is missing visitSymlink', 'warn');
+              return ctx.wait(300);
+            }).then(function () {
+              s.cells['SymlinkNode.' + c].setAttribute('class', 'cell fixed');
+              s.cellText['SymlinkNode.' + c].textContent = 'visitSymlink ✓';
+              ctx.flash(s.cells['SymlinkNode.' + c]);
+            });
+          });
+          return chain.then(function () { ctx.log('all visitors handle SymlinkNode', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  // ---------- try-it panel (instant, independent of the guided steps) ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('try-log');
+  var tree;
+  function mk(t, a, p) { return Kit.el(t, a, p || svg); }
+  function tlog(msg, kind) {
+    var li = document.createElement('li'); li.className = kind || ''; li.textContent = msg;
+    logList.appendChild(li); logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  var VISITORS = {
+    size: { name: 'SizeVisitor', file: function (f) { return f.bytes; }, folder: function (d, rs) { return rs.reduce(function (a, b) { return a + b; }, 0); }, show: fmt },
+    md: { name: "FindVisitor('.md')", file: function (f) { return /\.md$/.test(f.name) ? [f.name] : []; }, folder: function (d, rs) { return [].concat.apply([], rs); }, show: function (r) { return r.length ? r.length + ' md' : '—'; } },
+    count: { name: 'CountFilesVisitor', file: function () { return 1; }, folder: function (d, rs) { return rs.reduce(function (a, b) { return a + b; }, 0); }, show: function (r) { return r + (r === 1 ? ' file' : ' files'); } },
+    depth: { name: 'MaxDepthVisitor', file: function () { return 0; }, folder: function (d, rs) { return 1 + Math.max.apply(null, [0].concat(rs)); }, show: function (r) { return 'depth ' + r; } },
+  };
+  function draw() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    drawTree(mk, svg, tree);
+    var g = mk('g', {});
+    mk('rect', { x: 520, y: 16, width: 228, height: 120, rx: 10, class: 'box signal' }, g);
+    tree.panel = mk('text', { x: 534, y: 44, class: 'title', text: 'pick a visitor' }, g);
+    tree.res = mk('text', { x: 534, y: 80, class: 'mono small', text: '' }, g);
+    tree.res2 = mk('text', { x: 534, y: 104, class: 'mono small muted', text: 'node classes edited: 0' }, g);
+  }
+  function fresh() {
+    tree = makeTree();
+    draw();
+    logList.innerHTML = '';
+    tlog('Tree reset: 5 files, 4 folders', 'info');
+  }
+  function run() {
+    var v = VISITORS[document.getElementById('try-vis').value];
+    function go(n) {
+      var r = n.kind === 'file' ? v.file(n) : v.folder(n, n.children.map(go));
+      n.val.textContent = v.show(r);
+      n.val.setAttribute('class', 'mono small');
+      var hit = v.name.indexOf('Find') === 0 ? (Array.isArray(r) && r.length > 0) : true;
+      n.box.setAttribute('class', 'box' + (n.kind === 'file' && v.name.indexOf('Find') === 0 ? (hit ? ' ok' : ' dim') : ' accent'));
+      return r;
+    }
+    var result = go(tree);
+    tree.panel.textContent = v.name;
+    tree.res.textContent = 'result: ' + (Array.isArray(result) ? JSON.stringify(result) : v.show(result));
+    tlog('root.accept(new ' + v.name + ') → ' + (Array.isArray(result) ? JSON.stringify(result) : v.show(result)), 'ok');
+  }
+  document.getElementById('try-run').addEventListener('click', run);
+  document.getElementById('try-add').addEventListener('click', function () {
+    var src = tree.children[1];
+    if (src.children.length >= 3) { tlog('src/ already has notes.md', 'warn'); return; }
+    src.children.push({ kind: 'file', name: 'notes.md', bytes: 700, x: 14, y: 176 });
+    draw();
+    tlog('added src/notes.md (no class changed, just data)', 'info');
+  });
+  document.getElementById('try-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

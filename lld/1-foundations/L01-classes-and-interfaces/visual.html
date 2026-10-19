@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L01 Classes and interfaces</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L01 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Classes, interfaces and types</h1>
+    <p class="lede">An interface is a contract that disappears at compile time. A class is a blueprint that makes real objects. Union types describe states. Watch what exists at compile time, what exists at runtime, and what the compiler stops for you.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Interfaces, classes, objects and types in TypeScript"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Compile-time only (erased)</span>
+        <span><i style="background: var(--signal)"></i>Runtime object</span>
+        <span><i style="background: var(--ok)"></i>Accepted</span>
+        <span><i style="background: var(--bad)"></i>Rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">interface PaymentGateway {</span><span class="ln" data-l="1">  charge(amount: number): Promise&lt;Receipt&gt;;</span><span class="ln" data-l="2">}</span><span class="ln" data-l="3">class RazorpayGateway implements PaymentGateway {</span><span class="ln" data-l="4">  #calls = 0;                       // runtime private</span><span class="ln" data-l="5">  constructor(private readonly apiKey: string) {}</span><span class="ln" data-l="6">  async charge(amount: number) { ... }</span><span class="ln" data-l="7">}</span><span class="ln" data-l="8">const live = new RazorpayGateway('live_key');</span><span class="ln" data-l="9">const fake: PaymentGateway = { charge: async a =&gt; ({ id: 'f', amount: a }) };</span><span class="ln" data-l="10">type Payment =</span><span class="ln" data-l="11">  | { status: 'CREATED'; amount: number }</span><span class="ln" data-l="12">  | { status: 'CAPTURED'; amount: number; txnId: string };</span><span class="ln" data-l="13">default: { const missed: never = p; }   // exhaustive switch</span><span class="ln" data-l="14">abstract class BaseGateway { protected abstract doCharge(a: number): Promise&lt;string&gt;; }</span><span class="ln" data-l="15">class InMemoryRepo&lt;T extends { id: string }&gt; implements Repository&lt;T&gt; { ... }</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: will tsc accept this?</h3>
+      <p>Pick a line. The checker explains what the compiler says, and why.</p>
+      <div class="try" id="try"></div>
+      <div class="try-out" id="try-out">Pick a snippet above.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Boundaries like the payment gateway and the repository are interfaces, and classes implement them. Statuses are union literals and the entity is a discriminated union, so a captured payment always has a transaction id and a <code>never</code> check catches a missed state. Rules like a wallet balance sit behind private fields and methods."</p>
+    </div>
+    <div class="note wide">
+      <h3>Which tool for which job</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Tool</th><th>Exists at runtime?</th><th>Shares code?</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td><code>interface</code></td><td>No</td><td>No</td><td>Contracts at boundaries: gateway, repository, notifier, clock</td></tr>
+            <tr><td><code>type</code> union</td><td>No</td><td>No</td><td>States and data: <code>'CREATED' | 'CAPTURED'</code>, discriminated unions</td></tr>
+            <tr><td><code>class</code></td><td>Yes (prototype)</td><td>Yes</td><td>Entities with rules, services, implementations</td></tr>
+            <tr><td><code>abstract class</code></td><td>Yes, cannot be <code>new</code>-ed</td><td>Yes</td><td>A base with shared steps; one level deep</td></tr>
+            <tr><td><code>enum</code> (string)</td><td>Yes (an object)</td><td>No</td><td>Fine for fixed sets; union literals are lighter</td></tr>
+            <tr><td>generic <code>&lt;T&gt;</code></td><td>No</td><td>Yes (one class)</td><td><code>Repository&lt;T&gt;</code>, <code>Queue&lt;T&gt;</code>, caches</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Can you write <code>x instanceof PaymentGateway</code>?</summary><div>No. The interface is erased, so there is nothing to check against at runtime. Use <code>instanceof</code> on a class, or write a type guard <code>isGateway(x): x is PaymentGateway</code>.</div></details>
+      <details class="qa"><summary>Why does a plain object pass as a <code>PaymentGateway</code>?</summary><div>TypeScript is structural: if the shape matches, the type matches. <code>implements</code> only asks the compiler to check the class early.</div></details>
+      <details class="qa"><summary>What does the <code>never</code> line in the switch buy you?</summary><div>If someone adds a new status to the union and forgets a case, the leftover value is not <code>never</code>, so the code stops compiling. Missed states are caught at build time.</div></details>
+      <details class="qa"><summary>Is <code>private</code> real privacy?</summary><div>Only at compile time. <code>(obj as any).field</code> reads it at runtime. <code>#field</code> is enforced by the JavaScript engine.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+  // ---------- scenes ----------
+  function sceneBlueprint(ctx, g) {
+    T(ctx, g, 20, 28, 'Contract, blueprint, objects', 'title');
+    T(ctx, g, 20, 52, 'compile time', 'mono small muted');
+    T(ctx, g, 400, 52, 'runtime', 'mono small muted');
+    ctx.el('line', { x1: 380, x2: 380, y1: 40, y2: 420, class: 'sep', 'stroke-dasharray': '4 4' }, g);
+    var itf = cls(ctx, g, 40, 66, 300, 'PaymentGateway', ['charge(amount): Promise<Receipt>', 'refund(id): Promise<void>'], { stereo: 'interface', cls: 'accent', dash: true });
+    var itfG = itf; itfG.setAttribute('opacity', 0);
+    var klass = cls(ctx, g, 40, 240, 300, 'RazorpayGateway', ['- apiKey: string', '+ charge(amount)', '+ refund(id)'], { cls: 'signal' });
+    klass.setAttribute('opacity', 0);
+    var impl = arrow(ctx, g, 'M190,240 V' + itf.b.bottom, 'real');
+    impl.setAttribute('opacity', 0);
+    var implLbl = T(ctx, g, 198, 200, 'implements', 'mono small muted');
+    implLbl.setAttribute('opacity', 0);
+    var proto = cls(ctx, g, 420, 66, 300, 'RazorpayGateway.prototype', ['charge()   one shared copy', 'refund()   one shared copy'], { cls: 'signal' });
+    proto.setAttribute('opacity', 0);
+    var o1 = cls(ctx, g, 420, 250, 140, 'live', ["apiKey = 'live'"], { cls: 'signal' });
+    var o2 = cls(ctx, g, 580, 250, 140, 'test', ["apiKey = 'test'"], { cls: 'signal' });
+    [o1, o2].forEach(function (o) { o.setAttribute('opacity', 0); });
+    var links = ctx.group({ opacity: 0 }, g);
+    arrow(ctx, links, 'M490,250 V' + (proto.b.bottom + 4), 'dep');
+    arrow(ctx, links, 'M650,250 V' + (proto.b.bottom + 4), 'dep');
+    T(ctx, links, 570, 200, '[[Prototype]]', 'mono small muted', 'middle');
+    T(ctx, links, 570, 360, 'fields: one copy per object', 'small', 'middle');
+    T(ctx, links, 570, 380, 'methods: one copy per class', 'small', 'middle');
+    ctx.state.bp = { itf: itf, klass: klass, impl: impl, implLbl: implLbl, proto: proto, o1: o1, o2: o2, links: links };
+  }
+
+  function sceneAccess(ctx, g) {
+    T(ctx, g, 20, 28, 'Who may touch the fields?', 'title');
+    var w = cls(ctx, g, 430, 70, 290, 'Wallet', ['+ readonly id', '- private pin', '- #balance', '+ debit(amount)'], { cls: 'signal' });
+    var outside = cls(ctx, g, 30, 70, 220, 'checkout.ts', ['outside code'], {});
+    ctx.state.acc = { w: w, outside: outside };
+  }
+
+  function sceneShape(ctx, g) {
+    T(ctx, g, 20, 28, 'Structural typing: the shape is checked', 'title');
+    ctx.el('rect', { x: 340, y: 90, width: 90, height: 230, rx: 10, class: 'gate' }, g);
+    T(ctx, g, 385, 80, 'tsc', 'mono small muted', 'middle');
+    T(ctx, g, 385, 200, 'charge()?', 'mono small', 'middle');
+    T(ctx, g, 385, 218, 'refund()?', 'mono small', 'middle');
+    var vals = [
+      chip(ctx, g, 20, 120, 250, 'new RazorpayGateway()', 'signal'),
+      chip(ctx, g, 20, 200, 250, '{ charge(){..}, refund(){..} }', 'signal'),
+      chip(ctx, g, 20, 280, 250, '{ pay(){..} }', 'signal'),
+    ];
+    var ok = cls(ctx, g, 500, 150, 220, 'PaymentGateway slot', ['checkout(gw: PaymentGateway)'], { stereo: 'param', cls: 'accent', dash: true });
+    ctx.state.shape = { vals: vals, ok: ok };
+  }
+
+  function sceneErase(ctx, g) {
+    T(ctx, g, 20, 28, 'tsc erases types, keeps classes', 'title');
+    T(ctx, g, 40, 62, 'checkout.ts', 'mono b');
+    T(ctx, g, 450, 62, 'checkout.js', 'mono b');
+    var src = [
+      ['interface PaymentGateway {...}', true],
+      ["type Status = 'CREATED' | 'CAPTURED'", true],
+      ['class RazorpayGateway {...}', false],
+      ['const live = new RazorpayGateway()', false],
+      ['function pay(gw: PaymentGateway) {...}', false],
+    ];
+    var rows = src.map(function (s, i) {
+      var y = 100 + i * 52;
+      var c = chip(ctx, g, 30, y, 330, s[0], s[1] ? 'accent' : 'signal');
+      c.typeOnly = s[1];
+      return c;
+    });
+    var tsc = ctx.group({}, g);
+    ctx.el('rect', { x: 380, y: 200, width: 52, height: 34, rx: 8, class: 'gate' }, tsc);
+    T(ctx, tsc, 406, 222, 'tsc', 'mono small', 'middle');
+    ctx.state.erase = { rows: rows, g: g };
+  }
+
+  function sceneUnion(ctx, g) {
+    T(ctx, g, 20, 28, 'A discriminated union: one card per state', 'title');
+    var cards = [
+      cls(ctx, g, 20, 70, 220, "status: 'CREATED'", ['amount: number'], { cls: 'accent' }),
+      cls(ctx, g, 270, 70, 220, "status: 'CAPTURED'", ['amount: number', 'txnId: string   required'], { cls: 'accent' }),
+      cls(ctx, g, 520, 70, 220, "status: 'FAILED'", ['amount: number', 'reason: string'], { cls: 'accent' }),
+    ];
+    var sw = ctx.group({}, g);
+    ctx.el('rect', { x: 20, y: 220, width: 470, height: 170, rx: 8, class: 'box' }, sw);
+    var code = ['switch (p.status) {', "  case 'CREATED':  ...", "  case 'CAPTURED': p.txnId  // known to exist", "  case 'FAILED':   p.reason", '  default: const missed: never = p;', '}'];
+    var lines = code.map(function (c, i) { return T(ctx, sw, 36, 246 + i * 22, c, 'mono small'); });
+    ctx.state.u = { cards: cards, lines: lines, g: g };
+  }
+
+  function sceneAbstract(ctx, g) {
+    T(ctx, g, 20, 28, 'Abstract class: shared code, cannot be new-ed', 'title');
+    var base = cls(ctx, g, 250, 60, 280, 'BaseGateway', ['+ charge(amount)   validates, counts', '# doCharge(amount)   abstract'], { stereo: 'abstract', cls: 'signal' });
+    var a = cls(ctx, g, 130, 270, 200, 'RazorpayGateway', ['# doCharge(amount)'], { cls: 'signal' });
+    var b = cls(ctx, g, 450, 270, 200, 'StripeGateway', ['# doCharge(amount)'], { cls: 'signal' });
+    arrow(ctx, g, 'M230,270 V220 H390 V' + base.b.bottom, 'inh');
+    arrow(ctx, g, 'M550,270 V220 H390 V' + base.b.bottom, 'inh');
+    T(ctx, g, 400, 238, 'extends', 'mono small muted');
+    ctx.state.abs = { base: base, a: a, b: b };
+  }
+
+  function sceneGeneric(ctx, g) {
+    T(ctx, g, 20, 28, 'Generics: one class, many entity types', 'title');
+    var repo = cls(ctx, g, 230, 70, 300, 'InMemoryRepo<T>', ['- items: Map<string, T>', '+ save(item: T)', '+ findById(id): T | undefined'], { cls: 'signal' });
+    var slot = ctx.el('rect', { x: 335, y: 190, width: 90, height: 34, rx: 8, class: 'gate' }, g);
+    T(ctx, g, 380, 212, 'T = ?', 'mono small', 'middle');
+    var ents = [chip(ctx, g, 40, 300, 130, 'Payment', 'accent'), chip(ctx, g, 315, 340, 130, 'Seat', 'accent'), chip(ctx, g, 590, 300, 130, 'User', 'accent')];
+    var out = T(ctx, g, 380, 420, '', 'mono small', 'middle');
+    ctx.state.gen = { repo: repo, slot: slot, ents: ents, out: out };
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'What exists, and when?', say: 'Some things you write live only for the compiler. Others become real objects. Step through to see which is which, and what the compiler blocks.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneBlueprint(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'An interface is a contract',
+        say: '<code>PaymentGateway</code> says what any gateway must do: <code>charge</code> and <code>refund</code>. It has no code inside. It lives only at compile time.',
+        run: function (ctx) {
+          hl([0, 1, 2]);
+          ctx.log('interface PaymentGateway: 2 methods, 0 lines of runtime code', 'info');
+          return ctx.fade(ctx.state.bp.itf, 1, 500);
+        },
+      },
+      {
+        title: 'A class implements the contract',
+        say: '<code>RazorpayGateway</code> has real fields and method bodies. <code>implements</code> asks tsc to check, right here, that every method of the contract exists with the right types.',
+        run: function (ctx) {
+          var s = ctx.state.bp;
+          hl([3, 4, 5, 6, 7]);
+          return ctx.fade(s.klass, 1, 400).then(function () {
+            ctx.fade(s.implLbl, 1, 300);
+            return ctx.fade(s.impl, 1, 300);
+          }).then(function () {
+            return ctx.packet([[190, 240], [190, s.itf.b.bottom]], { cls: 'ok', label: 'check', ms: 700 });
+          }).then(function () { ctx.flash(s.itf.r); ctx.log('tsc: RazorpayGateway matches PaymentGateway', 'ok'); });
+        },
+      },
+      {
+        title: 'new makes objects; methods are shared',
+        say: 'Each <code>new</code> makes an object with its <b>own fields</b>. The methods are not copied: both objects point to one <code>prototype</code>. Only this right side exists when the code runs.',
+        run: function (ctx) {
+          var s = ctx.state.bp;
+          hl([8]);
+          return Promise.all([
+            ctx.packet([[340, 300], [420, 280]], { cls: 'warn', ms: 600 }),
+            ctx.packet([[340, 300], [380, 330], [650, 330], [650, 280]], { cls: 'warn', ms: 800 }),
+          ]).then(function () {
+            ctx.fade(s.o1, 1, 300); return ctx.fade(s.o2, 1, 300);
+          }).then(function () {
+            ctx.fade(s.proto, 1, 400); return ctx.fade(s.links, 1, 400);
+          }).then(function () {
+            ctx.log("new RazorpayGateway('live') and ('test'): 2 objects", 'info');
+            ctx.log('live.charge === test.charge  // true', 'ok');
+          });
+        },
+      },
+      {
+        title: 'private is a compile-time fence',
+        say: 'Outside code tries to read <code>wallet.pin</code>. tsc refuses. But <code>(wallet as any).pin</code> slips through: <code>private</code> is erased, so at runtime the field is just a normal property.',
+        run: function (ctx) {
+          hl([5]);
+          return swap(ctx, function (g) { sceneAccess(ctx, g); }).then(function () {
+            var w = ctx.state.acc.w;
+            var y = parseFloat(w.lines[1].getAttribute('y')) - 4;
+            return ctx.packet([[250, 100], [400, y], [250, 100]], { cls: 'bad', label: 'wallet.pin', ms: 1000 });
+          }).then(function () {
+            ctx.log("wallet.pin  → TS2341: Property 'pin' is private", 'bad');
+            var w = ctx.state.acc.w;
+            var y = parseFloat(w.lines[1].getAttribute('y')) - 4;
+            return ctx.packet([[250, 130], [440, y]], { cls: 'warn', label: '(wallet as any).pin', ms: 900 });
+          }).then(function () {
+            ctx.flash(ctx.state.acc.w.lines[1]);
+            ctx.log("(wallet as any).pin → '1234' at runtime", 'warn');
+          });
+        },
+      },
+      {
+        title: '#private is a runtime wall',
+        say: 'A <code>#balance</code> field is enforced by the JS engine. Even <code>any</code> cannot reach it. The only door is <code>debit()</code>, which checks the rule "balance never goes negative".',
+        run: function (ctx) {
+          hl([4]);
+          var w = ctx.state.acc.w;
+          var yb = parseFloat(w.lines[2].getAttribute('y')) - 4;
+          var yd = parseFloat(w.lines[3].getAttribute('y')) - 4;
+          var g = ctx.state.scene;
+          return ctx.packet([[250, 190], [415, yb], [250, 190]], { cls: 'bad', label: 'w.#balance', ms: 1000 }).then(function () {
+            ctx.log('w.#balance from outside → SyntaxError, even with any', 'bad');
+            return ctx.packet([[250, 230], [430, yd]], { cls: 'ok', label: 'w.debit(200)', ms: 900 });
+          }).then(function () {
+            ctx.flash(w.lines[3]);
+            T(ctx, g, 430, 220, 'debit() checks: amount <= balance', 'small fill-ok');
+            T(ctx, g, 30, 320, 'Expose behaviour (debit), not raw state (balance = x).', 'small');
+            T(ctx, g, 30, 342, 'The rule lives in one place, so no caller can break it.', 'small muted');
+            ctx.log('w.debit(200) → rule checked inside the class', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Structural typing: shape wins',
+        say: 'tsc does not ask "what is your class name?". It asks "do you have <code>charge</code> and <code>refund</code>?". A plain object passes, so tests can use simple fakes. An object with only <code>pay()</code> is stopped.',
+        run: function (ctx) {
+          hl([9]);
+          return swap(ctx, function (g) { sceneShape(ctx, g); }).then(function () {
+            var v = ctx.state.shape.vals;
+            var chain = Promise.resolve();
+            [[v[0], 'ok'], [v[1], 'ok'], [v[2], 'bad']].forEach(function (p, i) {
+              chain = chain.then(function () {
+                if (p[1] === 'ok') return ctx.move(p[0], 490, 260 + i * 42, 700);
+                return ctx.move(p[0], 300, 280, 500).then(function () { return ctx.move(p[0], 20, 280, 400); });
+              }).then(function () {
+                if (p[1] === 'bad') { p[0].firstChild.setAttribute('class', 'box bad'); ctx.log("{ pay() } → missing 'charge' and 'refund'", 'bad'); }
+                else { p[0].firstChild.setAttribute('class', 'box ok'); ctx.log((i === 0 ? 'class instance' : 'plain object literal') + ' → fits PaymentGateway', 'ok'); }
+              });
+            });
+            return chain;
+          });
+        },
+      },
+      {
+        title: 'tsc erases every type',
+        say: 'Compile the file. Classes, objects and functions move to the JS output. The interface and the type alias vanish. This is why you cannot <code>instanceof</code> an interface.',
+        run: function (ctx) {
+          hl([0, 10]);
+          return swap(ctx, function (g) { sceneErase(ctx, g); }).then(function () {
+            var rows = ctx.state.erase.rows;
+            return Promise.all(rows.map(function (r, i) {
+              return ctx.wait(i * 120).then(function () {
+                if (r.typeOnly) return ctx.move(r, 200, r._y, 500).then(function () { return ctx.fade(r, 0.12, 400); });
+                return ctx.move(r, 440, r._y, 900);
+              });
+            }));
+          }).then(function () {
+            ctx.log('interface, type → 0 bytes of JS', 'info');
+            ctx.log('class, new, function → real JS', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Union types make bad states unwritable',
+        say: 'Each status is its own variant. Only the <code>CAPTURED</code> variant has <code>txnId</code>, and there it is required. Inside <code>case \'CAPTURED\'</code> tsc knows <code>p.txnId</code> exists.',
+        run: function (ctx) {
+          hl([10, 11, 12]);
+          return swap(ctx, function (g) { sceneUnion(ctx, g); }).then(function () {
+            var u = ctx.state.u;
+            ctx.flash(u.cards[1].r);
+            return ctx.packet([[380, u.cards[1].b.bottom], [380, 200], [250, 290]], { cls: 'ok', label: 'p', ms: 800 });
+          }).then(function () {
+            ctx.flash(ctx.state.u.lines[2]);
+            ctx.log("{ status: 'CAPTURED', amount: 1 } → error: txnId is missing", 'bad');
+            ctx.log("case 'CAPTURED': p.txnId is a string here", 'ok');
+          });
+        },
+      },
+      {
+        title: 'Add a state, the build breaks (good)',
+        say: 'Someone adds <code>REFUNDED</code> to the union but not to the switch. The leftover value cannot be assigned to <code>never</code>, so the code stops compiling until the case is handled.',
+        run: function (ctx) {
+          hl([13]);
+          var u = ctx.state.u;
+          var card = cls(ctx, u.g, 520, 230, 220, "status: 'REFUNDED'", ['refundId: string'], { cls: 'bad' });
+          card.setAttribute('opacity', 0);
+          return ctx.fade(card, 1, 400).then(function () {
+            return ctx.packet([[520, 260], [400, 334]], { cls: 'bad', label: 'REFUNDED', ms: 700 });
+          }).then(function () {
+            u.lines[4].setAttribute('class', 'mono small fill-bad');
+            ctx.flash(u.lines[4]);
+            ctx.log("TS2322: Type '{ status: \"REFUNDED\" ... }' is not assignable to type 'never'", 'bad');
+          });
+        },
+      },
+      {
+        title: 'Abstract class: share code, forbid new',
+        say: '<code>BaseGateway</code> holds the shared validation in <code>charge()</code> and leaves <code>doCharge()</code> abstract. Subclasses fill in only that step. <code>new BaseGateway()</code> is a compile error.',
+        run: function (ctx) {
+          hl([14]);
+          return swap(ctx, function (g) { sceneAbstract(ctx, g); }).then(function () {
+            var s = ctx.state.abs;
+            return ctx.packet([[60, 120], [240, 100], [60, 120]], { cls: 'bad', label: 'new BaseGateway()', ms: 900 });
+          }).then(function () {
+            ctx.log('new BaseGateway() → TS2511: Cannot create an instance of an abstract class', 'bad');
+            var s = ctx.state.abs;
+            return Promise.all([
+              ctx.packet([[390, s.base.b.bottom], [390, 220], [230, 220], [230, 270]], { cls: 'ok', label: 'charge(499)', ms: 800 }),
+              ctx.packet([[390, s.base.b.bottom], [390, 220], [550, 220], [550, 270]], { cls: 'ok', ms: 800 }),
+            ]);
+          }).then(function () { ctx.log('charge() validates once, then calls each doCharge()', 'ok'); });
+        },
+      },
+      {
+        title: 'Generics: one repository for every entity',
+        say: '<code>InMemoryRepo&lt;T&gt;</code> is written once. Plug in <code>Payment</code>, then <code>Seat</code>: tsc now checks that <code>save()</code> only gets that type.',
+        run: function (ctx) {
+          hl([15]);
+          return swap(ctx, function (g) { sceneGeneric(ctx, g); }).then(function () {
+            var s = ctx.state.gen;
+            return ctx.move(s.ents[0], 315, 207, 700).then(function () {
+              s.out.textContent = 'InMemoryRepo<Payment>: save(seat) is a compile error';
+              ctx.log('T = Payment → save(item: Payment)', 'ok');
+              return ctx.move(s.ents[0], 40, 300, 500);
+            }).then(function () {
+              return ctx.move(s.ents[1], 315, 207, 700);
+            }).then(function () {
+              s.out.textContent = 'InMemoryRepo<Seat>: same class, now typed for seats';
+              ctx.log('T = Seat → same code, new checks', 'ok');
+            });
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it (outside the lab; does not touch the stage) ----------
+  var SNIPS = [
+    ['const gw: PaymentGateway = new RazorpayGateway("k")', true, 'OK. The class implements the interface.'],
+    ['const gw: PaymentGateway = { charge: async a => ({ id: "x", amount: a }), refund: async () => {} }', true, 'OK. Structural typing: the shape matches, no class needed.'],
+    ['const gw: PaymentGateway = { pay: async () => {} }', false, "Error. Property 'charge' is missing (and 'pay' is not in the type)."],
+    ["const p: Payment = { status: 'CAPTURED', amount: 10 }", false, "Error. Property 'txnId' is missing in the CAPTURED variant."],
+    ["const p: Payment = { status: 'capturd', amount: 10 }", false, "Error. 'capturd' is not one of the allowed status literals."],
+    ['new BaseGateway()', false, 'Error. Cannot create an instance of an abstract class.'],
+    ['if (x instanceof PaymentGateway) {}', false, "Error. 'PaymentGateway' only refers to a type. Interfaces do not exist at runtime."],
+    ['(wallet as any).pin', true, 'Compiles, and works at runtime. TS private is erased. Use #pin for real privacy.'],
+  ];
+  var box = document.getElementById('try'), out = document.getElementById('try-out');
+  SNIPS.forEach(function (s, i) {
+    var b = document.createElement('button');
+    b.className = 'btn'; b.type = 'button'; b.textContent = 'Snippet ' + (i + 1);
+    b.addEventListener('click', function () {
+      out.innerHTML = '';
+      var c = document.createElement('div'); c.textContent = s[0]; out.appendChild(c);
+      var r = document.createElement('div'); r.className = s[1] ? 'ok' : 'bad'; r.textContent = '→ ' + s[2]; out.appendChild(r);
+    });
+    box.appendChild(b);
+  });
+})();
+</script>
+</body>
+</html>

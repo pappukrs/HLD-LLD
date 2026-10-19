@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H30 Observability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .try output { font: 12px var(--font-mono); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H30 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Observability: Traces, Logs, Metrics, SLOs</h1>
+    <p class="lede">Follow one slow checkout through four services. The trace shows where the time went, the logs with the same trace id show why, the histogram shows how many users felt it, and the error budget decides whether someone gets paged.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 620" role="img" aria-label="A request through services, its trace waterfall, log lines, a latency histogram and an error budget"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="err">Error rate during an incident
+          <input type="range" id="err" min="0.1" max="10" step="0.1" value="1.5">
+        </label>
+        <output id="errOut">1.50%</output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Span / trace context</span>
+        <span><i style="background: var(--ok)"></i>Fast / healthy</span>
+        <span><i style="background: var(--signal)"></i>Slow / warning</span>
+        <span><i style="background: var(--bad)"></i>Error / alert</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Every service exports RED metrics with latency as histograms, plus business metrics like payment success per PSP. Traces use OpenTelemetry with the traceparent header, carried through Kafka headers, with tail sampling that keeps all errors and slow traces. Logs are JSON with the trace id and no card data. We page on SLO burn rate, 14.4× over an hour, not on CPU."</p>
+    </div>
+    <div class="note">
+      <h3>What goes where</h3>
+      <ul>
+        <li><b>Metric label</b>: route, status, method, region, pod. Bounded values only.</li>
+        <li><b>Trace attribute / log field</b>: user_id, order_id, payment_id, bank response code.</li>
+        <li><b>Never anywhere</b>: card number, CVV, OTP, password, raw tokens.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Three signals compared</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Metrics</th><th>Traces</th><th>Logs</th></tr></thead>
+          <tbody>
+            <tr><td>Question it answers</td><td>Is something wrong? How bad?</td><td>Where in the call graph?</td><td>Why, in this exact request?</td></tr>
+            <tr><td>Shape</td><td>Numbers + labels over time</td><td>Tree of timed spans</td><td>Timestamped JSON events</td></tr>
+            <tr><td>Cost driver</td><td>Cardinality (series count)</td><td>Volume → sampling</td><td>GB per day, retention</td></tr>
+            <tr><td>Typical tools</td><td>Prometheus, Grafana, Mimir</td><td>OpenTelemetry, Jaeger, Tempo</td><td>pino → Fluent Bit → Loki / OpenSearch</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Average latency is 130 ms. Is the service fine?</summary><div>Maybe not. In step 5 the average is fine while p99 is 2 s. With 20 calls per page, many page loads hit at least one slow call. Look at p95/p99.</div></details>
+      <details class="qa"><summary>Why sum histograms instead of averaging p99s?</summary><div>A quiet pod with a high p99 skews the average. Bucket counts add up across pods; the percentile from the merged buckets is the real fleet p99.</div></details>
+      <details class="qa"><summary>30 minutes of full outage against a 99.9% / 30-day SLO. Budget left?</summary><div>43.2 − 30 = 13.2 minutes, about 31%. Slow down risky releases.</div></details>
+      <details class="qa"><summary>Why alert on burn rate, not on "error rate &gt; 1%"?</summary><div>Burn rate ties the alert to the SLO: it pages for fast burns that threaten the month, ignores short blips, and the same rule works for any SLO target.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var SVC = [
+    { id: 'client', name: 'Client', x: 16 },
+    { id: 'gw', name: 'Gateway', x: 160 },
+    { id: 'order', name: 'Order', x: 304 },
+    { id: 'pay', name: 'Payment', x: 448 },
+    { id: 'bank', name: 'Bank API', x: 600 },
+  ];
+  var SY = 30, SW = 130, SH = 44;
+  var WX = 150, WPX = 1.6, WY = 196, WROW = 20;   // waterfall: x of t=0, px per ms
+  var SPANS = [
+    { name: 'gateway', from: 0, to: 320, cls: 'fill-signal' },
+    { name: 'order', from: 8, to: 312, cls: 'fill-signal' },
+    { name: 'inventory', from: 14, to: 26, cls: 'fill-ok' },
+    { name: 'payment', from: 30, to: 306, cls: 'fill-signal' },
+    { name: 'bank API', from: 38, to: 300, cls: 'fill-bad' },
+    { name: 'notify (Kafka)', from: 318, to: 342, cls: 'fill-ok' },
+  ];
+  var BK = [25, 50, 100, 250, 500, 1000, 2500];
+  var HX = 30, HY = 590, HW = 300, HH = 78;
+  var BX = 420, BW = 300;  // budget panel
+
+  function rng(seed) { return function () { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }; }
+  function sample(n, seed, slowShare, hugeShare) {
+    var r = rng(seed), out = [];
+    for (var i = 0; i < n; i++) {
+      var u = r();
+      if (u < hugeShare) out.push(1800 + r() * 600);
+      else if (u < hugeShare + slowShare) out.push(250 + r() * 300);
+      else out.push(35 + r() * 110);
+    }
+    return out;
+  }
+  function pct(arr, q) { var s = arr.slice().sort(function (a, b) { return a - b; }); return s[Math.min(s.length - 1, Math.ceil(q * s.length) - 1)]; }
+  function avg(arr) { return arr.reduce(function (a, b) { return a + b; }, 0) / arr.length; }
+  function bucketize(arr) { var c = BK.map(function () { return 0; }); arr.forEach(function (v) { var i = BK.findIndex(function (b) { return v <= b; }); c[i < 0 ? BK.length - 1 : i]++; }); return c; }
+  function bucketQ(counts, q) { var total = counts.reduce(function (a, b) { return a + b; }, 0), seen = 0; for (var i = 0; i < counts.length; i++) { seen += counts[i]; if (seen >= q * total) return BK[i]; } return BK[BK.length - 1]; }
+
+  function center(id) { var s = SVC.filter(function (x) { return x.id === id; })[0]; return [s.x + SW / 2, SY + SH / 2]; }
+  function hop(a, b) { var A = center(a), B = center(b); return [[A[0] + SW / 2, A[1]], [B[0] - SW / 2, B[1]]]; }
+
+  function burnText(errPct) {
+    var burn = Math.round(errPct * 10000) / 1000;
+    var hours = 720 / burn;
+    var page = burn >= 14.4 ? 'PAGE now' : burn >= 6 ? 'page if it lasts 6 h' : burn > 1 ? 'ticket' : 'within budget';
+    return ['Try it: error ' + errPct.toFixed(2) + '% → burn ' + burn.toFixed(1) + '×', 'budget gone in ' + (hours >= 48 ? (hours / 24).toFixed(1) + ' days' : hours.toFixed(1) + ' h') + ' → ' + page];
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One slow checkout',
+      say: 'A user taps Pay. The request goes Gateway → Order → Payment → Bank API. The bank is having a bad night. Each step shows one observability tool doing its job.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.box = {};
+      SVC.forEach(function (s, i) {
+        if (i > 0) ctx.el('line', { x1: SVC[i - 1].x + SW, y1: SY + SH / 2, x2: s.x, y2: SY + SH / 2, class: 'wire' });
+      });
+      SVC.forEach(function (s) {
+        var r = ctx.el('rect', { x: s.x, y: SY, width: SW, height: SH, rx: 8, class: 'box' });
+        ctx.el('text', { x: s.x + 10, y: SY + 20, class: 'title', text: s.name });
+        S.box[s.id] = { r: r, t: ctx.el('text', { x: s.x + 10, y: SY + 37, class: 'mono small muted', text: '' }) };
+      });
+      ctx.el('line', { x1: 369, y1: SY + SH, x2: 369, y2: 112, class: 'wire dashed' });
+      S.kafka = ctx.el('rect', { x: 304, y: 112, width: 130, height: 34, rx: 8, class: 'box dim' });
+      ctx.el('text', { x: 314, y: 134, class: 'mono small', text: 'Kafka → Notify' });
+      S.header = ctx.el('text', { x: 450, y: 134, class: 'mono small muted', text: '' });
+      // waterfall
+      ctx.el('text', { x: 16, y: 176, class: 'title', text: 'Trace' });
+      S.traceId = ctx.el('text', { x: 70, y: 176, class: 'mono small muted', text: '(no trace yet)' });
+      [0, 100, 200, 300].forEach(function (ms) {
+        var x = WX + ms * WPX;
+        ctx.el('line', { x1: x, y1: WY - 12, x2: x, y2: WY + SPANS.length * WROW, class: 'wire', opacity: 0.35 });
+        ctx.el('text', { x: x, y: WY + SPANS.length * WROW + 14, 'text-anchor': 'middle', class: 'mono small muted', text: ms + ' ms' });
+      });
+      S.spans = SPANS.map(function (sp, i) {
+        var y = WY + i * WROW;
+        var label = ctx.el('text', { x: 16, y: y + 11, class: 'mono small muted', text: sp.name, opacity: 0.25 });
+        var bar = ctx.el('rect', { x: WX + sp.from * WPX, y: y, width: 0, height: 13, rx: 3, class: sp.cls });
+        var dur = ctx.el('text', { x: WX + sp.to * WPX + 6, y: y + 11, class: 'mono small', text: '', opacity: 0 });
+        return { label: label, bar: bar, dur: dur, sp: sp };
+      });
+      // logs
+      ctx.el('line', { x1: 0, y1: 348, x2: 760, y2: 348, class: 'wire' });
+      ctx.el('text', { x: 16, y: 370, class: 'title', text: 'Logs (JSON, one line per event)' });
+      S.logG = ctx.group();
+      // bottom panels
+      ctx.el('line', { x1: 0, y1: 440, x2: 760, y2: 440, class: 'wire' });
+      S.metTitle = ctx.el('text', { x: 16, y: 462, class: 'title', text: 'Metrics' });
+      S.metG = ctx.group();
+      ctx.el('line', { x1: 392, y1: 440, x2: 392, y2: 620, class: 'wire' });
+      ctx.el('text', { x: 404, y: 462, class: 'title', text: 'SLO 99.9% · 30-day error budget' });
+      S.budBg = ctx.el('rect', { x: BX, y: 476, width: BW, height: 18, rx: 4, class: 'box' });
+      S.bud = ctx.el('rect', { x: BX, y: 476, width: 0, height: 18, rx: 4, class: 'fill-ok' });
+      S.budT = ctx.el('text', { x: BX, y: 512, class: 'mono small muted', text: 'budget = 0.1% ≈ 43.2 min of full outage' });
+      S.burnG = ctx.group();
+      S.tryT = ctx.el('text', { x: 404, y: 604, class: 'mono small muted', text: '' });
+      S.tryT2 = ctx.el('text', { x: 404, y: 617, class: 'mono small muted', text: '' });
+      renderTry(ctx);
+    },
+    steps: [
+      {
+        title: 'The gateway starts a trace',
+        say: 'The gateway creates a trace id and a span, and adds the W3C <code>traceparent</code> header to every call it makes. Each service reads the header, starts a child span, and passes it on. That header is what ties four services into one story.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.traceId.textContent = 'trace_id 4bf92f35…';
+          S.header.textContent = 'traceparent: 00-4bf92f35…-00f067aa…-01';
+          var chain = ctx.packet(hop('client', 'gw'), { ms: 450 });
+          ['gw', 'order', 'pay'].forEach(function (id, i) {
+            var next = ['order', 'pay', 'bank'][i];
+            chain = chain.then(function () { S.box[id].t.textContent = 'span ' + (i + 1); S.box[id].r.setAttribute('class', 'box accent'); return ctx.packet(hop(id, next), { ms: 450, cls: 'accent', label: 'traceparent' }); });
+          });
+          return chain.then(function () { S.box.bank.t.textContent = 'span 4'; S.box.bank.r.setAttribute('class', 'box accent'); ctx.log('Trace 4bf92f35 started; context passed on every hop', 'info'); });
+        },
+      },
+      {
+        title: 'Spans form a waterfall: the bank is the slow hop',
+        say: 'Each span records start and end. Laid out on one time axis, the picture is obvious: the whole 320 ms is the Payment → Bank call, which ends in a <b>timeout</b>. Inventory took 12 ms and is not the problem.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var parts = S.spans.slice(0, 5).map(function (s) {
+            s.label.setAttribute('opacity', 1);
+            return ctx.animate(s.bar, { width: (s.sp.to - s.sp.from) * WPX }, 900).then(function () {
+              s.dur.textContent = (s.sp.to - s.sp.from) + ' ms' + (s.sp.name === 'bank API' ? ' ✗ timeout' : '');
+              s.dur.setAttribute('opacity', 1);
+              if (s.sp.name === 'bank API') s.dur.setAttribute('class', 'mono small fill-bad');
+            });
+          });
+          return Promise.all(parts).then(function () {
+            S.box.bank.r.setAttribute('class', 'box bad'); S.box.bank.t.textContent = 'ETIMEDOUT';
+            ctx.flash(S.box.bank.r);
+            ctx.log('Waterfall: 262 ms of 320 ms spent in bank API (timeout)', 'bad');
+          });
+        },
+      },
+      {
+        title: 'The trace survives the queue',
+        say: 'Order publishes <code>PaymentFailed</code> to Kafka with <code>traceparent</code> in the <b>message headers</b>. The notification consumer continues the same trace. With <b>tail sampling</b>, the collector keeps this trace because it has an error; head sampling at 1% would probably have dropped it.',
+        run: function (ctx) {
+          var S = ctx.state, s = S.spans[5];
+          S.kafka.setAttribute('class', 'box accent');
+          return ctx.packet([[369, SY + SH], [369, 112]], { ms: 500, cls: 'accent', label: 'headers: traceparent' }).then(function () {
+            s.label.setAttribute('opacity', 1);
+            return ctx.animate(s.bar, { width: (s.sp.to - s.sp.from) * WPX }, 400);
+          }).then(function () {
+            s.dur.textContent = '24 ms'; s.dur.setAttribute('opacity', 1);
+            S.traceId.textContent = 'trace_id 4bf92f35… · kept by tail sampling (has error)';
+            S.traceId.setAttribute('class', 'mono small fill-ok');
+            ctx.log('Consumer span joined the trace via Kafka headers', 'info');
+            ctx.log('Tail sampler: keep (error) — head 1% would keep it 1 time in 100', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Logs with the same trace id say why',
+        say: 'Every log line is JSON and carries the trace id. Filter by <code>trace_id=4bf92f35</code> and you get the story in order. The payment service line says <b>why</b>: the bank\'s new endpoint timed out after 2 s. No card numbers in the logs.',
+        run: function (ctx) {
+          var S = ctx.state, lines = [
+            ['{"svc":"order","trace_id":"4bf92f35","msg":"checkout start","order_id":"o_981"}', 'muted'],
+            ['{"svc":"payment","trace_id":"4bf92f35","level":"error","bank":"HDFC","err":"ETIMEDOUT","latency_ms":2003}', 'fill-bad'],
+            ['{"svc":"order","trace_id":"4bf92f35","msg":"payment pending, will reconcile"}', 'muted'],
+          ], chain = Promise.resolve();
+          lines.forEach(function (l, i) {
+            chain = chain.then(function () {
+              var t = ctx.el('text', { x: 16, y: 392 + i * 18, class: 'mono small ' + l[1], text: l[0], opacity: 0 }, S.logG);
+              return ctx.fade(t, 1, 300);
+            });
+          });
+          return chain.then(function () { ctx.log('Log search trace_id=4bf92f35 → bank ETIMEDOUT', 'warn'); });
+        },
+      },
+      {
+        title: 'Metrics: the average hides the pain',
+        say: 'Now zoom out to 100 requests. Each pod records latency into <b>histogram buckets</b>. The average is about 160 ms and looks healthy. But <b>p99 is about 2 s</b>: one user in a hundred waits that long, and a page with 20 calls hits it often.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.metG;
+          var data = sample(100, 7, 0.08, 0.02);
+          S.data = data;
+          var c = bucketize(data), max = Math.max.apply(null, c), bw = HW / BK.length;
+          S.metTitle.textContent = 'Metrics · latency histogram (100 requests)';
+          ctx.el('line', { x1: HX, y1: HY, x2: HX + HW, y2: HY, class: 'wire' }, g);
+          var bars = c.map(function (n, i) {
+            ctx.el('text', { x: HX + i * bw + bw / 2, y: HY + 14, 'text-anchor': 'middle', class: 'mono small muted', text: '≤' + BK[i] }, g);
+            return { r: ctx.el('rect', { x: HX + i * bw + 4, y: HY, width: bw - 8, height: 0, class: i >= 5 ? 'fill-bad' : i >= 3 ? 'fill-signal' : 'fill-ok' }, g), h: (n / max) * HH, n: n, i: i };
+          });
+          return ctx.tween(800, function (t) { bars.forEach(function (b) { b.r.setAttribute('height', b.h * t); b.r.setAttribute('y', HY - b.h * t); }); })
+            .then(function () {
+              bars.forEach(function (b) { if (b.n) ctx.el('text', { x: HX + b.i * bw + bw / 2, y: HY - b.h - 4, 'text-anchor': 'middle', class: 'mono small', text: b.n }, g); });
+              ctx.el('text', { x: HX + 175, y: 484, class: 'mono small fill-ok', text: 'avg ' + Math.round(avg(data)) + ' ms · p50 ' + Math.round(pct(data, 0.5)) + ' ms' }, g);
+              ctx.el('text', { x: HX + 175, y: 500, class: 'mono small fill-bad', text: 'p99 ' + Math.round(pct(data, 0.99)) + ' ms' }, g);
+              ctx.log('avg ' + Math.round(avg(data)) + ' ms looks fine; p99 ' + Math.round(pct(data, 0.99)) + ' ms does not', 'warn');
+            });
+        },
+      },
+      {
+        title: 'Never average p99s across pods',
+        say: 'Pod A served 1,000 requests with p99 ≈ 145 ms. Pod B served only 10, with p99 ≈ 2.2 s. The average of the two p99s says about 1.2 s, which is wrong. <b>Add the bucket counts</b>, then read the percentile: the real fleet p99 is under 500 ms.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.metG;
+          while (g.firstChild) g.removeChild(g.firstChild);
+          S.metTitle.textContent = 'Metrics · two pods, one fleet p99';
+          var a = sample(1000, 3, 0.005, 0), b = sample(10, 11, 0, 0.4);
+          var pa = pct(a, 0.99), pb = pct(b, 0.99);
+          var merged = bucketize(a.concat(b));
+          var rows = [
+            ['pod A: 1,000 req, p99 ' + Math.round(pa) + ' ms', 'fill-ok'],
+            ['pod B:    10 req, p99 ' + Math.round(pb) + ' ms', 'fill-bad'],
+            ['avg of p99s = ' + Math.round((pa + pb) / 2) + ' ms   ✗ wrong', 'fill-bad'],
+            ['merged buckets → p99 ≤ ' + bucketQ(merged, 0.99) + ' ms   ✓ right', 'fill-ok'],
+          ], chain = Promise.resolve();
+          rows.forEach(function (r, i) {
+            chain = chain.then(function () {
+              var t = ctx.el('text', { x: 24, y: 494 + i * 24, class: 'mono small ' + r[1], text: r[0], opacity: 0 }, g);
+              return ctx.fade(t, 1, 300);
+            });
+          });
+          return chain.then(function () { ctx.log('Histograms add; percentiles do not', 'info'); });
+        },
+      },
+      {
+        title: 'Cardinality: one bad label melts Prometheus',
+        say: 'Every label combination is its own time series. route × status × method is 300 series. Someone adds <code>user_id</code> as a label "for debugging": 300 × 1M users = <b>300 million series</b>. Memory explodes. High-cardinality ids belong in logs and traces.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.metG;
+          while (g.firstChild) g.removeChild(g.firstChild);
+          S.metTitle.textContent = 'Metrics · active time series';
+          ctx.el('text', { x: 24, y: 494, class: 'mono small', text: 'http_requests_total{route, status, method}' }, g);
+          ctx.el('text', { x: 24, y: 512, class: 'mono small muted', text: '20 × 5 × 3 = 300 series' }, g);
+          ctx.el('text', { x: 24, y: 540, class: 'mono small fill-bad', text: '+ user_id label  (1,000,000 users)' }, g);
+          var big = ctx.el('text', { x: 24, y: 576, class: 'title fill-ok', text: '300' }, g);
+          return ctx.tween(1400, function (t) {
+            var v = Math.round(300 * Math.pow(1e6, t));
+            big.textContent = v.toLocaleString('en-US') + ' series';
+            big.setAttribute('class', 'title ' + (v > 1e6 ? 'fill-bad' : 'fill-ok'));
+          }).then(function () { ctx.log('user_id label → 300,000,000 series. Remove it; put it in logs.', 'bad'); });
+        },
+      },
+      {
+        title: 'SLO and error budget',
+        say: 'The SLO: 99.9% of payment requests succeed within 1 s over 30 days. The allowed 0.1% is the <b>error budget</b>, about 43 minutes of full outage. Tonight\'s bank incident caused 30 bad minutes, so <b>69% of the month\'s budget is gone</b>.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return ctx.animate(S.bud, { width: BW }, 500).then(function () {
+            ctx.log('Budget: 43.2 min for 30 days', 'info');
+            S.bud.setAttribute('class', 'fill-signal');
+            return ctx.animate(S.bud, { width: BW * (13.2 / 43.2) }, 1200);
+          }).then(function () {
+            S.budT.textContent = '30 min burned tonight → 13.2 min left (31%)';
+            S.budT.setAttribute('class', 'mono small fill-bad');
+            ctx.log('30 min outage burned 69% of the error budget → freeze risky deploys', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Burn-rate alert: page on the SLO, not on CPU',
+        say: 'Burn rate = error rate ÷ 0.1%. At <b>14.4×</b> the month\'s budget would be gone in about 2 days, and 2% of it in one hour. The alert pages when the 1-hour burn is above 14.4× and the last 5 minutes agree. CPU at 80% pages nobody.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.burnG;
+          var X0 = BX, Y0 = 590, W = BW, H = 54, maxB = 30;
+          ctx.el('line', { x1: X0, y1: Y0, x2: X0 + W, y2: Y0, class: 'wire' }, g);
+          var ty = Y0 - (14.4 / maxB) * H;
+          ctx.el('line', { x1: X0, y1: ty, x2: X0 + W, y2: ty, class: 'wire bad dashed' }, g);
+          ctx.el('text', { x: X0 + W, y: ty - 4, 'text-anchor': 'end', class: 'mono small fill-bad', text: '14.4× page' }, g);
+          ctx.el('text', { x: X0, y: Y0 - H - 4, class: 'mono small muted', text: 'burn rate over the incident' }, g);
+          var pts = [1, 1, 1.2, 4, 12, 22, 26, 25, 24, 8, 2, 1];
+          var line = ctx.el('polyline', { points: '', class: 'wire accent', style: 'fill: none; stroke-width: 2' }, g);
+          var alerted = false;
+          return ctx.tween(1500, function (t) {
+            var n = Math.max(2, Math.ceil(t * pts.length));
+            var p = pts.slice(0, n).map(function (b, i) { return (X0 + (i / (pts.length - 1)) * W) + ',' + (Y0 - (Math.min(b, maxB) / maxB) * H); });
+            line.setAttribute('points', p.join(' '));
+            if (!alerted && n > 5) { alerted = true; }
+          }).then(function () {
+            var px = X0 + (5 / (pts.length - 1)) * W, py = Y0 - (22 / maxB) * H;
+            var dot = ctx.el('circle', { cx: px, cy: py, r: 6, class: 'dot bad' }, g);
+            ctx.flash(dot);
+            ctx.el('text', { x: px - 10, y: py + 4, 'text-anchor': 'end', class: 'mono small fill-bad', text: 'PAGE on-call' }, g);
+            ctx.log('Burn 22× over 1 h and 5 min → page. On-call opens the trace from step 2.', 'bad');
+          });
+        },
+      },
+    ],
+  });
+
+  function renderTry(ctx) {
+    var v = parseFloat(document.getElementById('err').value) || 1.5;
+    document.getElementById('errOut').textContent = v.toFixed(2) + '%';
+    if (ctx.state.tryT) {
+      var bt = burnText(v), burn = Math.round(v * 10000) / 1000;
+      var cls = 'mono small ' + (burn >= 14.4 ? 'fill-bad' : burn >= 6 ? 'fill-signal' : 'fill-ok');
+      ctx.state.tryT.textContent = bt[0];
+      ctx.state.tryT2.textContent = bt[1];
+      ctx.state.tryT.setAttribute('class', cls);
+      ctx.state.tryT2.setAttribute('class', cls);
+    }
+  }
+  document.getElementById('err').addEventListener('input', function () {
+    renderTry(lab.ctx);
+  });
+  document.getElementById('err').addEventListener('change', function () {
+    lab.ctx.log('You: ' + burnText(parseFloat(this.value)).join(', '), 'info');
+  });
+})();
+</script>
+</body>
+</html>

@@ -121,6 +121,6 @@ Relationships: BookingService ⟶ SeatStore, PricingStrategy (dependency injecti
 
 ## Concepts used
 
-- [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [Repository and DI](../../concepts/patterns/p18-repository-di.md)
-- HLD link: [Ticket Booking (BookMyShow)](../../../hld/problems/09-ticket-booking/) · [SQL deep dive: locking](../../../hld/concepts/10-sql-deep-dive.md) · [Distributed locks](../../../hld/concepts/30-consensus-coordination.md)
-- Visuals: [Seat locking and race conditions](../../../visuals/v28-seat-locking.html) · [Node.js event loop](../../../visuals/v30-node-event-loop.html)
+- [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md)
+- HLD link: [Ticket Booking (BookMyShow)](../../../hld/case-studies/09-ticket-booking) · [SQL deep dive: locking](../../../hld/3-databases/H11-indexing/README.md) · [Distributed locks](../../../hld/5-reliability/H29-consensus-locks/README.md)
+- Visuals: [Seat locking and race conditions](../../5-machine-coding/L32-concurrency-in-node/visual.html) · [Node.js event loop](../../5-machine-coding/L32-concurrency-in-node/visual.html)

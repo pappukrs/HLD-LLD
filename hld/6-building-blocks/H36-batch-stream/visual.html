@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H36 Batch and stream</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .try label { font-size: 12px; color: var(--muted); }
+  .try .seg { display: inline-flex; gap: 4px; }
+  .try .seg .btn.on { outline: 2px solid var(--accent); }
+  .try output { font: 12.5px var(--font-mono); flex-basis: 100%; color: var(--ink); }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H36 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Batch and stream processing</h1>
+    <p class="lede">Clicks arrive out of order. A stream job puts each one in a 1-minute window by <b>event time</b>, fires a window when the watermark passes it, survives a crash with checkpoints and upserts, and a nightly batch job fixes what the stream missed.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Event-time tumbling windows with a watermark, checkpoint, and batch reconciliation"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <label>Try it: watermark delay</label>
+        <span class="seg" id="delay-seg">
+          <button class="btn" type="button" data-d="0">0 s</button>
+          <button class="btn" type="button" data-d="10">10 s</button>
+          <button class="btn on" type="button" data-d="30">30 s</button>
+          <button class="btn" type="button" data-d="60">60 s</button>
+        </span>
+        <output id="try-out"></output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Event in flight</span>
+        <span><i style="background: var(--accent)"></i>Counted in a window</span>
+        <span><i style="background: var(--ok)"></i>Window fired / exact</span>
+        <span><i style="background: var(--bad)"></i>Late / crash</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Clicks go to Kafka keyed by ad id. Flink counts them in 1-minute tumbling windows by event time, with a watermark 30 seconds behind the max event time; late events go to a side output. Results are upserted into ClickHouse by (ad, window), so a replay after a crash overwrites instead of double counting. A nightly Spark job recomputes exact counts from raw S3 data, and we bill on those."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code">const start = floor(e.t / 60) * 60;     // event-time window
+if (start + 60 &lt;= watermark) return late(e);
+count[start][e.ad]++;
+maxT = max(maxT, e.t);
+watermark = maxT - 30;                  // allowed delay
+if (start + 60 &lt;= watermark)             // fire
+  sink.upsert(`${ad}|${start}`, n);     // idempotent</pre>
+    </div>
+    <div class="note wide">
+      <h3>Batch vs micro-batch vs stream</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Batch (Spark + Airflow)</th><th>Micro-batch (Spark Streaming)</th><th>Stream (Flink, Kafka Streams)</th></tr></thead>
+          <tbody>
+            <tr><td>Input</td><td>Bounded files</td><td>Small chunks of a stream</td><td>Unbounded, per event</td></tr>
+            <tr><td>Latency</td><td>Hours</td><td>Seconds to a minute</td><td>Milliseconds to seconds</td></tr>
+            <tr><td>Correctness</td><td>Exact, complete, rerun = overwrite</td><td>Good, needs watermarks</td><td>Good, needs watermarks + idempotent sink</td></tr>
+            <tr><td>Use for</td><td>Billing, reconciliation, ML training</td><td>Near-real-time ETL</td><td>Fraud, alerts, live dashboards</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why count by event time, not processing time?</summary><div>Events arrive late and out of order (offline phones, consumer lag). Processing time puts a click in whatever minute the job happened to see it, so counts move when the system is slow.</div></details>
+      <details class="qa"><summary>What decides when a window fires?</summary><div>The watermark: when it passes the window's end, the job assumes no more events for that window will come and emits the result.</div></details>
+      <details class="qa"><summary>Checkpoints are exactly-once. Why do we still need an upsert sink?</summary><div>After a crash the job replays from the last checkpoint and emits results again. An increment sink counts them twice; an upsert by (ad, window) just overwrites.</div></details>
+      <details class="qa"><summary>Why keep a nightly batch job if the stream works?</summary><div>The batch sees the complete data, including late events dropped by the stream, and is easy to rerun. Money numbers come from batch; the stream is for speed.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>Kafka to Flink to OLAP: a few seconds end to end</li>
+        <li>Checkpoints: every 10 s to a few minutes</li>
+        <li>10B events/day x 200 B = 2 TB/day raw, ~300 GB as Parquet</li>
+        <li>10B/day ≈ 115k events/s average</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // Arrival order. t = event time in seconds after 10:00.
+  var EVENTS = [5, 20, 41, 70, 58, 95, 40, 130, 155];
+  var DELAY = 30;
+  var X0 = 110, XW = 600 / 180, AXIS = 250;
+  function tx(t) { return X0 + t * XW; }
+  function fmt(t) { return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+  function banner(ctx, text, kind) { ctx.state.banner.textContent = text; ctx.state.banner.setAttribute('class', 'title' + (kind ? ' fill-' + kind : '')); }
+
+  function setWm(ctx, t, ms) {
+    var s = ctx.state;
+    s.wm = t;
+    s.wmText.textContent = 'watermark ' + (t < 0 ? '-' : fmt(t));
+    return ctx.move(s.wmLine, tx(Math.max(0, t)), 0, ms === undefined ? 400 : ms);
+  }
+
+  // Drop one event into its window (or the side output if late).
+  function arrive(ctx, i) {
+    var s = ctx.state, t = EVENTS[i];
+    var w = Math.floor(t / 60);
+    var chip = s.chips[i];
+    chip.setAttribute('class', 'box signal');
+    var late = s.fired[w];
+    var dest = late ? [330, 340] : [tx(t), 222 - s.stack[w] * 18];
+    return ctx.packet([[58 + i * 34, 56], [58 + i * 34, 110], dest], { ms: 650, label: fmt(t) }).then(function () {
+      chip.setAttribute('class', 'box dim');
+      if (late) {
+        s.lateN++;
+        s.lateText.textContent = 'late: ' + s.lateN + ' event (0:40)';
+        s.lateBox.setAttribute('class', 'box bad');
+        ctx.flash(s.lateBox);
+        ctx.log('0:40 arrives after W1 fired -> side output', 'bad');
+        return;
+      }
+      ctx.el('circle', { cx: dest[0], cy: dest[1], r: 7, class: 'dot' });
+      s.stack[w]++;
+      s.count[w]++;
+      s.wCount[w].textContent = 'count ' + s.count[w];
+      s.maxT = Math.max(s.maxT, t);
+      ctx.log('event ' + fmt(t) + ' -> W' + (w + 1) + (i === 4 ? ' (arrived after 1:10, still on time)' : ''), i === 4 ? 'warn' : '');
+    });
+  }
+
+  function fire(ctx, w) {
+    var s = ctx.state;
+    s.fired[w] = true;
+    s.wRect[w].setAttribute('class', 'box ok');
+    ctx.flash(s.wRect[w]);
+    return ctx.packet([[tx(w * 60 + 30), 250], [130, 340]], { ms: 600, cls: 'ok' }).then(function () {
+      s.rows[w].textContent = 'ad|W' + (w + 1) + ' = ' + s.count[w];
+      s.rows[w].setAttribute('class', 'mono fill-ok');
+      ctx.log('watermark passed ' + fmt((w + 1) * 60) + ': W' + (w + 1) + ' fires, upsert count=' + s.count[w], 'ok');
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Nine clicks, out of order',
+      say: 'The top row is the Kafka partition in arrival order. The timeline below is event time, from 10:00 to 10:03, cut into 1-minute tumbling windows. The watermark runs 30 seconds behind the newest event seen.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      s.maxT = 0; s.count = [0, 0, 0]; s.stack = [0, 0, 0]; s.fired = [false, false, false]; s.lateN = 0;
+      ctx.el('text', { x: 20, y: 22, class: 'title', text: 'Kafka partition (arrival order)' });
+      s.chips = EVENTS.map(function (t, i) {
+        var r = ctx.el('rect', { x: 42 + i * 34, y: 34, width: 32, height: 22, rx: 4, class: 'box' });
+        ctx.el('text', { x: 58 + i * 34, y: 49, 'text-anchor': 'middle', class: 'mono small', text: fmt(t) });
+        return r;
+      });
+      ctx.el('text', { x: 42, y: 72, class: 'mono small muted', text: 'offset 0 ... 8' });
+      ctx.el('rect', { x: 440, y: 30, width: 290, height: 56, rx: 8, class: 'box' });
+      ctx.el('text', { x: 452, y: 50, class: 'title', text: 'Flink job' });
+      s.jobText = ctx.el('text', { x: 452, y: 72, class: 'mono small muted', text: 'keyed state in RocksDB' });
+      // windows
+      s.wRect = []; s.wCount = [];
+      for (var w = 0; w < 3; w++) {
+        s.wRect.push(ctx.el('rect', { x: tx(w * 60) + 2, y: 126, width: 60 * XW - 4, height: 112, rx: 8, class: 'box' }));
+        ctx.el('text', { x: tx(w * 60) + 10, y: 144, class: 'title', text: 'W' + (w + 1) + ' [' + fmt(w * 60) + ', ' + fmt(w * 60 + 60) + ')' });
+        s.wCount.push(ctx.el('text', { x: tx(w * 60) + 10, y: 162, class: 'mono small muted', text: 'count 0' }));
+      }
+      ctx.el('line', { x1: X0, y1: AXIS, x2: tx(180), y2: AXIS, class: 'wire' });
+      for (var m = 0; m <= 3; m++) ctx.el('text', { x: tx(m * 60), y: AXIS + 16, 'text-anchor': 'middle', class: 'mono small muted', text: '10:0' + m });
+      ctx.el('text', { x: 20, y: AXIS + 4, class: 'mono small muted', text: 'event time' });
+      s.wmLine = ctx.group();
+      ctx.el('line', { x1: 0, y1: 112, x2: 0, y2: AXIS + 4, class: 'wire bad' }, s.wmLine);
+      s.wmText = ctx.el('text', { x: 4, y: 110, class: 'mono small fill-bad', text: 'watermark -' }, s.wmLine);
+      ctx.place(s.wmLine, tx(0), 0);
+      // sinks
+      ctx.el('rect', { x: 20, y: 290, width: 220, height: 110, rx: 8, class: 'box' });
+      ctx.el('text', { x: 32, y: 310, class: 'title', text: 'ClickHouse (upsert)' });
+      s.rows = [ctx.el('text', { x: 32, y: 334, class: 'mono muted', text: 'ad|W1 = -' }), ctx.el('text', { x: 32, y: 354, class: 'mono muted', text: 'ad|W2 = -' })];
+      s.sinkNote = ctx.el('text', { x: 32, y: 386, class: 'mono small muted', text: 'key = (ad, window start)' });
+      s.lateBox = ctx.el('rect', { x: 256, y: 290, width: 150, height: 110, rx: 8, class: 'box' });
+      ctx.el('text', { x: 268, y: 310, class: 'title', text: 'Side output' });
+      s.lateText = ctx.el('text', { x: 268, y: 334, class: 'mono small muted', text: 'late: 0' });
+      s.ckBox = ctx.el('rect', { x: 422, y: 290, width: 140, height: 110, rx: 8, class: 'box' });
+      ctx.el('text', { x: 434, y: 310, class: 'title', text: 'Checkpoint (S3)' });
+      s.ckText = ctx.el('text', { x: 434, y: 334, class: 'mono small muted', text: 'none yet' });
+      s.ckText2 = ctx.el('text', { x: 434, y: 352, class: 'mono small muted', text: '' });
+      s.batchBox = ctx.el('rect', { x: 578, y: 290, width: 162, height: 110, rx: 8, class: 'box' });
+      ctx.el('text', { x: 590, y: 310, class: 'title', text: 'Nightly Spark' });
+      s.batchText = ctx.el('text', { x: 590, y: 334, class: 'mono small muted', text: 'raw S3 Parquet' });
+      s.batchText2 = ctx.el('text', { x: 590, y: 352, class: 'mono small muted', text: '' });
+      s.batchText3 = ctx.el('text', { x: 590, y: 370, class: 'mono small muted', text: '' });
+      s.banner = ctx.el('text', { x: 380, y: 440, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'First clicks land in W1 by event time',
+        say: 'Each click carries its own timestamp. 0:05, 0:20 and 0:41 all belong to W1, the 10:00 window. The watermark is max event time minus 30 s: now 0:11.',
+        run: function (ctx) {
+          return arrive(ctx, 0).then(function () { return arrive(ctx, 1); }).then(function () { return arrive(ctx, 2); })
+            .then(function () { ctx.log('max event time 0:41 -> watermark 0:11', 'info'); return setWm(ctx, ctx.state.maxT - DELAY); });
+        },
+      },
+      {
+        title: 'Out of order: 0:58 arrives after 1:10',
+        say: '1:10 goes to W2. Then 0:58 shows up late in arrival order, but the watermark is only 0:40, so W1 is still open and the click is counted correctly. Processing time would have put it in the wrong minute.',
+        run: function (ctx) {
+          return arrive(ctx, 3).then(function () { return setWm(ctx, ctx.state.maxT - DELAY); })
+            .then(function () { return arrive(ctx, 4); });
+        },
+      },
+      {
+        title: 'Watermark passes 1:00: W1 fires',
+        say: '1:35 arrives, so the watermark moves to 1:05. That is past the end of W1, so the job emits W1 = 4 and upserts it into ClickHouse under the key (ad, 10:00).',
+        run: function (ctx) {
+          return arrive(ctx, 5).then(function () { return setWm(ctx, ctx.state.maxT - DELAY); }).then(function () { return fire(ctx, 0); });
+        },
+      },
+      {
+        title: 'Checkpoint: state + offset together',
+        say: 'A checkpoint barrier flows through the job. It snapshots the open window counts and the Kafka offset (6) to S3, as one consistent pair.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[585, 86], [492, 290]], { cls: 'accent', label: 'barrier' }).then(function () {
+            s.ckBox.setAttribute('class', 'box accent');
+            s.ckText.textContent = 'offset = 6';
+            s.ckText2.textContent = 'W2=2, W3=0';
+            ctx.flash(s.ckBox);
+            ctx.log('checkpoint #1: offset 6, open windows W2=2', 'info');
+          });
+        },
+      },
+      {
+        title: 'A very late click: side output',
+        say: 'A click from 0:40 arrives now, from a phone that was offline. W1 already fired. It goes to the side output instead of silently vanishing. The nightly batch will count it.',
+        run: function (ctx) { return arrive(ctx, 6); },
+      },
+      {
+        title: 'W2 fires, then the job crashes',
+        say: '2:10 and 2:35 arrive, the watermark reaches 2:05, and W2 = 2 is upserted. Right after that, the task manager dies. Everything after the checkpoint (offsets 6 to 8) is lost from memory.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return arrive(ctx, 7).then(function () { return arrive(ctx, 8); }).then(function () { return setWm(ctx, s.maxT - DELAY); })
+            .then(function () { return fire(ctx, 1); }).then(function () {
+              s.jobText.textContent = 'CRASHED';
+              s.jobText.setAttribute('class', 'mono small fill-bad');
+              banner(ctx, 'Task manager lost', 'bad');
+              ctx.log('job crashed after offset 8', 'bad');
+            });
+        },
+      },
+      {
+        title: 'Restore and replay: upsert saves you',
+        say: 'Flink restores W2=2 and offset 6 from S3, then replays offsets 6 to 8. W2 fires again with count 2. Because the sink <b>upserts</b> by (ad, window), the row stays 2. An increment sink would now show 4.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[492, 290], [585, 86]], { cls: 'accent', label: 'restore' }).then(function () {
+            s.jobText.textContent = 'restored, replaying 6..8';
+            s.jobText.setAttribute('class', 'mono small fill-accent');
+            ctx.log('restore checkpoint #1, replay offsets 6..8', 'info');
+            return ctx.packet([[tx(90), 250], [130, 350]], { ms: 600, cls: 'warn' });
+          }).then(function () {
+            ctx.flash(s.rows[1]);
+            s.sinkNote.textContent = 'W2 replayed: still 2';
+            s.sinkNote.setAttribute('class', 'mono small fill-ok');
+            banner(ctx, 'Exactly-once effect = replay + idempotent sink', 'ok');
+            ctx.log('W2 re-emitted -> upsert overwrites -> still 2', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Nightly batch: map, shuffle, reduce',
+        say: 'All raw clicks were also archived to S3 as Parquet. The nightly Spark job reads the complete, bounded input, maps each click to (ad, window), shuffles by key and sums. It sees the late 0:40 click too.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.batchBox.setAttribute('class', 'box accent');
+          s.batchText.textContent = 'map: 9 x (ad|W, 1)';
+          return ctx.packet([[350, 56], [420, 100], [659, 290]], { ms: 700, label: 'raw' }).then(function () {
+            s.batchText2.textContent = 'shuffle by key';
+            return ctx.wait(400);
+          }).then(function () {
+            s.batchText3.textContent = 'W1=5  W2=2  W3=2';
+            s.batchText3.setAttribute('class', 'mono small fill-ok');
+            ctx.log('batch result: W1=5 W2=2 W3=2 (complete)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Reconcile and bill on batch',
+        say: 'Stream said W1 = 4; batch says 5. The difference is exactly the late click in the side output. Dashboards use the stream (seconds); invoices use the batch (exact). Alert if they differ by more than a threshold.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[659, 400], [659, 420], [130, 420], [130, 400]], { ms: 800, cls: 'ok', label: 'W1 = 5' }).then(function () {
+            s.rows[0].textContent = 'ad|W1 = 5 (batch fix)';
+            s.batchBox.setAttribute('class', 'box ok');
+            banner(ctx, 'Stream for speed, batch for money', 'ok');
+            ctx.log('reconcile: W1 stream 4 vs batch 5 -> diff = 1 late event', 'warn');
+          });
+        },
+      },
+    ],
+  });
+
+  // Try it: replays the same arrival order with a different watermark delay (pure calculation, no SVG changes).
+  var out = document.getElementById('try-out');
+  function simulate(d) {
+    var maxT = 0, fired = {}, late = [], fireAt = {};
+    EVENTS.forEach(function (t, i) {
+      var w = Math.floor(t / 60);
+      if (fired[w]) { late.push(fmt(t)); return; }
+      maxT = Math.max(maxT, t);
+      for (var k = 0; (k + 1) * 60 <= maxT - d; k++) if (!fired[k]) { fired[k] = true; fireAt[k] = i + 1; }
+    });
+    var w1 = fireAt[0] ? 'W1 fires after arrival #' + fireAt[0] : 'W1 never fires in this sample';
+    return 'delay ' + d + ' s: ' + w1 + '; late events: ' + (late.length ? late.join(', ') : 'none') +
+      '. ' + (d >= 60 ? 'Nothing lost, but every result waits a full minute.' : d === 0 ? 'Freshest results, but out-of-order clicks get dropped.' : 'A balance between freshness and completeness.');
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('#delay-seg .btn'), function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('#delay-seg .btn'), function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      out.textContent = simulate(parseInt(b.getAttribute('data-d'), 10));
+    });
+  });
+  out.textContent = simulate(30);
+  void lab;
+})();
+</script>
+</body>
+</html>

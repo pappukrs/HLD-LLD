@@ -94,5 +94,5 @@ Relationships: System ◆— Elevator (composition). System ⟶ DispatchStrategy
 
 ## Concepts used
 
-- [State pattern](../../concepts/patterns/p12-state.md) · [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Visuals: [State machine](../../../visuals/v25-state-machine.html) · [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [State pattern](../../4-behavioral/L22-state/README.md) · [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Visuals: [State machine](../../4-behavioral/L22-state/visual.html) · [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

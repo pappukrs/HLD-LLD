@@ -1,77 +1,72 @@
-# Week 2 · Creational and structural patterns · caching and databases
+# Week 2 · OOP and design principles in TypeScript · Creational patterns · Basics · Scaling the stateless tier
 
 > Mon 26 Oct – Sun 1 Nov · Phase 1: Foundations · ~10 h this week
-> **Goal:** Pick the right cache pattern and database for a requirement, and explain why.
+> **Goal:** Learn one LLD and one HLD concept a day: visual, notes, code, self-test. Finish a timed LLD every Saturday and a full HLD every Sunday.
 
 [← Week 1](week-01.md) · [All weeks](README.md) · [Week 3 →](week-03.md)
 
 ## Mon 26 Oct · Day 8 · 60 min
 
-- [ ] **LLD · 25 min**: Singleton + Factory  
-  [patterns/p01-singleton](../../lld/concepts/patterns/p01-singleton.md) · [patterns/p01-singleton.ts](../../lld/concepts/patterns/p01-singleton.ts) · [patterns/p02-factory](../../lld/concepts/patterns/p02-factory.md) · [patterns/p02-factory.ts](../../lld/concepts/patterns/p02-factory.ts)  
-  _Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test._
-- [ ] **HLD · 35 min**: Caching  
-  [concepts/08-caching](../../hld/concepts/08-caching.md) · [visuals/v03-caching-patterns.html](../../visuals/v03-caching-patterns.html)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
+- [ ] **LLD · 25 min**: L06 UML class diagrams and relationships  
+  [L06-uml-relationships/README.md](../../lld/1-foundations/L06-uml-relationships/README.md) · [visual](../../lld/1-foundations/L06-uml-relationships/visual.html) · [demo.ts](../../lld/1-foundations/L06-uml-relationships/demo.ts)  
+  _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
+- [ ] **HLD · 35 min**: H06 Proxies, reverse proxies and the API gateway  
+  [H06-proxies-api-gateway/README.md](../../hld/1-basics/H06-proxies-api-gateway/README.md) · [visual](../../hld/1-basics/H06-proxies-api-gateway/visual.html) · [demo.ts](../../hld/1-basics/H06-proxies-api-gateway/demo.ts)  
+  _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
 ## Tue 27 Oct · Day 9 · 60 min
 
-- [ ] **LLD · 25 min**: Builder + Prototype  
-  [patterns/p03-builder](../../lld/concepts/patterns/p03-builder.md) · [patterns/p03-builder.ts](../../lld/concepts/patterns/p03-builder.ts) · [patterns/p04-prototype](../../lld/concepts/patterns/p04-prototype.md) · [patterns/p04-prototype.ts](../../lld/concepts/patterns/p04-prototype.ts)  
-  _Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test._
-- [ ] **HLD · 35 min**: CDN and edge  
-  [concepts/09-cdn](../../hld/concepts/09-cdn.md)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
+- [ ] **LLD · 25 min**: L07 DRY, KISS, YAGNI, coupling, cohesion, Law of Demeter  
+  [L07-design-principles/README.md](../../lld/1-foundations/L07-design-principles/README.md) · [visual](../../lld/1-foundations/L07-design-principles/visual.html) · [demo.ts](../../lld/1-foundations/L07-design-principles/demo.ts)  
+  _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
+- [ ] **HLD · 35 min**: H07 Vertical vs horizontal scaling and stateless services  
+  [H07-scaling-stateless/README.md](../../hld/2-scaling/H07-scaling-stateless/README.md) · [visual](../../hld/2-scaling/H07-scaling-stateless/visual.html) · [demo.ts](../../hld/2-scaling/H07-scaling-stateless/demo.ts)  
+  _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
 ## Wed 28 Oct · Day 10 · 60 min
 
-- [ ] **LLD · 25 min**: Adapter + Facade  
-  [patterns/p05-adapter](../../lld/concepts/patterns/p05-adapter.md) · [patterns/p05-adapter.ts](../../lld/concepts/patterns/p05-adapter.ts) · [patterns/p07-facade](../../lld/concepts/patterns/p07-facade.md) · [patterns/p07-facade.ts](../../lld/concepts/patterns/p07-facade.ts)  
-  _Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test._
-- [ ] **HLD · 35 min**: SQL part 1: indexes and EXPLAIN  
-  [concepts/10-sql-deep-dive](../../hld/concepts/10-sql-deep-dive.md)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
+- [ ] **LLD · 25 min**: L08 Singleton  
+  [L08-singleton/README.md](../../lld/2-creational/L08-singleton/README.md) · [visual](../../lld/2-creational/L08-singleton/visual.html) · [demo.ts](../../lld/2-creational/L08-singleton/demo.ts)  
+  _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
+- [ ] **HLD · 35 min**: H08 Load balancing  
+  [H08-load-balancing/README.md](../../hld/2-scaling/H08-load-balancing/README.md) · [visual](../../hld/2-scaling/H08-load-balancing/visual.html) · [demo.ts](../../hld/2-scaling/H08-load-balancing/demo.ts)  
+  _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
 ## Thu 29 Oct · Day 11 · 60 min
 
-- [ ] **LLD · 25 min**: Decorator  
-  [patterns/p06-decorator](../../lld/concepts/patterns/p06-decorator.md) · [patterns/p06-decorator.ts](../../lld/concepts/patterns/p06-decorator.ts) · [visuals/v26-decorator-chain.html](../../visuals/v26-decorator-chain.html)  
-  _Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test._
-- [ ] **HLD · 35 min**: SQL part 2: transactions, isolation, locking  
-  [concepts/10-sql-deep-dive](../../hld/concepts/10-sql-deep-dive.md) · [visuals/v20-isolation-levels.html](../../visuals/v20-isolation-levels.html)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
+- [ ] **LLD · 25 min**: L09 Simple Factory and Factory Method  
+  [L09-factory-method/README.md](../../lld/2-creational/L09-factory-method/README.md) · [visual](../../lld/2-creational/L09-factory-method/visual.html) · [demo.ts](../../lld/2-creational/L09-factory-method/demo.ts)  
+  _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
+- [ ] **HLD · 35 min**: H09 Caching patterns, eviction and failures  
+  [H09-caching/README.md](../../hld/2-scaling/H09-caching/README.md) · [visual](../../hld/2-scaling/H09-caching/visual.html) · [demo.ts](../../hld/2-scaling/H09-caching/demo.ts)  
+  _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
 ## Fri 30 Oct · Day 12 · 60 min
 
-- [ ] **LLD · 25 min**: Proxy + Composite  
-  [patterns/p08-proxy](../../lld/concepts/patterns/p08-proxy.md) · [patterns/p08-proxy.ts](../../lld/concepts/patterns/p08-proxy.ts) · [patterns/p09-composite](../../lld/concepts/patterns/p09-composite.md) · [patterns/p09-composite.ts](../../lld/concepts/patterns/p09-composite.ts)  
-  _Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test._
-- [ ] **HLD · 35 min**: NoSQL types and choosing a database  
-  [concepts/11-nosql-types](../../hld/concepts/11-nosql-types.md)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
+- [ ] **LLD · 25 min**: L10 Abstract Factory  
+  [L10-abstract-factory/README.md](../../lld/2-creational/L10-abstract-factory/README.md) · [visual](../../lld/2-creational/L10-abstract-factory/visual.html) · [demo.ts](../../lld/2-creational/L10-abstract-factory/demo.ts)  
+  _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
+- [ ] **HLD · 35 min**: H10 CDN and static content  
+  [H10-cdn/README.md](../../hld/2-scaling/H10-cdn/README.md) · [visual](../../hld/2-scaling/H10-cdn/visual.html) · [demo.ts](../../hld/2-scaling/H10-cdn/demo.ts)  
+  _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
 ## Sat 31 Oct · Day 13 · 150 min
 
-- [ ] **LLD · 90 min**: LRU / LFU Cache: timed machine-coding  
-  [02-lru-cache](../../lld/problems/02-lru-cache/README.md)  
-  _Full round, 90 min on a timer: 10 min clarify, 10 min design, the rest code + tests. Then compare with reference.ts and note 3 differences._
-- [ ] **HLD · 60 min**: Replication  
-  [concepts/12-replication](../../hld/concepts/12-replication.md) · [visuals/v05-replication.html](../../visuals/v05-replication.html)  
-  _Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud._
-- [ ] **Stretch · 30 min**: Code: Snowflake IDs  
-  [04-snowflake-id](../../hld/code/04-snowflake-id/README.md)  
-  _Implement it and make the tests pass._
+- [ ] **LLD · 90 min**: Parking Lot: timed machine-coding round  
+  [01-parking-lot/README.md](../../lld/problems/01-parking-lot/README.md) · [L30-machine-coding-framework/README.md](../../lld/5-machine-coding/L30-machine-coding-framework/README.md)  
+  _90 min on a timer: 10 clarify, 10 design, 60 code + tests, 10 demo it out loud. Then compare with reference.ts and note 3 differences._
+- [ ] **HLD · 60 min**: Hands-on: H06 Proxies, reverse proxies and the API gateway  
+  [hands-on/README.md](../../hld/1-basics/H06-proxies-api-gateway/hands-on/README.md) · [H06-proxies-api-gateway/README.md](../../hld/1-basics/H06-proxies-api-gateway/README.md)  
+  _Pick one folder in hands-on/, run it with Docker or Node, and watch the behaviour the README describes. Write 3 lines on what you saw._
 
 ## Sun 1 Nov · Day 14 · 120 min
 
-- [ ] **HLD · 75 min**: Unique ID Generator: concept + design  
-  [concepts/25-unique-id-generation](../../hld/concepts/25-unique-id-generation.md) · [03-unique-id-generator](../../hld/problems/03-unique-id-generator/README.md) · [03-unique-id-generator/my-design](../../hld/problems/03-unique-id-generator/my-design.md)  
-  _Read the unique-ID card (25 min), then design the problem in 50 min._
+- [ ] **HLD · 75 min**: Unique ID Generator: full design  
+  [03-unique-id-generator/README.md](../../hld/case-studies/03-unique-id-generator/README.md) · [03-unique-id-generator/my-design.md](../../hld/case-studies/03-unique-id-generator/my-design.md) · [H01-approach-hld-round/README.md](../../hld/1-basics/H01-approach-hld-round/README.md)  
+  _45 min on a timer in my-design.md, talking out loud as if to an interviewer (do it as a mock if someone is free). Then 30 min comparing with the hints and filling in the Review._
 - [ ] **REV · 45 min**: Weekly review  
-  _Self-test all cards from this week. Redo the LRU cache get/put from memory in 10 min. Then run /daily week._
-- [ ] **Stretch · 30 min**: Code: base62 + ID ranges  
-  [05-base62-shortener](../../hld/code/05-base62-shortener/README.md)  
-  _Implement it and make the tests pass._
+  [L06-uml-relationships/README.md](../../lld/1-foundations/L06-uml-relationships/README.md) · [H06-proxies-api-gateway/README.md](../../hld/1-basics/H06-proxies-api-gateway/README.md) · [L07-design-principles/README.md](../../lld/1-foundations/L07-design-principles/README.md) · [H07-scaling-stateless/README.md](../../hld/2-scaling/H07-scaling-stateless/README.md) · [L08-singleton/README.md](../../lld/2-creational/L08-singleton/README.md) · [H08-load-balancing/README.md](../../hld/2-scaling/H08-load-balancing/README.md) · [L09-factory-method/README.md](../../lld/2-creational/L09-factory-method/README.md) · [H09-caching/README.md](../../hld/2-scaling/H09-caching/README.md) · [L10-abstract-factory/README.md](../../lld/2-creational/L10-abstract-factory/README.md) · [H10-cdn/README.md](../../hld/2-scaling/H10-cdn/README.md)  
+  _Self-test every concept from this week (L06, H06, L07, H07, L08, H08, L09, H09, L10, H10). Replay any visual you couldn't explain. Write 5 flashcards for what you got wrong. Then run /daily week._
 
 ## Notes
 

@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H17 Consistent Hashing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+  .try input[type="text"] { font: 13px var(--font-mono); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; width: 140px; }
+  .try .hint { color: var(--muted); font-size: 12px; }
+  .vbars { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .vbar { display: grid; grid-template-columns: 24px 1fr 56px; align-items: center; gap: 8px; font: 12px var(--font-mono); }
+  .vbar .track { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; height: 14px; position: relative; overflow: hidden; }
+  .vbar .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+  .vbar .ideal { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--signal); }
+  .vstat { font: 12px var(--font-mono); color: var(--muted); margin-top: 6px; }
+  .links { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H17 · Databases</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Consistent Hashing</h1>
+    <p class="lede">With <code>hash(key) % N</code>, changing N moves almost every key. Put servers and keys on one ring instead: adding or removing a server then moves only the keys in one arc. Virtual nodes make the load even, and the same ring gives you replica placement.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Hash ring with servers, keys and a table of key owners"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <strong>Try it:</strong>
+        <label for="try-key" class="hint">key</label>
+        <input id="try-key" type="text" value="user:42" maxlength="24">
+        <button class="btn" type="button" id="try-route">Route this key</button>
+        <span class="hint" id="try-out">Works after step 3 (servers on the ring). Routes on the ring as it is now.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Server / vnode</span>
+        <span><i style="background: var(--signal)"></i>Key</span>
+        <span><i style="background: var(--bad)"></i>Key that moved</span>
+        <span><i style="background: var(--ok)"></i>Replica</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"With <code>hash % N</code>, going from 4 to 5 nodes remaps about 80% of keys, which is a miss storm on the database. I'll put nodes and keys on a hash ring and give each key to the first node clockwise, so a join or leave moves only about 1/N of the keys. Each node gets about 150 virtual nodes so the load stays even and a failure spreads across all survivors. Replicas go to the next 3 distinct physical nodes clockwise, in different AZs."</p>
+    </div>
+    <div class="note">
+      <h3>Key lines (TypeScript)</h3>
+<pre class="code">// sorted array of { pos, node }, lower-bound search
+let lo = 0, hi = points.length;
+while (lo &lt; hi) {
+  const mid = (lo + hi) &gt;&gt;&gt; 1;
+  if (points[mid].pos &lt; h) lo = mid + 1;
+  else hi = mid;
+}
+const owner = points[lo % points.length].node; // wrap
+
+// replicas: walk on, skip nodes already taken
+for (let i = lo; out.length &lt; R; i = (i + 1) % n)
+  if (!out.includes(points[i].node)) out.push(points[i].node);</pre>
+    </div>
+    <div class="note">
+      <h3>Try it: how many vnodes?</h3>
+      <p>Three servers, each placed <strong id="v-n">1</strong> time(s) on a real 32-bit ring. Bars show each server's share of the ring. The orange line is the fair share (33.3%).</p>
+      <label class="hint" for="v-slider">vnodes per server</label>
+      <input id="v-slider" type="range" min="1" max="300" value="1" style="width: 100%">
+      <div class="vbars" id="v-bars"></div>
+      <div class="vstat" id="v-stat"></div>
+    </div>
+    <div class="note">
+      <h3>Where it's used</h3>
+      <ul>
+        <li>DynamoDB, Cassandra, Riak: token ring + vnodes, replicas on the next N nodes</li>
+        <li>Memcached clients (ketama), Redis client-side sharding</li>
+        <li>Nginx <code>hash $key consistent</code>, Envoy ring hash and Maglev: sticky routing that survives scaling</li>
+        <li>Not a ring, same goal: Redis Cluster (16,384 slots), Kafka partitions</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Placement schemes compared</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th><code>hash % N</code></th><th>Ring (1 point)</th><th>Ring + vnodes</th><th>Fixed slots (Redis)</th><th>Rendezvous (HRW)</th></tr></thead>
+          <tbody>
+            <tr><td>Keys moved when 1 of N joins</td><td>~N/(N+1), nearly all</td><td>~1/(N+1), but random size</td><td>~1/(N+1), taken from all nodes</td><td>Only the slots you move</td><td>~1/(N+1)</td></tr>
+            <tr><td>Load balance</td><td>Even</td><td>Uneven (1.7× vs 0.6×)</td><td>Within ~10%</td><td>As even as your slot plan</td><td>Even</td></tr>
+            <tr><td>When a node dies</td><td>Everything reshuffles</td><td>One neighbour takes it all</td><td>Spread over all survivors</td><td>Replica promoted, slots reassigned</td><td>Spread over all</td></tr>
+            <tr><td>Lookup</td><td>O(1)</td><td>O(log N)</td><td>O(log N·V)</td><td>O(1) slot table</td><td>O(N)</td></tr>
+            <tr><td>Metadata</td><td>Just N</td><td>Node list</td><td>Node list (+ weights)</td><td>Slot → node map</td><td>Node list</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>A server dies. Where do its keys go?</summary><div>To the next server clockwise. With virtual nodes, its many small arcs go to many different servers, so no single neighbour is flooded. Step 9 shows this.</div></details>
+      <details class="qa"><summary>Why can't two replicas just be "the next 2 points"?</summary><div>The next point may be another vnode of the same physical server. Then both copies are on one machine. Skip vnodes of servers already chosen (and servers in an AZ already used).</div></details>
+      <details class="qa"><summary>Does consistent hashing fix a hot key?</summary><div>No. One key always lands on one owner. Use a local cache, read from all replicas, or split the key into <code>key#0..#9</code>.</div></details>
+      <details class="qa"><summary>Is there anything simpler for a fixed shard count?</summary><div>Yes. If you pre-split into, say, 1024 logical shards and only move shards between machines, <code>% 1024</code> plus a shard → node map is enough. Jump consistent hash also works when shards only grow at the end.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (100k keys: 79.9% moved with modulo vs 18.5% with a ring)</li>
+        <li>Lab: <a href="lab-hash-ring/README.md">lab-hash-ring</a> (build and test the ring)</li>
+        <li>Used in: <a href="../../case-studies/04-key-value-store/README.md">Key-value store</a>, <a href="../../case-studies/17-distributed-cache/README.md">Distributed cache</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CX = 210, CY = 230, R = 150;
+  // Demo positions on a 0-359 ring (stand-ins for hash(name) % 360).
+  var KEYS = [
+    { id: 'k1', pos: 12 }, { id: 'k2', pos: 47 }, { id: 'k3', pos: 81 },
+    { id: 'k4', pos: 124 }, { id: 'k5', pos: 167 }, { id: 'k6', pos: 205 },
+    { id: 'k7', pos: 238 }, { id: 'k8', pos: 296 }, { id: 'k9', pos: 331 },
+  ];
+  var SERVERS = [{ id: 'A', pos: 30 }, { id: 'B', pos: 150 }, { id: 'C', pos: 262 }];
+  var VNODES = [
+    { id: 'A1', pos: 30 }, { id: 'A2', pos: 190 }, { id: 'A3', pos: 315 },
+    { id: 'C1', pos: 262 }, { id: 'C2', pos: 140 }, { id: 'C3', pos: 355 },
+    { id: 'D1', pos: 95 }, { id: 'D2', pos: 220 }, { id: 'D3', pos: 175 },
+  ];
+
+  function xy(deg, r) {
+    var a = (deg * Math.PI) / 180;
+    return [CX + (r || R) * Math.sin(a), CY - (r || R) * Math.cos(a)];
+  }
+  function sorted(points) { return points.slice().sort(function (a, b) { return a.pos - b.pos; }); }
+  // First point clockwise at or after pos (wraps). Returns its index in the sorted list.
+  function ownerIndex(pos, s) {
+    for (var i = 0; i < s.length; i++) if (s[i].pos >= pos) return i;
+    return 0;
+  }
+  function owner(pos, points) { var s = sorted(points); return s[ownerIndex(pos, s)]; }
+  function physical(p) { return p.id.charAt(0); }
+
+  function arcPoints(from, to, r) {
+    var pts = [], end = to < from ? to + 360 : to;
+    for (var d = from; d <= end; d += 4) pts.push(xy(d % 360, r));
+    pts.push(xy(to, r));
+    return pts;
+  }
+
+  function drawServer(ctx, s, small) {
+    var p = xy(s.pos);
+    var g = ctx.group({ opacity: 0 });
+    ctx.el('circle', { r: small ? 11 : 15, class: 'dot', opacity: small ? 0.7 : 1 }, g);
+    ctx.el('text', { y: 4, 'text-anchor': 'middle', class: 'mono' + (small ? ' small' : ''), text: s.id, style: 'fill: var(--surface); font-weight: 600' }, g);
+    if (!small) {
+      var lp = xy(s.pos, R + 32);
+      ctx.el('text', { x: lp[0] - p[0], y: lp[1] - p[1] + 4, 'text-anchor': 'middle', class: 'mono small muted', text: s.pos + '°' }, g);
+    }
+    ctx.place(g, p[0], p[1]);
+    ctx.state.serverEls[s.id] = g;
+    return g;
+  }
+
+  function drawKey(ctx, k) {
+    var p = xy(k.pos);
+    var g = ctx.group({ opacity: 0 });
+    var dot = ctx.el('circle', { r: 6, class: 'dot signal' }, g);
+    var lp = xy(k.pos, R - 26);
+    ctx.el('text', { x: lp[0] - p[0], y: lp[1] - p[1] + 4, 'text-anchor': 'middle', class: 'mono small', text: k.id }, g);
+    ctx.place(g, p[0], p[1]);
+    ctx.state.keyEls[k.id] = { g: g, dot: dot };
+    return g;
+  }
+
+  // Right-hand table: key | %3 | %4 | ring owner
+  function drawTable(ctx) {
+    var t = ctx.group();
+    var x0 = 450, y0 = 40;
+    ctx.el('text', { x: x0, y: y0 - 14, class: 'title', text: 'Where does each key go?' }, t);
+    ['key', 'hash % 3', 'hash % 4', 'ring'].forEach(function (h, i) { ctx.el('text', { x: x0 + i * 72, y: y0 + 8, class: 'mono small muted', text: h }, t); });
+    ctx.state.cells = {};
+    KEYS.forEach(function (k, r) {
+      var y = y0 + 30 + r * 22;
+      ctx.el('text', { x: x0, y: y, class: 'mono', text: k.id + ' (' + k.pos + ')' }, t);
+      ctx.state.cells[k.id] = [1, 2, 3].map(function (c) { return ctx.el('text', { x: x0 + c * 72, y: y, class: 'mono', text: '·' }, t); });
+    });
+  }
+
+  function drawLoadBars(ctx) {
+    var g = ctx.group();
+    ctx.el('text', { x: 450, y: 318, class: 'title', text: 'Keys per server' }, g);
+    ctx.state.bars = {};
+    ['A', 'B', 'C', 'D'].forEach(function (id, i) {
+      var y = 334 + i * 24;
+      ctx.el('text', { x: 450, y: y + 12, class: 'mono', text: id }, g);
+      var bar = ctx.el('rect', { x: 470, y: y, width: 0, height: 14, rx: 3, class: 'fill-accent' }, g);
+      var label = ctx.el('text', { x: 476, y: y + 12, class: 'mono small muted', text: '' }, g);
+      ctx.state.bars[id] = { bar: bar, label: label };
+    });
+  }
+
+  function updateBars(ctx, points, ms) {
+    var counts = { A: 0, B: 0, C: 0, D: 0 };
+    KEYS.forEach(function (k) { counts[physical(owner(k.pos, points))]++; });
+    return Promise.all(Object.keys(counts).map(function (id) {
+      var b = ctx.state.bars[id];
+      var w = counts[id] * 26;
+      b.label.textContent = counts[id] ? counts[id] + ' keys' : '';
+      return ctx.animate(b.bar, { width: w }, ms).then(function () { b.label.setAttribute('x', 476 + w); });
+    }));
+  }
+
+  // Send every key clockwise to its owner, colouring moved keys red.
+  function route(ctx, points, opts) {
+    opts = opts || {};
+    var chain = Promise.resolve();
+    KEYS.forEach(function (k) {
+      chain = chain.then(function () {
+        var o = owner(k.pos, points);
+        var prev = ctx.state.owner[k.id];
+        var moved = prev && physical(prev) !== physical(o);
+        ctx.state.owner[k.id] = o;
+        var cell = ctx.state.cells[k.id][2];
+        cell.textContent = physical(o);
+        cell.setAttribute('class', moved ? 'mono fill-bad' : 'mono');
+        ctx.state.keyEls[k.id].dot.setAttribute('class', moved ? 'dot bad' : 'dot signal');
+        if (moved) ctx.log(k.id + ' moved ' + physical(prev) + ' → ' + physical(o), 'bad');
+        if (opts.onlyMoved && !moved) return;
+        return ctx.packet(arcPoints(k.pos, o.pos), { ms: opts.ms || 500, cls: moved ? 'bad' : '' });
+      });
+    });
+    return chain;
+  }
+
+  var labHandle = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Nine keys, three servers',
+      say: 'We place keys on servers twice: first with <code>hash % N</code>, then with a hash ring. Then we add and remove servers, add virtual nodes, and place replicas.',
+    },
+    setup: function (ctx) {
+      ctx.state.serverEls = {};
+      ctx.state.keyEls = {};
+      ctx.state.owner = {};
+      ctx.state.ring = [];
+      ctx.el('circle', { cx: CX, cy: CY, r: R, class: 'ring' });
+      ctx.el('text', { x: CX, y: CY - 6, 'text-anchor': 'middle', class: 'title', text: 'hash ring' });
+      ctx.el('text', { x: CX, y: CY + 14, 'text-anchor': 'middle', class: 'mono small muted', text: '0° … 359°, clockwise' });
+      var top = xy(0, R + 14);
+      ctx.el('text', { x: top[0], y: top[1] - 4, 'text-anchor': 'middle', class: 'mono small muted', text: '0°' });
+      ctx.state.caption = ctx.el('text', { x: CX, y: 450, 'text-anchor': 'middle', class: 'mono small muted', text: '' });
+      drawTable(ctx);
+      drawLoadBars(ctx);
+    },
+    steps: [
+      {
+        title: 'Modulo hashing with 3 servers',
+        say: 'Each key goes to server <code>hash % 3</code>. The load is even and the lookup is O(1). It works well until N changes.',
+        run: function (ctx) {
+          KEYS.forEach(function (k) { ctx.state.cells[k.id][0].textContent = 'S' + (k.pos % 3); });
+          ctx.log('Assigned 9 keys with hash % 3', 'info');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Add a 4th server: most keys move',
+        say: 'Now every key uses <code>hash % 4</code>. Compare the columns: almost every key lands on a different server. For a cache, that is a near-total miss storm on the database.',
+        run: function (ctx) {
+          var moved = 0;
+          var chain = Promise.resolve();
+          KEYS.forEach(function (k) {
+            chain = chain.then(function () {
+              var cell = ctx.state.cells[k.id][1];
+              var changed = k.pos % 3 !== k.pos % 4;
+              cell.textContent = 'S' + (k.pos % 4);
+              cell.setAttribute('class', changed ? 'mono fill-bad' : 'mono');
+              ctx.flash(cell);
+              if (changed) moved++;
+              return ctx.wait(90);
+            });
+          });
+          return chain.then(function () {
+            ctx.log(moved + ' of 9 keys changed server (' + Math.round((moved / 9) * 100) + '%). Theory for 3→4: 75%', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Place servers on a ring',
+        say: 'Hash each server name onto a circle of positions. Here A sits at 30°, B at 150° and C at 262°. In real systems the circle is 0 … 2<sup>32</sup>−1.',
+        run: function (ctx) {
+          ctx.state.ring = SERVERS.slice();
+          return SERVERS.reduce(function (p, s) {
+            return p.then(function () { var g = drawServer(ctx, s); ctx.log('Server ' + s.id + ' at ' + s.pos + '°'); return ctx.fade(g, 1, 350); });
+          }, Promise.resolve());
+        },
+      },
+      {
+        title: 'Place keys on the same ring',
+        say: 'Keys are hashed with the same function, so they share the circle with the servers.',
+        run: function (ctx) {
+          ctx.log('9 keys hashed onto the ring');
+          return Promise.all(KEYS.map(function (k) { return ctx.fade(drawKey(ctx, k), 1, 500); }));
+        },
+      },
+      {
+        title: 'Walk clockwise to the first server',
+        say: 'A key belongs to the first server at or after it, going clockwise. Past 359° you wrap to 0°. In code this is a binary search over the sorted server positions.',
+        run: function (ctx) {
+          ctx.state.caption.textContent = 'sorted positions [30, 150, 262] → lower-bound search, wrap to index 0';
+          return route(ctx, ctx.state.ring, { ms: 420 }).then(function () {
+            ctx.log('A: k1 k8 k9 (k8, k9 wrap past 359°) · B: k2 k3 k4 · C: k5 k6 k7', 'info');
+            return updateBars(ctx, ctx.state.ring);
+          });
+        },
+      },
+      {
+        title: 'Add server D at 95°: only one arc moves',
+        say: 'D takes over the arc from A (30°) up to itself (95°). Only keys in that arc move, all from B to D. Nothing else changes.',
+        run: function (ctx) {
+          var d = { id: 'D', pos: 95 };
+          ctx.state.ring.push(d);
+          ctx.log('Server D joins at 95°', 'info');
+          var arc = ctx.el('path', { d: 'M' + arcPoints(30, 95, R + 12).map(function (p) { return p.join(','); }).join(' L'), class: 'wire accent', 'stroke-width': 5, opacity: 0 });
+          return ctx.fade(arc, 1, 300)
+            .then(function () { return ctx.fade(drawServer(ctx, d), 1, 400); })
+            .then(function () { return route(ctx, ctx.state.ring, { onlyMoved: true, ms: 600 }); })
+            .then(function () { return updateBars(ctx, ctx.state.ring); })
+            .then(function () { ctx.log('2 of 9 keys moved (modulo moved 7)', 'ok'); return ctx.fade(arc, 0, 400); });
+        },
+      },
+      {
+        title: 'Remove server B: its keys go to the next server only',
+        say: 'B fails. Its keys continue clockwise to C. Keys on A and D stay where they are. But look at the bars: C is now carrying most of the ring.',
+        run: function (ctx) {
+          ctx.state.ring = ctx.state.ring.filter(function (s) { return s.id !== 'B'; });
+          ctx.log('Server B leaves', 'warn');
+          return ctx.fade(ctx.state.serverEls.B, 0.12, 400)
+            .then(function () { return route(ctx, ctx.state.ring, { onlyMoved: true, ms: 600 }); })
+            .then(function () { return updateBars(ctx, ctx.state.ring); })
+            .then(function () { ctx.log('C now owns the arc 95°→262°: 167° of 360° (46% of the ring)', 'warn'); });
+        },
+      },
+      {
+        title: 'Uneven arcs → virtual nodes',
+        say: 'Fix the uneven arcs by putting each server on the ring several times (A1, A2, A3 …). Each server now owns many small arcs, so no one server holds a huge slice. Real systems use 100–200 vnodes per server.',
+        run: function (ctx) {
+          ctx.state.vEls = {};
+          var g = ctx.group({ opacity: 0 });
+          VNODES.forEach(function (v) {
+            if (v.id === 'A1') { ctx.state.vEls[v.id] = ctx.state.serverEls.A; return; }
+            if (v.id === 'C1') { ctx.state.vEls[v.id] = ctx.state.serverEls.C; return; }
+            if (v.id === 'D1') { ctx.state.vEls[v.id] = ctx.state.serverEls.D; return; }
+            var p = xy(v.pos);
+            var vg = ctx.el('g', {}, g);
+            ctx.el('circle', { cx: p[0], cy: p[1], r: 11, class: 'dot', opacity: 0.65 }, vg);
+            ctx.el('text', { x: p[0], y: p[1] + 4, 'text-anchor': 'middle', class: 'mono small', text: v.id, style: 'fill: var(--surface)' }, vg);
+            ctx.state.vEls[v.id] = vg;
+          });
+          ctx.state.ring = VNODES.slice();
+          ctx.state.caption.textContent = 'each server = 3 points here; 150 in production';
+          ctx.log('Each server now has 3 virtual nodes', 'info');
+          return ctx.fade(g, 1, 500)
+            .then(function () { return route(ctx, ctx.state.ring, { ms: 380 }); })
+            .then(function () { return updateBars(ctx, ctx.state.ring); })
+            .then(function () {
+              var c = { A: 0, C: 0, D: 0 };
+              KEYS.forEach(function (k) { c[physical(owner(k.pos, ctx.state.ring))]++; });
+              ctx.log('Keys now A ' + c.A + ' · C ' + c.C + ' · D ' + c.D + '. Biggest arc per server shrank; with 150 vnodes shares land within ~10%', 'ok');
+            });
+        },
+      },
+      {
+        title: 'Server C dies: its load spreads out',
+        say: 'C\'s three small arcs are taken by different neighbours: k4 goes to D, k7 and k9 go to A. Without vnodes, one neighbour would have taken all of C\'s keys.',
+        run: function (ctx) {
+          ctx.log('Server C (C1, C2, C3) fails', 'warn');
+          ctx.state.ring = ctx.state.ring.filter(function (v) { return physical(v) !== 'C'; });
+          return Promise.all(['C1', 'C2', 'C3'].map(function (id) { return ctx.fade(ctx.state.vEls[id], 0.12, 400); }))
+            .then(function () { return route(ctx, ctx.state.ring, { onlyMoved: true, ms: 600 }); })
+            .then(function () { return updateBars(ctx, ctx.state.ring); })
+            .then(function () { ctx.log('C\'s 3 keys went to 2 different servers (D, A)', 'ok'); });
+        },
+      },
+      {
+        title: 'Replicas: next distinct physical servers',
+        say: 'Bring C back and keep 3 copies of k5. Walk clockwise: D3, A2, then D2 is skipped because D is already used, then C1. The preference list is [D, A, C]: three different machines.',
+        run: function (ctx) {
+          ctx.state.ring = VNODES.slice();
+          ['C1', 'C2', 'C3'].forEach(function (id) { ctx.state.vEls[id].setAttribute('opacity', 1); });
+          ctx.log('C rejoins. Place 3 replicas of k5 (167°)', 'info');
+          var s = sorted(ctx.state.ring);
+          var i = ownerIndex(167, s), taken = [], from = 167, chain = Promise.resolve();
+          for (var steps = 0; taken.length < 3 && steps < s.length; steps++, i = (i + 1) % s.length) {
+            (function (pt, start, skip) {
+              chain = chain.then(function () {
+                return ctx.packet(arcPoints(start, pt.pos, R + 18), { ms: 500, cls: skip ? 'bad' : 'ok', label: skip ? 'skip' : '' }).then(function () {
+                  if (skip) { ctx.log(pt.id + ' skipped: ' + physical(pt) + ' already holds a copy', 'warn'); return; }
+                  var p = xy(pt.pos, R + 18);
+                  ctx.el('circle', { cx: p[0], cy: p[1], r: 7, class: 'dot ok' });
+                  ctx.log('replica on ' + pt.id + ' → server ' + physical(pt), 'ok');
+                });
+              });
+            })(s[i], from, taken.indexOf(physical(s[i])) >= 0);
+            if (taken.indexOf(physical(s[i])) < 0) taken.push(physical(s[i]));
+            from = s[i].pos;
+          }
+          return chain.then(function () {
+            ctx.state.caption.textContent = 'preference list(k5) = [' + taken.join(', ') + ']';
+            ctx.log('Preference list for k5: [' + taken.join(', ') + ']. Quorum W=2, R=2 runs on it.', 'info');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: route any key on the ring as it is now ----
+  function hashDeg(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13;
+    return (h >>> 0) % 360;
+  }
+  var out = document.getElementById('try-out');
+  document.getElementById('try-route').addEventListener('click', function () {
+    var ctx = labHandle.ctx;
+    var ring = ctx.state.ring || [];
+    if (!ring.length) { out.textContent = 'No servers on the ring yet. Step to step 3 first.'; return; }
+    var key = (document.getElementById('try-key').value || 'key').trim().slice(0, 24) || 'key';
+    var pos = hashDeg(key);
+    var o = owner(pos, ring);
+    out.textContent = key + ' → hash ' + pos + '° → owner ' + o.id + ' (server ' + physical(o) + ')';
+    var p = xy(pos, R - 12);
+    var mark = ctx.el('circle', { cx: p[0], cy: p[1], r: 5, class: 'dot warn' });
+    ctx.log('try: ' + key + ' at ' + pos + '° → ' + o.id, 'info');
+    ctx.packet(arcPoints(pos, o.pos, R - 12), { ms: 700, cls: 'warn' }).then(function () { return ctx.fade(mark, 0, 600); }).then(function () { mark.remove(); });
+  });
+
+  // ---- Try it: vnode slider on a real 32-bit ring ----
+  function h32(str) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+    return h >>> 0;
+  }
+  var slider = document.getElementById('v-slider');
+  var barsBox = document.getElementById('v-bars');
+  var stat = document.getElementById('v-stat');
+  var NODES = ['A', 'B', 'C'];
+  var rows = {};
+  NODES.forEach(function (n) {
+    var row = Kit.html('div', { class: 'vbar' }, barsBox);
+    Kit.html('span', { text: n }, row);
+    var track = Kit.html('div', { class: 'track' }, row);
+    var fill = Kit.html('div', { class: 'fill' }, track);
+    Kit.html('div', { class: 'ideal', style: 'left: 33.3%' }, track);
+    var val = Kit.html('span', { text: '' }, row);
+    rows[n] = { fill: fill, val: val };
+  });
+  function shares(v) {
+    var pts = [];
+    NODES.forEach(function (n) { for (var i = 0; i < v; i++) pts.push({ pos: h32(n + '#' + i), node: n }); });
+    pts.sort(function (a, b) { return a.pos - b.pos; });
+    var own = { A: 0, B: 0, C: 0 }, SPACE = 4294967296;
+    for (var i = 0; i < pts.length; i++) {
+      var prev = i === 0 ? pts[pts.length - 1].pos - SPACE : pts[i - 1].pos;
+      own[pts[i].node] += (pts[i].pos - prev) / SPACE; // arc (prev, this] belongs to this point
+    }
+    return own;
+  }
+  function renderV() {
+    var v = parseInt(slider.value, 10) || 1;
+    document.getElementById('v-n').textContent = v;
+    var s = shares(v), max = 0, min = 1;
+    NODES.forEach(function (n) {
+      rows[n].fill.style.width = (s[n] * 100).toFixed(1) + '%';
+      rows[n].val.textContent = (s[n] * 100).toFixed(1) + '%';
+      max = Math.max(max, s[n]); min = Math.min(min, s[n]);
+    });
+    stat.textContent = 'busiest ' + (max * 3).toFixed(2) + '× fair share · idlest ' + (min * 3).toFixed(2) + '×';
+  }
+  slider.addEventListener('input', renderV);
+  renderV();
+})();
+</script>
+</body>
+</html>

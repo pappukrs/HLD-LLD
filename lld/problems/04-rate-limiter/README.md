@@ -120,6 +120,6 @@ Two separate questions, two separate places:
 
 ## Concepts used
 
-- [Strategy](../../concepts/patterns/p10-strategy.md) · [Factory](../../concepts/patterns/p02-factory.md) · [Concurrency and race conditions in Node](../../concepts/06-concurrency-in-node.md) · [SOLID](../../concepts/02-solid.md)
-- HLD links: [Rate limiting](../../../hld/concepts/23-rate-limiting.md) · [Distributed Rate Limiter](../../../hld/problems/02-rate-limiter/) · [Rate limiter algorithms (code)](../../../hld/code/02-rate-limiter-algorithms/)
-- Visuals: [Rate limiting algorithms](../../../visuals/v09-rate-limiting.html) · [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy](../../4-behavioral/L20-strategy/README.md) · [Factory](../../2-creational/L09-factory-method/README.md) · [Concurrency and race conditions in Node](../../5-machine-coding/L32-concurrency-in-node/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md)
+- HLD links: [Rate limiting](../../../hld/5-reliability/H26-rate-limiting/README.md) · [Distributed Rate Limiter](../../../hld/case-studies/02-rate-limiter) · [Rate limiter algorithms (code)](../../../hld/5-reliability/H26-rate-limiting/lab-rate-limiters)
+- Visuals: [Rate limiting algorithms](../../../hld/5-reliability/H26-rate-limiting/visual.html) · [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

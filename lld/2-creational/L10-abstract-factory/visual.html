@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L10 Abstract Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .stage .fam-a { stroke: var(--accent) !important; }
+  .stage .fam-b { stroke: var(--signal) !important; }
+  .stage .fam-f { stroke: var(--muted) !important; stroke-dasharray: 4 3; }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L10 · Creational</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Abstract Factory</h1>
+    <p class="lede">A payment provider is not one object. It is a client, a webhook verifier and a refund API that only work together. One factory per provider (a "kit") creates the whole family, so you can never mix provider A's client with provider B's verifier.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Provider kits creating matching families of payment objects"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <button class="btn" type="button" data-kit="0">Use RazorpayKit</button>
+        <button class="btn" type="button" data-kit="1">Use StripeKit</button>
+        <button class="btn" type="button" data-kit="2">Use FakeKit</button>
+        <span id="try-out">Run to step 4 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Razorpay family</span>
+        <span><i style="background: var(--signal)"></i>Stripe family / calls</span>
+        <span><i style="background: var(--muted)"></i>Fake family (tests)</span>
+        <span><i style="background: var(--bad)"></i>Mixed family / broken</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface ProviderKit {</span><span class="ln" data-l="2">  createClient(): PaymentClient;</span><span class="ln" data-l="3">  createWebhookVerifier(): WebhookVerifier;</span><span class="ln" data-l="4">  createRefunder(): Refunder;</span><span class="ln" data-l="5">}</span><span class="ln" data-l="6">class RazorpayKit implements ProviderKit {</span><span class="ln" data-l="7">  createClient() { return new RazorpayClient(this.keys); }</span><span class="ln" data-l="8">  createWebhookVerifier() { return new RazorpayVerifier(this.secret); }</span><span class="ln" data-l="9">  createRefunder() { return new RazorpayRefunder(this.keys); }</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">const kits: Record&lt;Provider, () =&gt; ProviderKit&gt; = { razorpay, stripe, fake };</span><span class="ln" data-l="12">const svc = new PaymentService(kits[env.PROVIDER]());</span><span class="ln" data-l="13">class PaymentService {</span><span class="ln" data-l="14">  constructor(private kit: ProviderKit) {}</span><span class="ln" data-l="15">  charge(o: Order) { return this.kit.createClient().charge(o); }</span><span class="ln" data-l="16">  onWebhook(body: string, sig: string) {</span><span class="ln" data-l="17">    return this.kit.createWebhookVerifier().verify(body, sig); }</span><span class="ln" data-l="18">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each payment provider has a client, a webhook verifier and a refund API that only work together. I define a <code>ProviderKit</code> interface with one create method per product, and one kit per provider. The composition root picks the kit from config and injects it, so the service can never mix provider A's client with provider B's verifier. Tests inject a <code>FakeKit</code>. The cost: adding a new product type means editing every kit."</p>
+    </div>
+    <div class="note wide">
+      <h3>Factory Method vs Abstract Factory vs Builder</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Simple factory / Factory Method (L09)</th><th>Abstract Factory</th><th>Builder (L11)</th></tr></thead>
+          <tbody>
+            <tr><td>Creates</td><td>One product</td><td>A family of related products</td><td>One complex product, step by step</td></tr>
+            <tr><td>Main guarantee</td><td>Callers never call <code>new</code> on concrete classes</td><td>Products always come from the same family</td><td>The object is valid when built</td></tr>
+            <tr><td>Switch families</td><td>n/a</td><td>Swap one kit object</td><td>n/a</td></tr>
+            <tr><td>Easy to add</td><td>A new type (one class + one entry)</td><td>A new family (one new kit)</td><td>A new optional field</td></tr>
+            <tr><td>Hard to add</td><td>Nothing much</td><td>A new product kind (edit every kit)</td><td>Nothing much</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>What bug does Abstract Factory prevent that two separate factories do not?</summary><div>Mixing families. With two independent factories driven by two config values, you can end up with a Stripe client and a Razorpay webhook verifier. Every webhook then fails signature checks. One kit creates all products from the same family.</div></details>
+      <details class="qa"><summary>You need to add <code>createPayoutApi()</code>. What changes?</summary><div>The <code>ProviderKit</code> interface and every concrete kit (Razorpay, Stripe, Fake). That is the known weakness: adding a new family is easy, adding a new product kind is not.</div></details>
+      <details class="qa"><summary>Is a NestJS module with <code>useClass</code> chosen by env an abstract factory?</summary><div>Close in spirit. A dynamic module that registers a whole set of matching providers (client, verifier, refunder) for one provider from config gives the same "one family at a time" guarantee.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var KITS = [
+    { id: 'rzp', name: 'RazorpayKit', short: 'Razorpay', fam: 'fam-a', y: 270 },
+    { id: 'stp', name: 'StripeKit', short: 'Stripe', fam: 'fam-b', y: 335 },
+    { id: 'fake', name: 'FakeKit', short: 'Fake', fam: 'fam-f', y: 400 },
+  ];
+  var PRODUCTS = ['Client', 'Verifier', 'Refunder'];
+  var COLX = [210, 390, 570], CW = 170, RH = 46;
+  var SLOTX = 545, SLOTW = 195, SLOTY = [28, 84, 140];
+  var IX = 255, IY = 28, IW = 255, IH = 112;
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+  function range(a, b) { var r = []; for (var i = a; i <= b; i++) r.push(i); return r; }
+
+  function box(ctx, parent, x, y, w, h, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: x + 10, y: y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: x + 10, y: y + 36 + i * 15, class: 'mono small', text: l }, g);
+    });
+    return g;
+  }
+
+  function setSlot(ctx, i, kit, note, bad) {
+    var sl = ctx.state.slots[i];
+    sl.t.textContent = (kit ? kit.short : '—') + PRODUCTS[i];
+    sl.lines[0].textContent = note || '';
+    sl.r.setAttribute('class', 'box ' + (bad ? 'bad' : kit ? kit.fam : ''));
+    sl.lines[0].setAttribute('class', 'mono small ' + (bad ? 'fill-bad' : 'muted'));
+    ctx.flash(sl.r);
+  }
+
+  function pick(ctx, ki) {
+    var s = ctx.state, k = KITS[ki];
+    KITS.forEach(function (o, j) { s.rows[j].label.r.setAttribute('class', 'box ' + (j === ki ? o.fam : '')); });
+    s.cfg.lines[0].textContent = 'PROVIDER=' + (ki === 2 ? 'fake (tests)' : k.short.toLowerCase());
+    s.svc.lines[0].textContent = 'kit: ' + k.name;
+    s.current = ki;
+    ctx.flash(s.cfg.r);
+    ctx.log('main.ts: new PaymentService(new ' + k.name + '())', 'info');
+    return ctx.packet([[110, 80], [110, 100], [20, 100], [20, k.y + 23], [30, k.y + 23]], { ms: 500, label: 'config' })
+      .then(function () { ctx.flash(s.rows[ki].label.r); return ctx.packet([[100, k.y], [100, 210], [110, 196]], { ms: 450, cls: 'accent', label: 'kit' }); })
+      .then(function () { ctx.flash(s.svc.r); });
+  }
+
+  // Service asks the kit for product i; the product comes from the chosen row.
+  function make(ctx, i, note, label) {
+    var s = ctx.state, k = KITS[s.current];
+    return ctx.packet([[200, 160], [IX, 60 + i * 22]], { ms: 400, label: label })
+      .then(function () {
+        ctx.flash(s.iface.r);
+        return ctx.packet([[IX + IW / 2, IY + IH], [COLX[i] + CW / 2, k.y]], { ms: 450 });
+      })
+      .then(function () {
+        ctx.flash(s.rows[s.current].cells[i].r);
+        return ctx.packet([[COLX[i] + CW, k.y + 10], [SLOTX + SLOTW / 2, SLOTY[i] + RH]], { ms: 500, cls: 'accent' });
+      })
+      .then(function () { setSlot(ctx, i, k, note); ctx.log(k.name + '.create' + PRODUCTS[i] + '() → ' + k.short + PRODUCTS[i], 'ok'); });
+  }
+
+  function swapAll(ctx, ki) {
+    var k = KITS[ki];
+    return pick(ctx, ki).then(function () {
+      return Promise.all(PRODUCTS.map(function (p, i) {
+        return ctx.packet([[COLX[i] + CW, k.y + 10], [SLOTX + SLOTW / 2, SLOTY[i] + RH]], { ms: 550, cls: 'accent' });
+      }));
+    }).then(function () {
+      PRODUCTS.forEach(function (p, i) { setSlot(ctx, i, k, ki === 2 ? 'in-memory, no network' : 'same family'); });
+      ctx.log('all 3 products switched together to ' + k.short, 'ok');
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A provider is a family, not one object',
+      say: 'To take payments the service needs a client (charge), a webhook verifier (check signatures) and a refunder. Each provider ships all three, and they only work with each other.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      s.cfg = box(ctx, null, 20, 28, 180, 52, '.env', ['PROVIDER=?'], '');
+      s.svc = box(ctx, null, 20, 110, 180, 92, 'PaymentService', ['kit: ?', 'charge(order)', 'onWebhook(body, sig)'], 'signal');
+      var ig = ctx.group({ opacity: 0 });
+      s.ifaceG = ig;
+      s.iface = box(ctx, ig, IX, IY, IW, IH, '«interface» ProviderKit', ['createClient(): PaymentClient', 'createWebhookVerifier()', 'createRefunder(): Refunder'], 'accent');
+      s.iface.lines.forEach(function (l, i) { l.setAttribute('y', IY + 40 + i * 22); l.setAttribute('class', 'mono'); });
+      ctx.el('text', { x: SLOTX, y: 20, class: 'mono small muted', text: 'objects the service is using' });
+      s.slots = SLOTY.map(function (y, i) {
+        return box(ctx, null, SLOTX, y, SLOTW, RH, '—' + PRODUCTS[i], [''], '');
+      });
+      ctx.el('line', { x1: 10, y1: 222, x2: 750, y2: 222, class: 'divider' });
+      s.gridG = ctx.group({ opacity: 0 });
+      PRODUCTS.forEach(function (p, i) {
+        ctx.el('text', { x: COLX[i] + CW / 2, y: 264, 'text-anchor': 'middle', class: 'mono small muted', text: 'create' + p + '()' }, s.gridG);
+      });
+      ctx.el('text', { x: 20, y: 242, class: 'title', text: 'Concrete kits (one row = one family)' }, s.gridG);
+      s.rows = KITS.map(function (k, ki) {
+        var g = ctx.group({ opacity: ki === 2 ? 0 : 1 }, s.gridG);
+        var row = { g: g };
+        row.label = box(ctx, g, 30, k.y, 165, RH, k.name, ['implements ProviderKit'], '');
+        row.cells = PRODUCTS.map(function (p, i) { return box(ctx, g, COLX[i], k.y, CW, RH, k.short + p, [p === 'Verifier' ? (ki === 2 ? 'accepts "valid"' : ki ? 'Stripe-Signature' : 'X-Razorpay-Signature') : ''], k.fam); });
+        return row;
+      });
+      s.current = 0;
+    },
+    steps: [
+      {
+        title: 'Before: two factories, mixed by mistake',
+        say: 'The client comes from <code>PAYMENT_PROVIDER=stripe</code>, the verifier from an older <code>WEBHOOK_PROVIDER=razorpay</code>. Charges work, but every webhook fails its signature check, so orders stay "pending".',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[200, 140], [SLOTX, 51]], { ms: 450, label: 'clientFactory' }).then(function () {
+            setSlot(ctx, 0, KITS[1], 'from PAYMENT_PROVIDER');
+            return ctx.packet([[200, 170], [SLOTX, 107]], { ms: 450, label: 'verifierFactory' });
+          }).then(function () {
+            setSlot(ctx, 1, KITS[0], 'expects Razorpay signature', true);
+            ctx.log('charge via StripeClient: ok', 'ok');
+            return ctx.packet([[0, 190], [20, 190]], { ms: 300, cls: 'bad', label: 'Stripe webhook' });
+          }).then(function () {
+            ctx.flash(s.slots[1].r);
+            ctx.log('RazorpayVerifier.verify(stripe webhook) → invalid signature', 'bad');
+            ctx.log('100% of webhooks rejected; orders stuck in PENDING', 'bad');
+          });
+        },
+      },
+      {
+        title: 'One interface creates the whole family',
+        say: '<code>ProviderKit</code> has one create method per product. The service depends only on this interface and the product interfaces, never on <code>StripeClient</code> or <code>RazorpayVerifier</code>.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl(range(1, 5));
+          [0, 1, 2].forEach(function (i) { setSlot(ctx, i, null, ''); s.slots[i].t.textContent = '—' + PRODUCTS[i]; });
+          return ctx.fade(s.ifaceG, 1, 450);
+        },
+      },
+      {
+        title: 'One concrete kit per provider',
+        say: '<code>RazorpayKit</code> only returns Razorpay objects. <code>StripeKit</code> only returns Stripe objects. A row is a family; the matching is fixed inside the kit, not left to config.',
+        run: function (ctx) {
+          hl(range(6, 10));
+          ctx.log('RazorpayKit, StripeKit implement ProviderKit', 'info');
+          return ctx.fade(ctx.state.gridG, 1, 500);
+        },
+      },
+      {
+        title: 'The composition root picks ONE kit',
+        say: 'At startup, <code>main.ts</code> reads one config value and injects one kit into <code>PaymentService</code>. There is now only one decision, so there is nothing to get out of sync.',
+        run: function (ctx) { hl([11, 12, 14]); return pick(ctx, 0).then(function () { ctx.state.ready = true; }); },
+      },
+      {
+        title: 'charge(): the kit makes the client',
+        say: 'The service calls <code>kit.createClient().charge(order)</code>. It does not know which provider it is talking to.',
+        run: function (ctx) {
+          hl([15]);
+          return make(ctx, 0, 'charge ₹499 → pay_9xQ', 'createClient()').then(function () { ctx.log('charge ok: pay_9xQ', 'ok'); });
+        },
+      },
+      {
+        title: 'A webhook arrives: the verifier always matches',
+        say: 'The provider calls our webhook. <code>kit.createWebhookVerifier()</code> comes from the same kit as the client, so the HMAC check uses the right header and secret.',
+        run: function (ctx) {
+          hl([16, 17]);
+          ctx.log('POST /webhooks/payments (X-Razorpay-Signature)', 'info');
+          return ctx.packet([[0, 190], [20, 190]], { ms: 300, label: 'webhook' })
+            .then(function () { return make(ctx, 1, 'HMAC-SHA256 ok', 'createWebhookVerifier()'); })
+            .then(function () { return make(ctx, 2, 'ready for refunds', 'createRefunder()'); })
+            .then(function () { ctx.log('order 81 → PAID', 'ok'); });
+        },
+      },
+      {
+        title: 'Switch provider: one value, three products',
+        say: 'Ops moves traffic to Stripe. Change one config value; the root injects <code>StripeKit</code>, and client, verifier and refunder all switch together. The service code does not change.',
+        run: function (ctx) { hl([11, 12]); return swapAll(ctx, 1); },
+      },
+      {
+        title: 'Tests inject a FakeKit',
+        say: 'A third family: in-memory client, a verifier that accepts a test signature, a refunder that records calls. Unit tests run with no network and no keys.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([14]);
+          return ctx.fade(s.rows[2].g, 1, 400).then(function () { return swapAll(ctx, 2); });
+        },
+      },
+      {
+        title: 'The cost: a new product kind touches every kit',
+        say: 'Product asks for payouts. Add <code>createPayoutApi()</code> to the interface, and now Razorpay, Stripe and Fake kits must all change. New families are cheap; new product kinds are not.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([1, 5]);
+          s.iface.r.setAttribute('height', IH + 22);
+          var t = ctx.el('text', { x: IX + 10, y: IY + 106 + 22, class: 'mono fill-warn', text: '+ createPayoutApi()' }, s.ifaceG);
+          ctx.flash(t);
+          return ctx.tween(400, function () {}).then(function () {
+            s.rows.forEach(function (r) { r.label.r.setAttribute('class', 'box bad'); ctx.flash(r.label.r); r.label.lines[0].textContent = 'needs + createPayout…'; });
+            ctx.log('interface changed → 3 kits to edit (OCP cost)', 'warn');
+          });
+        },
+      },
+    ],
+  });
+
+  var out = document.getElementById('try-out');
+  Array.prototype.forEach.call(document.querySelectorAll('[data-kit]'), function (b) {
+    b.addEventListener('click', function () {
+      var ctx = lab.ctx;
+      if (!ctx.state.ready) { out.textContent = 'Run to step 4 first (a kit must be injected).'; return; }
+      var ki = parseInt(b.getAttribute('data-kit'), 10);
+      if (ki === 2) ctx.state.rows[2].g.setAttribute('opacity', 1);
+      swapAll(ctx, ki).then(function () { out.textContent = KITS[ki].name + ': all three products come from one family.'; });
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H37 Data at scale</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .calc { border-top: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .calc h3 { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  .calc .inputs { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+  .calc label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .calc input { font: 13px var(--font-mono); width: 110px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .calc .out { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 560px) { .calc .out { grid-template-columns: minmax(0, 1fr); } }
+  .calc .card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .calc .card b { display: block; font-family: var(--font-display); font-size: 14px; margin-bottom: 2px; }
+  .calc .card .num { font-family: var(--font-mono); color: var(--accent); }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H37 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Data at scale: fan-out, hot keys, counters</h1>
+    <p class="lede">Top: a home feed built by push, by pull, and by a hybrid that keeps celebrities off the write path. Bottom: one viral post's like counter melts a cache node until the key is split, while the like table stays the truth.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Feed fan-out with timelines, and a hot counter key split across cache nodes"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="calc" id="calc">
+        <h3>Try it: cost of one post, one feed open, one hot key</h3>
+        <div class="inputs">
+          <label>Author followers <input id="c-f" type="number" min="0" step="1" value="300"></label>
+          <label>Reader follows <input id="c-k" type="number" min="1" step="1" value="200"></label>
+          <label>Celebrity limit <input id="c-t" type="number" min="1" step="1" value="10000"></label>
+          <label>Likes/s on one post <input id="c-l" type="number" min="0" step="1000" value="50000"></label>
+        </div>
+        <div class="out">
+          <div class="card" id="o-push"></div>
+          <div class="card" id="o-pull"></div>
+          <div class="card" id="o-hyb"></div>
+          <div class="card" id="o-key"></div>
+        </div>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Write path</span>
+        <span><i style="background: var(--accent)"></i>Read path / pushed id</span>
+        <span><i style="background: var(--ok)"></i>Delivered / balanced</span>
+        <span><i style="background: var(--bad)"></i>Expensive / hot</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Reads are about 100 times writes, so I fan out on write: workers push post ids into each active follower's Redis list, capped at 800 ids. Authors above about 100k followers are not pushed; their recent posts are merged at read time. For a viral post, likes go to 16 split counter keys and reads sum them, with a 1-second local cache. The likes table with a unique (user_id, post_id) stays the source of truth."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code">// hybrid fan-out
+if (author.followers &gt;= CELEB) return;   // pull later
+for (f of activeFollowers) {
+  LPUSH tl:{f} postId; LTRIM tl:{f} 0 799
+}
+// split hot counter
+INCR likes:{post}#{rand(0..15)}
+total = sum(MGET likes:{post}#0..#15)</pre>
+    </div>
+    <div class="note wide">
+      <h3>Push vs pull vs hybrid, and hot-key fixes</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Push</th><th>Pull</th><th>Hybrid</th><th>Split key / buffer</th></tr></thead>
+          <tbody>
+            <tr><td>Write cost</td><td>One per follower</td><td>One row</td><td>Push normal, skip celebrities</td><td>One INCR on a random sub-key, or 1 flush/s</td></tr>
+            <tr><td>Read cost</td><td>One list read</td><td>One query per followee</td><td>List + a few celebrity queries</td><td>Sum N sub-keys (cache 1 s)</td></tr>
+            <tr><td>Weak spot</td><td>Celebrity posts</td><td>Slow feeds</td><td>Two code paths</td><td>Reads touch N keys; slight delay if buffered</td></tr>
+            <tr><td>Used by</td><td>Small apps</td><td>Small graphs</td><td>Twitter, Instagram</td><td>Likes, views, flash-sale stock</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why does adding Redis nodes not fix one hot key?</summary><div>A key hashes to one slot on one node. New nodes take other keys. Split the key into sub-keys, replicate it for reads, or cache it locally.</div></details>
+      <details class="qa"><summary>Why store ids, not post bodies, in timelines?</summary><div>Memory (6.4 KB per user for 800 ids) and one place to edit or delete. Bodies come from a post cache at read time.</div></details>
+      <details class="qa"><summary>A pushed post is deleted. Do you clean 2,000 lists?</summary><div>No. Mark it deleted in the posts store; hydration drops it. Clean lists lazily.</div></details>
+      <details class="qa"><summary>Why keep a likes table if you have a counter?</summary><div>The unique (user_id, post_id) row stops double likes and lets a job rebuild the count. The counter is a derived cache.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>One Redis key: ~100k simple ops/s on one core</li>
+        <li>DynamoDB partition: 3,000 RCU, 1,000 WCU</li>
+        <li>800 ids x 8 B = 6.4 KB per timeline; 100M users ≈ 640 GB</li>
+        <li>Celebrity limit: about 10k to 100k followers</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var USERS = ['Bob', 'Cara', 'Dan'];
+  var SLOT0 = 520, SLOTW = 46;
+  var NODES = [190, 330, 470, 610];
+  function rowY(i) { return 46 + i * 46; }
+  function fmt(n) { return Math.round(n).toLocaleString('en-US'); }
+  function banner(ctx, text, kind) { ctx.state.banner.textContent = text; ctx.state.banner.setAttribute('class', 'title' + (kind ? ' fill-' + kind : '')); }
+
+  function box(ctx, x, y, w, h, title, sub) {
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box' });
+    ctx.el('text', { x: x + 10, y: y + 18, class: 'small', text: title, style: 'font-weight:600' });
+    var s = ctx.el('text', { x: x + 10, y: y + 34, class: 'mono small muted', text: sub || '' });
+    return { r: r, s: s };
+  }
+  function renderRow(ctx, u) {
+    var items = ctx.state.tl[u];
+    ctx.state.slots[u].forEach(function (sl, j) {
+      var it = items[j];
+      sl.t.textContent = it ? it.id : '';
+      sl.t.setAttribute('class', 'mono small' + (it && it.cls ? ' ' + it.cls : ''));
+      sl.r.setAttribute('class', 'box' + (it ? (it.cls === 'fill-bad' ? ' bad' : it.cls === 'fill-ok' ? ' ok' : ' accent') : ''));
+    });
+  }
+  function pushTo(ctx, u, id, cls) { ctx.state.tl[u].unshift({ id: id, cls: cls }); ctx.state.tl[u] = ctx.state.tl[u].slice(0, 4); renderRow(ctx, u); }
+  function workToRow(i) { return [[410, 64], [440, 64], [440, rowY(i) + 14], [SLOT0, rowY(i) + 14]]; }
+  function setBar(ctx, i, frac, cls) {
+    var b = ctx.state.bars[i];
+    b.bar.setAttribute('class', cls);
+    b.txt.textContent = fmt(frac * 50000) + ' ops/s';
+    return ctx.animate(b.bar, { width: Math.max(2, 100 * Math.min(1, frac)) }, 450);
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three readers, two authors, one viral post',
+      say: 'Bob, Cara and Dan follow Alice (300 followers) and Star (50M followers). Each reader has a timeline in Redis: a list of post ids. Below, four cache nodes will hold the like counter of Star\'s viral post.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      s.tl = { Bob: [], Cara: [], Dan: [] }; s.slots = {};
+      ctx.el('text', { x: 16, y: 20, class: 'title', text: 'Feed fan-out' });
+      s.alice = box(ctx, 16, 34, 120, 42, 'Alice', '300 followers');
+      s.star = box(ctx, 16, 92, 120, 42, 'Star', '50M followers');
+      s.db = box(ctx, 160, 60, 110, 48, 'Posts DB', 'source of posts');
+      s.work = box(ctx, 300, 40, 110, 48, 'Fan-out workers', 'via queue');
+      s.feed = box(ctx, 300, 130, 110, 48, 'Feed service', 'idle');
+      ctx.el('line', { x1: 136, y1: 55, x2: 160, y2: 80, class: 'wire' });
+      ctx.el('line', { x1: 136, y1: 113, x2: 160, y2: 92, class: 'wire' });
+      ctx.el('line', { x1: 270, y1: 76, x2: 300, y2: 64, class: 'wire' });
+      ctx.el('line', { x1: 270, y1: 96, x2: 300, y2: 150, class: 'wire dashed' });
+      USERS.forEach(function (u, i) {
+        var y = rowY(i);
+        s.slots[u] = [];
+        s['lbl' + u] = ctx.el('text', { x: 456, y: y + 18, class: 'small', text: 'tl:' + u.toLowerCase() });
+        for (var j = 0; j < 4; j++) {
+          var r = ctx.el('rect', { x: SLOT0 + j * SLOTW, y: y, width: SLOTW - 4, height: 28, rx: 4, class: 'box' });
+          var t = ctx.el('text', { x: SLOT0 + j * SLOTW + (SLOTW - 4) / 2, y: y + 18, 'text-anchor': 'middle', class: 'mono small', text: '' });
+          s.slots[u].push({ r: r, t: t });
+        }
+      });
+      s.cost = ctx.el('text', { x: 16, y: 206, class: 'mono small', text: '' });
+      s.feedOut = ctx.el('text', { x: 456, y: 206, class: 'mono small', text: '' });
+      ctx.el('line', { x1: 10, y1: 222, x2: 750, y2: 222, class: 'wire dashed' });
+      // hot key area
+      ctx.el('text', { x: 16, y: 246, class: 'title', text: 'Hot key: likes on post s1' });
+      s.viewers = box(ctx, 16, 268, 140, 48, 'Viewers', '50k likes/s');
+      s.bars = NODES.map(function (x, i) {
+        ctx.el('rect', { x: x, y: 260, width: 124, height: 76, rx: 8, class: 'box' });
+        ctx.el('text', { x: x + 10, y: 278, class: 'small', text: 'cache node ' + i, style: 'font-weight:600' });
+        var keys = ctx.el('text', { x: x + 10, y: 294, class: 'mono small muted', text: '' });
+        ctx.el('rect', { x: x + 10, y: 302, width: 100, height: 10, rx: 3, class: 'box' });
+        var bar = ctx.el('rect', { x: x + 10, y: 302, width: 2, height: 10, rx: 3, class: 'fill-ok' });
+        var txt = ctx.el('text', { x: x + 10, y: 328, class: 'mono small muted', text: '0 ops/s' });
+        return { keys: keys, bar: bar, txt: txt };
+      });
+      s.table = box(ctx, 16, 350, 200, 60, 'likes table', 'UNIQUE(user_id, post_id)');
+      s.tableRows = ctx.el('text', { x: 26, y: 400, class: 'mono small muted', text: '' });
+      s.readOut = ctx.el('text', { x: 240, y: 360, class: 'mono small', text: '' });
+      s.readOut2 = ctx.el('text', { x: 240, y: 378, class: 'mono small muted', text: '' });
+      s.readOut3 = ctx.el('text', { x: 240, y: 396, class: 'mono small muted', text: '' });
+      s.banner = ctx.el('text', { x: 380, y: 444, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'Push: Alice posts, ids go to every follower',
+        say: 'Alice posts a1. It is saved once in the Posts DB, then a queue hands it to workers that <code>LPUSH</code> the id into each follower\'s timeline. One write per follower, done in the background.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.alice.r.setAttribute('class', 'box signal');
+          return ctx.packet([[136, 55], [160, 80]], { label: 'a1' }).then(function () {
+            return ctx.packet([[270, 76], [300, 64]]);
+          }).then(function () {
+            return Promise.all(USERS.map(function (u, i) {
+              return ctx.packet(workToRow(i), { cls: 'accent', ms: 700 }).then(function () { pushTo(ctx, u, 'a1'); });
+            }));
+          }).then(function () {
+            s.cost.textContent = 'a1: 1 row + 3 LPUSH (one per follower)';
+            ctx.log('Alice posts a1 -> 3 timeline writes', 'info');
+          });
+        },
+      },
+      {
+        title: 'Reading is one list lookup',
+        say: 'Bob opens the app. The feed service runs <code>LRANGE tl:bob 0 19</code> and multi-gets the post bodies. No joins, no merging. Reads are about 100 times more common than posts, so this is the path to keep cheap.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.feed.s.textContent = 'LRANGE tl:bob';
+          return ctx.packet([[410, 154], [440, 154], [440, rowY(0) + 14], [SLOT0, rowY(0) + 14]], { cls: 'accent', ms: 600 }).then(function () {
+            return ctx.packet([[SLOT0, rowY(0) + 14], [440, rowY(0) + 14], [440, 154], [410, 154]], { cls: 'ok', ms: 600 });
+          }).then(function () {
+            s.feedOut.textContent = 'Bob feed: a1  (1 read)';
+            s.feedOut.setAttribute('class', 'mono small fill-ok');
+            ctx.log('Bob feed = 1 list read', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The celebrity problem',
+        say: 'Star posts s1. Pure push means 50 million <code>LPUSH</code> writes for one post. Even at 500k writes a second, the last follower sees it after about 100 seconds, and the workers are busy for everyone else.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.star.r.setAttribute('class', 'box bad');
+          return ctx.packet([[136, 113], [160, 92]], { label: 's1', cls: 'bad' }).then(function () {
+            return ctx.packet([[270, 76], [300, 64]], { cls: 'bad' });
+          }).then(function () {
+            var waves = [];
+            for (var k = 0; k < 3; k++) {
+              waves.push(Promise.all(USERS.map(function (u, i) { return ctx.wait(k * 160).then(function () { return ctx.packet(workToRow(i), { cls: 'bad', ms: 500 }); }); })));
+            }
+            return Promise.all(waves);
+          }).then(function () {
+            USERS.forEach(function (u) { pushTo(ctx, u, 's1', 'fill-bad'); });
+            s.work.r.setAttribute('class', 'box bad');
+            s.work.s.textContent = 'backlog 50M writes';
+            s.cost.textContent = 's1: 50,000,000 LPUSH, ~100 s lag';
+            s.cost.setAttribute('class', 'mono small fill-bad');
+            ctx.log('Star posts s1 -> 50M writes, workers saturated', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Hybrid: do not push celebrities',
+        say: 'Accounts above a limit (say 100k followers) are not fanned out. We remove that path: s1 stays only in the Posts DB. The workers go back to normal.',
+        run: function (ctx) {
+          var s = ctx.state;
+          USERS.forEach(function (u) { s.tl[u] = s.tl[u].filter(function (it) { return it.id !== 's1'; }); renderRow(ctx, u); });
+          s.work.r.setAttribute('class', 'box'); s.work.s.textContent = 'via queue';
+          s.star.r.setAttribute('class', 'box signal'); s.star.s.textContent = '50M: celebrity, no push';
+          s.db.s.textContent = 'has s1 (Star)';
+          s.cost.textContent = 's1: 1 row, 0 LPUSH';
+          s.cost.setAttribute('class', 'mono small fill-ok');
+          ctx.flash(s.db.r);
+          ctx.log('Star is above the limit: s1 stored once, not pushed', 'ok');
+          return ctx.wait(400);
+        },
+      },
+      {
+        title: 'Read = cached list + pull celebrities, merge',
+        say: 'Bob opens the feed again. The service reads his list and, in parallel, the recent posts of the few celebrities he follows. It merges by time. Both the post path and the read path stay cheap.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.feed.s.textContent = 'list + pull Star';
+          return Promise.all([
+            ctx.packet([[410, 154], [440, 154], [440, rowY(0) + 14], [SLOT0, rowY(0) + 14]], { cls: 'accent', ms: 600 }),
+            ctx.packet([[270, 96], [300, 150]], { cls: 'accent', ms: 600, label: 's1' }),
+          ]).then(function () {
+            s.feedOut.textContent = 'Bob feed: s1, a1 (merged)';
+            ctx.log('Bob feed = LRANGE + Star recent posts, merged', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Skip inactive users',
+        say: 'Dan has not opened the app in 30 days. When Alice posts a2, the workers skip him: fewer writes and less memory. When Dan returns, his timeline is rebuilt once with a pull.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.lblDan.setAttribute('class', 'small fill-muted');
+          s.lblDan.textContent = 'tl:dan (idle)';
+          s.slots.Dan.forEach(function (sl) { sl.r.setAttribute('class', 'box dim'); });
+          return ctx.packet([[136, 55], [160, 80]], { label: 'a2' }).then(function () {
+            return ctx.packet([[270, 76], [300, 64]]);
+          }).then(function () {
+            return Promise.all([0, 1].map(function (i) { return ctx.packet(workToRow(i), { cls: 'accent', ms: 600 }).then(function () { pushTo(ctx, USERS[i], 'a2'); }); }));
+          }).then(function () {
+            s.cost.textContent = 'a2: 2 LPUSH (Dan skipped), lists capped at 800 ids';
+            s.cost.setAttribute('class', 'mono small');
+            ctx.log('a2 pushed to Bob, Cara; Dan inactive, skipped', 'info');
+          });
+        },
+      },
+      {
+        title: 'Hot key: every like hits one node',
+        say: 's1 goes viral: 50k likes a second, all <code>INCR likes:s1</code>. One key lives on one node. That node does all the work, near its single-core limit, while the other three are idle. Adding nodes does not help.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.bars[2].keys.textContent = 'likes:s1';
+          var ps = [];
+          for (var k = 0; k < 6; k++) ps.push(ctx.wait(k * 90).then(function () { return ctx.packet([[156, 292], [NODES[2] + 60, 292]], { cls: 'bad', ms: 500 }); }));
+          return Promise.all(ps).then(function () {
+            return setBar(ctx, 2, 1, 'fill-bad');
+          }).then(function () {
+            banner(ctx, 'One key = one node = one core', 'bad');
+            ctx.log('likes:s1 -> 50k ops/s on node 2, others idle', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Split the key into sub-keys',
+        say: 'Write to <code>likes:s1#0..#15</code>, picking one at random. The sub-keys hash to different nodes, so the load spreads. Each node now takes about a quarter.',
+        run: function (ctx) {
+          var s = ctx.state;
+          banner(ctx, '', '');
+          ['#0 #4 #8 #12', '#1 #5 #9 #13', '#2 #6 #10 #14', '#3 #7 #11 #15'].forEach(function (t, i) { s.bars[i].keys.textContent = 'likes:s1' + t.split(' ')[0] + '..'; });
+          var ps = NODES.map(function (x, i) { return ctx.packet([[156, 292], [x + 60, 292]], { cls: 'ok', ms: 550 }); });
+          return Promise.all(ps).then(function () {
+            return Promise.all([0, 1, 2, 3].map(function (i) { return setBar(ctx, i, 0.25, 'fill-ok'); }));
+          }).then(function () {
+            ctx.log('16 sub-keys -> ~12.5k ops/s per node', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Read: sum the shards, cache for a second',
+        say: 'To show the count, read all 16 sub-keys with one <code>MGET</code> per node and add them. Put a 1-second local cache in front so a million viewers do not each run that read.',
+        run: function (ctx) {
+          var s = ctx.state;
+          var ps = NODES.map(function (x) { return ctx.packet([[x + 60, 336], [x + 60, 350], [330, 350]], { cls: 'accent', ms: 500 }); });
+          return Promise.all(ps).then(function () {
+            s.readOut.textContent = 'likes(s1) = sum of 16 sub-keys = 1,204,331';
+            s.readOut.setAttribute('class', 'mono small fill-accent');
+            s.readOut2.textContent = 'local cache TTL 1 s -> 1 read/s per pod';
+            ctx.log('count = sum of 16 sub-keys, cached 1 s', 'info');
+          });
+        },
+      },
+      {
+        title: 'The like table is the truth',
+        say: 'u7 taps like twice. The second insert fails on the unique (user_id, post_id), so it is not counted. If the counter ever drifts (a lost flush, a bug), a job rebuilds it from the table.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[86, 316], [86, 350]], { label: 'u7 like' }).then(function () {
+            s.tableRows.textContent = '(u7, s1) inserted';
+            s.tableRows.setAttribute('class', 'mono small fill-ok');
+            return ctx.packet([[86, 316], [86, 350]], { cls: 'bad', label: 'u7 again' });
+          }).then(function () {
+            s.table.r.setAttribute('class', 'box bad'); ctx.flash(s.table.r);
+            s.tableRows.textContent = '(u7, s1) duplicate: rejected';
+            s.tableRows.setAttribute('class', 'mono small fill-bad');
+            s.readOut3.textContent = 'repair job: counter := COUNT(*) from likes';
+            s.readOut3.setAttribute('class', 'mono small fill-ok');
+            banner(ctx, 'Counter = cache; table = truth', 'ok');
+            ctx.log('duplicate like rejected by unique key', 'warn');
+            ctx.log('nightly repair recomputes counts from the table', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // Live calculator (outside the SVG, so it survives every reset).
+  var fIn = document.getElementById('c-f'), kIn = document.getElementById('c-k'), tIn = document.getElementById('c-t'), lIn = document.getElementById('c-l');
+  function n(v, d) { var x = parseFloat(v); return isFinite(x) && x >= 0 ? x : d; }
+  function calc() {
+    var F = n(fIn.value, 0), K = Math.max(1, n(kIn.value, 1)), T = Math.max(1, n(tIn.value, 1)), L = n(lIn.value, 0);
+    var celeb = F >= T;
+    var shards = Math.max(1, Math.ceil(L / 20000));
+    document.getElementById('o-push').innerHTML = '<b>Push</b>Post: <span class="num">' + fmt(F) + '</span> writes<br>Feed open: <span class="num">1</span> list read';
+    document.getElementById('o-pull').innerHTML = '<b>Pull</b>Post: <span class="num">1</span> write<br>Feed open: <span class="num">' + fmt(K) + '</span> queries + merge';
+    document.getElementById('o-hyb').innerHTML = '<b>Hybrid</b>' + (celeb
+      ? 'Celebrity: post = <span class="num">1</span> write; followers pull it at read time'
+      : 'Normal author: post = <span class="num">' + fmt(F) + '</span> writes; feed open = 1 list + celebrity queries');
+    document.getElementById('o-key').innerHTML = '<b>Hot key</b>' + (L <= 20000
+      ? 'One key is fine at <span class="num">' + fmt(L) + '</span>/s'
+      : 'Split into <span class="num">' + shards + '</span> sub-keys (~20k/s each, safe headroom); read sums ' + shards + ' keys');
+  }
+  [fIn, kIn, tIn, lIn].forEach(function (i) { i.addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

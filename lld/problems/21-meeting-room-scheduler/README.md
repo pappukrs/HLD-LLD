@@ -91,6 +91,6 @@ The internals are **your design**. The tests only use the API above.
 
 ## Concepts used
 
-- [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md) · [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md)
-- Related HLD: [Hotel Reservation](../../../hld/problems/23-hotel-booking/)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md) · [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- Related HLD: [Hotel Reservation](../../../hld/case-studies/23-hotel-booking)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

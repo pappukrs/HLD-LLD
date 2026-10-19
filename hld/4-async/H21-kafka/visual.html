@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H21 Kafka deep dive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage .cell { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+  .stage .cell.new { stroke: var(--signal); stroke-width: 2; }
+  .stage .cell.done { fill: var(--accent-soft); stroke: var(--ok); }
+  .stage .cell.dup { fill: var(--accent-soft); stroke: var(--bad); stroke-width: 2.5; }
+  .stage .cell.replay { fill: var(--accent-soft); stroke: var(--signal); stroke-width: 2.5; }
+  .try { display: grid; gap: 10px; }
+  .try label { display: grid; grid-template-columns: 190px 1fr 80px; gap: 8px; align-items: center; font-size: 14px; }
+  .try select, .try input { width: 100%; }
+  .try .out { font-family: var(--font-mono); font-size: 14px; padding: 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+  .try .out b.ok { color: var(--ok); } .try .out b.bad { color: var(--bad); } .try .out b.warn { color: var(--warn); }
+  @media (max-width: 560px) { .try label { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H21 · Async</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Kafka: partitions, consumer groups, offsets</h1>
+    <p class="lede">A topic is split into partitions: append-only logs. The key picks the partition, so one key stays in order. In a consumer group each partition has exactly one reader, and the group's position is a committed offset. Reading never deletes.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A producer, a topic with three partition logs, and a consumer group with up to four consumers"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>New message</span>
+        <span><i style="background: var(--ok)"></i>Processed</span>
+        <span><i style="background: var(--accent)"></i>Partition → consumer</span>
+        <span><i style="background: var(--bad)"></i>Processed twice</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>Try it: durability and sizing</h3>
+      <div class="try">
+        <label>Replication factor <input type="range" id="t-rf" min="1" max="5" value="3"><span id="t-rf-v">3</span></label>
+        <label>min.insync.replicas <input type="range" id="t-isr" min="1" max="5" value="2"><span id="t-isr-v">2</span></label>
+        <label>Producer acks <select id="t-acks"><option value="0">0</option><option value="1">1</option><option value="all" selected>all</option></select><span></span></label>
+        <label>Brokers down (of this partition) <input type="range" id="t-down" min="0" max="4" value="1"><span id="t-down-v">1</span></label>
+        <div class="out" id="t-out1"></div>
+        <label>Target throughput (MB/s) <input type="range" id="t-tp" min="5" max="500" step="5" value="100"><span id="t-tp-v">100</span></label>
+        <label>One consumer handles (MB/s) <input type="range" id="t-cr" min="1" max="50" value="5"><span id="t-cr-v">5</span></label>
+        <div class="out" id="t-out2"></div>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Order events go to a topic keyed by order_id, so all events of one order land in one partition and stay in order. Each downstream service is its own consumer group, so each gets every event and can replay. Partitions are the unit of parallelism, so I create more than I expect consumers. RF 3, min.insync.replicas 2, acks=all. Consumers commit after processing: at-least-once, so handlers are idempotent, and I alert on lag."</p>
+    </div>
+    <div class="note">
+      <h3>Rules to remember</h3>
+      <ul>
+        <li>Order is per partition, not per topic.</li>
+        <li>Max useful consumers in a group = number of partitions.</li>
+        <li>Adding partitions later changes <code>hash(key) % P</code>, so a key can move and lose order for a while.</li>
+        <li>Reading does not delete. Messages stay for the retention time (7 days default) or forever with compaction.</li>
+        <li>A slow consumer only builds lag; it does not slow the producer.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Kafka vs a classic queue</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Kafka (log)</th><th>RabbitMQ / SQS (queue)</th></tr></thead>
+          <tbody>
+            <tr><td>After a message is read</td><td>It stays; the group moves its offset</td><td>It is acked and deleted</td></tr>
+            <tr><td>Many independent readers</td><td>Yes: one consumer group per service</td><td>Needs a fanout exchange or SNS → many queues</td></tr>
+            <tr><td>Replay old messages</td><td>Yes: reset the offset</td><td>No (unless you archive them)</td></tr>
+            <tr><td>Ordering</td><td>Per partition</td><td>Per queue (SQS FIFO: per message group)</td></tr>
+            <tr><td>Scaling consumers</td><td>Up to the partition count</td><td>Any number of competing consumers</td></tr>
+            <tr><td>Per-message delay, priority, DLQ</td><td>Weak (build it yourself)</td><td>Built in</td></tr>
+            <tr><td>Throughput</td><td>Millions of msgs/s per cluster</td><td>Tens of thousands per queue</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>A topic has 6 partitions and the group has 8 consumers. What happens?</summary><div>6 consumers get one partition each and 2 stay idle as standbys. If a consumer dies, an idle one takes its partition at the next rebalance.</div></details>
+      <details class="qa"><summary>Commit before or after processing?</summary><div>After processing gives at-least-once: a crash replays a few messages, so handlers must be idempotent. Before gives at-most-once: a crash loses messages.</div></details>
+      <details class="qa"><summary>How do you stop a rebalance from pausing the whole group?</summary><div>Cooperative sticky assignor (only moved partitions pause), static membership (<code>group.instance.id</code>) so a quick restart does not trigger a rebalance, and short work per poll below <code>max.poll.interval.ms</code>.</div></details>
+      <details class="qa"><summary>RF=3, min.insync=2, acks=all, two brokers die. Writes?</summary><div>They fail with NotEnoughReplicas. Nothing acknowledged is lost. Kafka picks consistency over availability here.</div></details>
+    </div>
+    <div class="note">
+      <h3>Files</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (partitioner, consumer group, crash and replay, lag, acks)</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var ROWY = [74, 184, 294];        // partition log rows (top of cells)
+  var CX0 = 184, CW = 38, CG = 3, CH = 40;
+  var CONS = ['C1', 'C2', 'C3', 'C4'];
+  var CY = [44, 134, 224, 314];     // consumer box tops
+  var KX = 610, KW = 134, KH = 64;
+  var PR = { x: 16, y: 170, w: 112, h: 70 };
+  var KEYP = { u1: 1, u2: 0, u3: 2, u4: 0, u5: 1, u7: 2 }; // demo stand-in for hash(key) % 3
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+  function each(ctx, list, fn) { return seq(ctx, list.map(function (x, i) { return function () { return fn(x, i); }; })); }
+
+  function cellX(off) { return CX0 + off * (CW + CG); }
+  function rowMid(p) { return ROWY[p] + CH / 2; }
+  function consMid(c) { return CY[CONS.indexOf(c)] + KH / 2; }
+  function toPartition(p, off) { return [[PR.x + PR.w, 205], [150, 205], [150, rowMid(p)], [cellX(off) + CW / 2, rowMid(p)]]; }
+  function toConsumer(p, off, c) { return [[cellX(off) + CW / 2, rowMid(p)], [566, rowMid(p)], [586, consMid(c)], [KX, consMid(c)]]; }
+
+  function renderParts(ctx) {
+    var S = ctx.state;
+    S.parts.forEach(function (pt, p) {
+      var g = pt.g;
+      while (g.firstChild) g.removeChild(g.firstChild);
+      pt.msgs.forEach(function (m, off) {
+        var x = cellX(off);
+        ctx.el('text', { x: x + CW / 2, y: ROWY[p] - 5, 'text-anchor': 'middle', class: 'mono small muted', text: off }, g);
+        ctx.el('rect', { x: x, y: ROWY[p], width: CW, height: CH, rx: 4, class: 'cell' }, g);
+        if (m.cls) ctx.el('rect', { x: x, y: ROWY[p], width: CW, height: CH, rx: 4, class: 'cell ' + m.cls }, g);
+        ctx.el('text', { x: x + CW / 2, y: ROWY[p] + 24, 'text-anchor': 'middle', class: 'mono small', text: m.key }, g);
+      });
+      // committed offset marker: points at the next offset to read
+      var mx = cellX(pt.committed) + CW / 2;
+      ctx.el('polygon', { points: [[mx, ROWY[p] + CH + 4], [mx - 6, ROWY[p] + CH + 13], [mx + 6, ROWY[p] + CH + 13]].join(' '), class: 'fill-accent' }, g);
+      ctx.el('text', { x: CX0, y: ROWY[p] + CH + 28, class: 'mono small fill-accent', text: 'committed offset: ' + pt.committed }, g);
+      if (S.showLag) {
+        var lag = pt.msgs.length - pt.committed;
+        ctx.el('text', { x: CX0 + 170, y: ROWY[p] + CH + 28, class: 'mono small ' + (lag > 2 ? 'fill-bad' : 'fill-ok'), text: 'end ' + pt.msgs.length + ' − committed ' + pt.committed + ' = lag ' + lag }, g);
+      }
+    });
+  }
+  function renderAssign(ctx) {
+    var S = ctx.state, g = S.assignG;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    CONS.forEach(function (c, i) {
+      var v = S.cv[c], st = S.cons[c];
+      var mine = [0, 1, 2].filter(function (p) { return S.assign[p] === c; });
+      v.g.setAttribute('opacity', st.joined ? 1 : 0);
+      v.parts.textContent = !st.alive ? 'crashed' : mine.length ? 'reads P' + mine.join(', P') : 'idle (standby)';
+      v.parts.setAttribute('class', 'mono small ' + (!st.alive ? 'fill-bad' : mine.length ? 'fill-accent' : 'muted'));
+      v.rect.setAttribute('class', 'box ' + (!st.alive ? 'bad dim' : mine.length ? '' : 'dim'));
+    });
+    [0, 1, 2].forEach(function (p) {
+      var c = S.assign[p];
+      if (!c) return;
+      ctx.el('polyline', { points: [[560, rowMid(p)], [586, consMid(c)], [KX, consMid(c)]].join(' '), class: 'wire accent' }, g);
+    });
+  }
+
+  function produce(ctx, key, label) {
+    var S = ctx.state, p = KEYP[key], pt = S.parts[p], off = pt.msgs.length;
+    return ctx.packet(toPartition(p, off), { ms: 420, label: label || key }).then(function () {
+      if (ctx.state !== S) return;
+      pt.msgs.push({ key: label || key, cls: 'new' });
+      renderParts(ctx);
+    });
+  }
+  // Consumer of partition p processes offsets [from, to)
+  function consume(ctx, p, from, to, cls) {
+    var S = ctx.state, c = S.assign[p], offs = [];
+    for (var o = from; o < to; o++) offs.push(o);
+    return each(ctx, offs, function (o) {
+      return ctx.packet(toConsumer(p, o, c), { ms: 380, cls: cls === 'dup' ? 'bad' : 'ok', r: 5 }).then(function () {
+        if (ctx.state !== S) return;
+        S.parts[p].msgs[o].cls = cls || 'done';
+        renderParts(ctx);
+      });
+    });
+  }
+  function commit(ctx, p, off) {
+    ctx.state.parts[p].committed = off;
+    renderParts(ctx);
+    ctx.log(ctx.state.assign[p] + ' commits P' + p + ' offset ' + off, 'info');
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Topic "orders", 3 partitions',
+      say: 'Each partition is an append-only log, and each message gets the next <b>offset</b> in its partition. The consumer group <code>billing</code> reads the topic. The triangle under each log is the group\'s committed offset: the next message to read.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.parts = [0, 1, 2].map(function () { return { msgs: [], committed: 0 }; });
+      S.assign = {};
+      S.cons = {}; S.cv = {};
+      ctx.el('rect', { x: PR.x, y: PR.y, width: PR.w, height: PR.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: PR.x + PR.w / 2, y: PR.y + 30, 'text-anchor': 'middle', class: 'title', text: 'Producer' });
+      ctx.el('text', { x: PR.x + PR.w / 2, y: PR.y + 50, 'text-anchor': 'middle', class: 'mono small muted', text: 'key = user id' });
+      ctx.el('text', { x: 150, y: 30, class: 'title', text: 'topic: orders' });
+      ctx.el('text', { x: KX, y: 30, class: 'title', text: 'group: billing' });
+      ctx.el('polyline', { points: [[PR.x + PR.w, 205], [150, 205]].join(' '), class: 'wire' });
+      ctx.el('line', { x1: 150, y1: rowMid(0), x2: 150, y2: rowMid(2), class: 'wire' });
+      S.parts.forEach(function (pt, p) {
+        ctx.el('line', { x1: 150, y1: rowMid(p), x2: CX0, y2: rowMid(p), class: 'wire' });
+        ctx.el('text', { x: 160, y: ROWY[p] - 5, class: 'mono small', text: 'P' + p });
+        ctx.el('line', { x1: CX0, y1: rowMid(p), x2: 560, y2: rowMid(p), class: 'wire dashed' });
+        pt.g = ctx.group();
+      });
+      S.assignG = ctx.group();
+      CONS.forEach(function (c, i) {
+        S.cons[c] = { joined: false, alive: true };
+        var g = ctx.group({ opacity: 0 });
+        var rect = ctx.el('rect', { x: KX, y: CY[i], width: KW, height: KH, rx: 8, class: 'box' }, g);
+        ctx.el('text', { x: KX + 14, y: CY[i] + 26, class: 'title', text: 'Consumer ' + c }, g);
+        var parts = ctx.el('text', { x: KX + 14, y: CY[i] + 48, class: 'mono small muted', text: '' }, g);
+        S.cv[c] = { g: g, rect: rect, parts: parts };
+      });
+      renderParts(ctx);
+      renderAssign(ctx);
+    },
+    steps: [
+      {
+        title: 'The key picks the partition',
+        say: 'The producer sends events keyed by user id. Kafka computes <code>hash(key) % 3</code>, so u2 and u4 go to P0, u1 and u5 to P1, u3 to P2. The same key always lands in the same partition. There is no order between partitions.',
+        run: function (ctx) {
+          return each(ctx, ['u1', 'u2', 'u3', 'u4', 'u5', 'u2'], function (k) { return produce(ctx, k); })
+            .then(function () { ctx.log('6 events appended. u2 twice in P0', 'info'); });
+        },
+      },
+      {
+        title: 'One key, strict order',
+        say: 'User u7 creates, pays and ships an order. All three events have key u7, so they go to P2 one after another at offsets 1, 2 and 3. Any consumer of P2 sees them in that exact order. This is how you get per-entity ordering.',
+        run: function (ctx) {
+          return each(ctx, ['u7·c', 'u7·p', 'u7·s'], function (l) { return produce(ctx, 'u7', l); })
+            .then(function () { ctx.log('u7: created → paid → shipped, all in P2 in order', 'ok'); });
+        },
+      },
+      {
+        title: 'A consumer group shares the partitions',
+        say: 'Consumers C1 and C2 join group <code>billing</code>. The group coordinator assigns each partition to exactly <b>one</b> consumer in the group: C1 gets P0 and P1, C2 gets P2. Two consumers in one group never read the same partition.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.cons.C1.joined = true; S.cons.C2.joined = true;
+          S.assign = { 0: 'C1', 1: 'C1', 2: 'C2' };
+          renderAssign(ctx);
+          ctx.log('C1, C2 joined. C1: P0, P1. C2: P2', 'info');
+          return Promise.all([ctx.fade(S.cv.C1.g, 1, 300), ctx.fade(S.cv.C2.g, 1, 300)]);
+        },
+      },
+      {
+        title: 'Process, then commit the offset',
+        say: 'Each consumer polls its partitions, processes the messages, and then <b>commits</b> the next offset to read. The commit is stored in Kafka (<code>__consumer_offsets</code>). The messages are not deleted: reading only moves the group\'s pointer.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () {
+              return Promise.all([
+                consume(ctx, 0, 0, S.parts[0].msgs.length).then(function () { return consume(ctx, 1, 0, S.parts[1].msgs.length); }),
+                consume(ctx, 2, 0, S.parts[2].msgs.length),
+              ]);
+            },
+            function () { commit(ctx, 0, S.parts[0].msgs.length); commit(ctx, 1, S.parts[1].msgs.length); commit(ctx, 2, S.parts[2].msgs.length); },
+          ]);
+        },
+      },
+      {
+        title: 'C3 and C4 join: rebalance',
+        say: 'Two more consumers join. The group <b>rebalances</b>: consumption pauses, and partitions are reassigned so C1, C2 and C3 get one each. C4 stays <b>idle</b>: with 3 partitions, at most 3 consumers in a group can work. Partitions set the max parallelism.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.cons.C3.joined = true; S.cons.C4.joined = true;
+          ctx.log('C3, C4 joined → rebalance', 'warn');
+          return seq(ctx, [
+            function () { return Promise.all([ctx.fade(S.cv.C3.g, 1, 300), ctx.fade(S.cv.C4.g, 1, 300)]); },
+            function () { S.assign = {}; renderAssign(ctx); return ctx.wait(500); },
+            function () { S.assign = { 0: 'C1', 1: 'C2', 2: 'C3' }; renderAssign(ctx); ctx.log('New assignment: P0→C1, P1→C2, P2→C3. C4 idle', 'info'); },
+          ]);
+        },
+      },
+      {
+        title: 'C2 works but commits late',
+        say: 'More events arrive for P1. C2 processes offsets 2, 3 and 4, but it commits only every few seconds, so its last commit is still 3. Committing less often is faster, but it leaves a window of work that is done and not yet recorded.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return each(ctx, ['u1', 'u5', 'u1'], function (k) { return produce(ctx, k); }); },
+            function () { return consume(ctx, 1, 2, 3); },
+            function () { commit(ctx, 1, 3); return consume(ctx, 1, 3, 5); },
+            function () { ctx.log('C2 processed up to offset 4, committed only 3', 'warn'); },
+          ]);
+        },
+      },
+      {
+        title: 'C2 crashes: its partition moves',
+        say: 'C2 crashes before its next commit. After the session timeout, the group rebalances and P1 goes to C4, the idle consumer. C4 starts from the committed offset 3, so offsets 3 and 4 are <b>processed again</b>. This is at-least-once delivery: handlers must be idempotent.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.cons.C2.alive = false;
+          delete S.assign[1];
+          renderAssign(ctx);
+          ctx.log('C2 missed heartbeats → removed from group', 'bad');
+          return seq(ctx, [
+            function () { return ctx.wait(500); },
+            function () { S.assign[1] = 'C4'; renderAssign(ctx); ctx.log('Rebalance: P1 → C4, start at committed offset 3', 'warn'); },
+            function () { return consume(ctx, 1, 3, 5, 'dup'); },
+            function () { commit(ctx, 1, 5); ctx.log('Offsets 3 and 4 processed twice (duplicates)', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'Replay: move the offset back',
+        say: 'A bug in billing is fixed and we must recompute P0. Because Kafka keeps messages for the retention period, we reset the group\'s offset on P0 to 0 and C1 reads it again. Another group, like <code>analytics</code>, has its own offsets and is not affected.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { commit(ctx, 0, 0); ctx.log('Reset billing offset on P0 to 0 (--reset-offsets --to-earliest)', 'warn'); return ctx.wait(400); },
+            function () { return consume(ctx, 0, 0, S.parts[0].msgs.length, 'replay'); },
+            function () { commit(ctx, 0, S.parts[0].msgs.length); ctx.log('P0 replayed. Messages were never deleted', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'Consumer lag: the health number',
+        say: 'A burst for user u3 arrives on P2 while C3 is busy in a slow DB call. The producer is not slowed down: messages just pile up. <b>Lag = log end offset − committed offset</b>. You alert on it and autoscale consumers on it (up to the partition count).',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.showLag = true;
+          renderParts(ctx);
+          return seq(ctx, [
+            function () { return each(ctx, ['u3', 'u3', 'u3', 'u3'], function (k) { return produce(ctx, k); }); },
+            function () {
+              [0, 1, 2].forEach(function (p) { ctx.log('P' + p + ' lag = ' + (S.parts[p].msgs.length - S.parts[p].committed), S.parts[p].msgs.length - S.parts[p].committed > 2 ? 'bad' : 'ok'); });
+              return ctx.wait(400);
+            },
+            function () { return consume(ctx, 2, S.parts[2].committed, S.parts[2].msgs.length); },
+            function () { commit(ctx, 2, S.parts[2].msgs.length); ctx.log('C3 caught up: P2 lag back to 0', 'ok'); },
+          ]);
+        },
+      },
+    ],
+  });
+  // ---- Try it panel (independent of the step player) ----
+  function $(id) { return document.getElementById(id); }
+  function calc() {
+    var rf = +$('t-rf').value, isr = Math.min(+$('t-isr').value, rf), acks = $('t-acks').value, down = Math.min(+$('t-down').value, rf);
+    $('t-rf-v').textContent = rf; $('t-isr-v').textContent = isr; $('t-down-v').textContent = down;
+    var alive = rf - down, msg;
+    if (alive === 0) msg = '<b class="bad">Partition offline.</b> No replica is alive: no reads, no writes.';
+    else if (acks === 'all' && alive < isr) msg = '<b class="warn">Writes rejected (NotEnoughReplicas).</b> ' + alive + ' in-sync < min.insync ' + isr + '. Nothing acked is lost: Kafka chose consistency.';
+    else if (acks === 'all' && isr >= 2) msg = '<b class="ok">Writes OK, durable.</b> Each ack means at least ' + isr + ' copies. Survives losing ' + (isr - 1) + ' more broker(s) without losing acked data.';
+    else if (acks === 'all') msg = '<b class="warn">Writes OK, but weak.</b> min.insync=1 lets the ISR shrink to the leader alone; then acks=all means "leader only".';
+    else if (acks === '1') msg = '<b class="warn">Writes OK, loss possible.</b> Acked once the leader has it. If the leader dies before followers copy it, the message is gone.';
+    else msg = '<b class="bad">Fire and forget.</b> acks=0: the producer never knows if the broker got it.';
+    $('t-out1').innerHTML = 'RF ' + rf + ', alive ' + alive + ': ' + msg;
+    var tp = +$('t-tp').value, cr = +$('t-cr').value;
+    $('t-tp-v').textContent = tp; $('t-cr-v').textContent = cr;
+    var need = Math.max(Math.ceil(tp / 10), Math.ceil(tp / cr));
+    $('t-out2').innerHTML = 'Need ≥ <b>' + need + '</b> partitions (max of ' + tp + '/10 producer MB/s per partition and ' + tp + '/' + cr + ' consumer MB/s). With 2× headroom pick about <b>' + need * 2 + '</b>. You can add partitions later, never remove them.';
+  }
+  ['t-rf', 't-isr', 't-acks', 't-down', 't-tp', 't-cr'].forEach(function (id) { $(id).addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

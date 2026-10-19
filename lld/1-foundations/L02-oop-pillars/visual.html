@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L02 OOP pillars</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+
+  .stage .capsule { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .stage .hidden-panel { fill: var(--bg); stroke: var(--line); stroke-dasharray: 5 4; }
+  .try label { font-size: 14px; display: flex; gap: 6px; align-items: center; }
+  .try select, .try input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+  .try input { width: 90px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L02 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>The four OOP pillars</h1>
+    <p class="lede">A checkout that pays by UPI, card or wallet. We start with a public balance and an <code>if/else</code> chain, then apply encapsulation, abstraction, inheritance and polymorphism one at a time, and watch the calls move.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Checkout classes showing the four OOP pillars"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Contract / protected boundary</span>
+        <span><i style="background: var(--signal)"></i>Concrete class / object</span>
+        <span><i style="background: var(--ok)"></i>Allowed call</span>
+        <span><i style="background: var(--bad)"></i>Blocked / broken</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">class Wallet {</span><span class="ln" data-l="1">  #balance = 500;</span><span class="ln" data-l="2">  debit(amount: number) {</span><span class="ln" data-l="3">    if (amount &gt; this.#balance) throw new Error('Insufficient funds');</span><span class="ln" data-l="4">    this.#balance -= amount; }</span><span class="ln" data-l="5">}</span><span class="ln" data-l="6">interface PaymentMethod { pay(amount: number): Promise&lt;string&gt;; }</span><span class="ln" data-l="7">abstract class BasePaymentMethod implements PaymentMethod {</span><span class="ln" data-l="8">  async pay(a: number) { validate(a); return this.doPay(a); }</span><span class="ln" data-l="9">  protected abstract doPay(a: number): Promise&lt;string&gt;;</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">class WalletPayment extends BasePaymentMethod {</span><span class="ln" data-l="12">  protected async doPay(a: number) { this.wallet.debit(a); return 'wal_' + a; } }</span><span class="ln" data-l="13">const txn = await method.pay(250);   // polymorphic call</span><span class="ln" data-l="14">class PayLaterPayment extends BasePaymentMethod { ... }  // new file, 0 edits</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: run a checkout</h3>
+      <p>Pick a method and an amount. The output shows which class each call reaches. The wallet starts at 500 and keeps its balance between clicks.</p>
+      <div class="try">
+        <label>Method <select id="t-method"><option>UPI</option><option>CARD</option><option>WALLET</option><option>PAY_LATER</option></select></label>
+        <label>Amount <input id="t-amount" type="number" value="250"></label>
+        <button class="btn primary" type="button" id="t-pay">Pay</button>
+        <button class="btn" type="button" id="t-topup">Top up wallet +500</button>
+      </div>
+      <div class="try-out" id="try-out">Wallet balance: 500</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each entity owns its state and exposes behaviour, not setters: <code>Wallet.debit()</code> checks the balance, so the rule lives in one place. Payment methods sit behind an interface, so checkout calls <code>method.pay()</code> with no type switch. I use inheritance only for a shallow base that shares validation; everything else is composition."</p>
+    </div>
+    <div class="note wide">
+      <h3>The four pillars side by side</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Pillar</th><th>One line</th><th>Smell when missing</th><th>In this checkout</th></tr></thead>
+          <tbody>
+            <tr><td>Encapsulation</td><td>The object guards its own data and rules</td><td>Public fields, a setter for every field</td><td><code>#balance</code> changes only through <code>debit()</code>/<code>credit()</code></td></tr>
+            <tr><td>Abstraction</td><td>Callers see what, not how</td><td>Checkout imports SDKs, handles HTTP codes</td><td><code>PaymentMethod.pay()</code> hides UPI and card APIs</td></tr>
+            <tr><td>Inheritance</td><td>IS-A: reuse a contract and shared code</td><td>Same validation copied into 3 classes, or a 5-level tree</td><td><code>BasePaymentMethod</code> validates once</td></tr>
+            <tr><td>Polymorphism</td><td>One call, the right behaviour per type</td><td><code>if (type === 'UPI') ... else if ...</code> in many places</td><td><code>method.pay(250)</code> works for every method</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Private fields plus a public setter for each one: is that encapsulation?</summary><div>No. The rules still live outside. Encapsulation means the class offers meaningful operations (<code>debit</code>, <code>hold</code>, <code>book</code>) that keep its invariants true.</div></details>
+      <details class="qa"><summary>Abstraction vs encapsulation?</summary><div>Encapsulation protects data and rules inside one object. Abstraction is the small contract a caller depends on so it can ignore implementation details.</div></details>
+      <details class="qa"><summary>Why did the deep tree in the last step hurt?</summary><div>Every level depends on the one above. A change in <code>Vehicle</code> ripples to every subclass, and each must be re-tested. Shallow trees plus composition keep changes local.</div></details>
+      <details class="qa"><summary>Where does JS find <code>doPay</code> when <code>pay()</code> calls <code>this.doPay()</code>?</summary><div>On <code>this</code>, the real object, walking its prototype chain from the bottom. So it finds the child's override first. That is dynamic dispatch.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+
+
+  // ---------- scenes ----------
+  function sceneBefore(ctx, g) {
+    T(ctx, g, 20, 28, 'Before: public state and a type switch', 'title');
+    var fn = ctx.group({}, g);
+    ctx.el('rect', { x: 20, y: 60, width: 380, height: 200, rx: 8, class: 'box' }, fn);
+    ['function pay(method, amount, wallet) {', "  if (method === 'WALLET')", '    wallet.balance -= amount;', "  else if (method === 'UPI')", '    callUpiApi(amount);', "  else if (method === 'CARD')", '    callCardNetwork(amount);', '}  // new method = edit here'].forEach(function (l, i) {
+      T(ctx, fn, 36, 86 + i * 22, l, 'mono small' + (i === 7 ? ' fill-bad' : ''));
+    });
+    var w = cls(ctx, g, 500, 80, 220, 'Wallet', ['+ balance = 500    public'], { cls: 'signal' });
+    var any = cls(ctx, g, 500, 260, 220, 'any-other-file.ts', ['wallet.balance = -500'], {});
+    ctx.state.before = { w: w, any: any };
+  }
+
+  function sceneCapsule(ctx, g) {
+    T(ctx, g, 20, 28, 'Encapsulation: private state, guarded doors', 'title');
+    ctx.el('rect', { x: 400, y: 80, width: 320, height: 220, rx: 40, class: 'capsule' }, g);
+    T(ctx, g, 560, 108, 'Wallet', 'b', 'middle');
+    ctx.el('rect', { x: 490, y: 160, width: 140, height: 60, rx: 8, class: 'box signal' }, g);
+    T(ctx, g, 560, 185, '#balance', 'mono small muted', 'middle');
+    var bal = T(ctx, g, 560, 208, '500', 'mono b', 'middle');
+    var dCredit = ctx.el('rect', { x: 384, y: 130, width: 90, height: 28, rx: 6, class: 'box ok' }, g);
+    T(ctx, g, 429, 149, 'credit()', 'mono small', 'middle');
+    var dDebit = ctx.el('rect', { x: 384, y: 230, width: 90, height: 28, rx: 6, class: 'box ok' }, g);
+    T(ctx, g, 429, 249, 'debit()', 'mono small', 'middle');
+    var rule = T(ctx, g, 560, 285, 'rule: amount <= balance', 'mono small fill-ok', 'middle');
+    cls(ctx, g, 30, 150, 200, 'checkout.ts', ['outside code'], {});
+    ctx.state.cap = { bal: bal, dDebit: dDebit, dCredit: dCredit, rule: rule, g: g };
+  }
+
+  function sceneAbstraction(ctx, g) {
+    T(ctx, g, 20, 28, 'Abstraction: one small contract', 'title');
+    var co = cls(ctx, g, 20, 150, 170, 'CheckoutService', ['pay(method, amt)'], { cls: 'signal' });
+    var itf = cls(ctx, g, 250, 140, 190, 'PaymentMethod', ['pay(amount): txnId'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M190,180 H250', 'assoc');
+    var hidden = ctx.group({ opacity: 0.45 }, g);
+    ctx.el('rect', { x: 480, y: 60, width: 260, height: 300, rx: 10, class: 'hidden-panel' }, hidden);
+    T(ctx, hidden, 610, 84, 'hidden from checkout', 'mono small muted', 'middle');
+    var items = ['POST /upi/collect', 'retry 3x on 5xx', 'verify HMAC signature', 'map SDK error codes', 'poll status until final'];
+    var rows = items.map(function (t, i) {
+      ctx.el('rect', { x: 500, y: 104 + i * 48, width: 220, height: 34, rx: 6, class: 'box dim' }, hidden);
+      return T(ctx, hidden, 610, 126 + i * 48, t, 'mono small', 'middle');
+    });
+    ctx.state.abs = { co: co, itf: itf, hidden: hidden, rows: rows };
+  }
+
+  function sceneTree(ctx, g, withNew) {
+    T(ctx, g, 20, 28, withNew ? 'Extension: add a class, edit nothing' : 'Inheritance: share the rule once', 'title');
+    var co = cls(ctx, g, 20, 60, 180, 'CheckoutService', ['method.pay(250)'], { cls: 'signal' });
+    var base = cls(ctx, g, 270, 50, 250, 'BasePaymentMethod', [{ t: '+ pay(a): validate, doPay(a)', cls: 'fill-accent' }, '# doPay(a)   abstract'], { stereo: 'abstract', cls: 'accent' });
+    arrow(ctx, g, 'M200,95 H270', 'assoc');
+    var names = ['UpiPayment', 'CardPayment', 'WalletPayment', 'PayLaterPayment'];
+    var n = withNew ? 4 : 3;
+    var kids = [];
+    for (var i = 0; i < 4; i++) {
+      var sub = ctx.group({ opacity: 0 }, g);
+      var x = 20 + i * 185;
+      var c = cls(ctx, sub, x, 270, 170, names[i], ['# doPay(a)'], { cls: i === 3 ? 'ok' : 'signal' });
+      arrow(ctx, sub, 'M' + (x + 85) + ',270 V225 H395 V' + base.b.bottom, 'inh');
+      sub.c = c;
+      kids.push(sub);
+    }
+    if (withNew) for (var j = 0; j < 3; j++) kids[j].setAttribute('opacity', 1);
+    ctx.state.tree = { co: co, base: base, kids: kids, g: g };
+  }
+
+  function sceneChain(ctx, g) {
+    T(ctx, g, 20, 28, 'Dynamic dispatch walks the prototype chain', 'title');
+    var specs = [
+      ['walletPay (the object)', ['wallet: Wallet']],
+      ['WalletPayment.prototype', ['doPay()']],
+      ['BasePaymentMethod.prototype', ['pay()']],
+      ['Object.prototype', ['toString(), ...']],
+    ];
+    var boxes = specs.map(function (s, i) {
+      var b = cls(ctx, g, 260, 340 - i * 92, 260, s[0], s[1], { cls: i === 0 ? 'signal' : '' });
+      if (i > 0) arrow(ctx, g, 'M390,' + (340 - (i - 1) * 92) + ' V' + (340 - i * 92 + 52), 'dep');
+      return b;
+    });
+    T(ctx, g, 540, 330, '[[Prototype]] links go up', 'mono small muted');
+    ctx.state.chain = { boxes: boxes, g: g };
+  }
+
+  function sceneDeep(ctx, g) {
+    T(ctx, g, 20, 28, 'Too deep: one change ripples down', 'title');
+    var names = ['Vehicle', 'MotorVehicle', 'Car', 'ElectricCar', 'TeslaModel3'];
+    var boxes = names.map(function (n, i) {
+      var b = cls(ctx, g, 80 + i * 60, 60 + i * 72, 200, n, [], { cls: 'signal' });
+      if (i > 0) arrow(ctx, g, 'M' + (80 + i * 60 + 20) + ',' + (60 + i * 72) + ' V' + (60 + (i - 1) * 72 + 26), 'inh');
+      return b;
+    });
+    var side = ctx.group({ opacity: 0 }, g);
+    T(ctx, side, 470, 120, 'Every leaf depends on every level above.', 'small');
+    T(ctx, side, 470, 142, 'Prefer: Car HAS-A Engine, HAS-A Battery.', 'small fill-ok');
+    T(ctx, side, 470, 164, 'See L03 Composition over inheritance.', 'small muted');
+    ctx.state.deep = { boxes: boxes, side: side };
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'One checkout, four pillars', say: 'Start with code that works but is easy to break. Each step applies one pillar and shows the effect on real calls.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneBefore(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'Public state: anyone can break the rule',
+        say: 'The wallet balance is a public field. Some other file writes <code>wallet.balance = -500</code>. Nothing stops it, because the rule "never negative" lives nowhere.',
+        run: function (ctx) {
+          var s = ctx.state.before;
+          return ctx.packet([[610, 260], [610, 130]], { cls: 'bad', label: '= -500', ms: 800 }).then(function () {
+            s.w.lines[0].textContent = '+ balance = -500   public';
+            s.w.lines[0].setAttribute('class', 'mono small fill-bad');
+            s.w.r.setAttribute('class', 'box bad');
+            ctx.flash(s.w.r);
+            ctx.log('wallet.balance = -500 accepted. Invariant broken.', 'bad');
+            ctx.log("pay() has 3 branches; a 4th method means editing it", 'warn');
+          });
+        },
+      },
+      {
+        title: 'Encapsulation: hide the field, guard the doors',
+        say: 'The balance becomes <code>#balance</code>, sealed inside the wallet. The only ways in are <code>credit()</code> and <code>debit()</code>, and they check the rule. A debit of 700 bounces; 200 goes through.',
+        run: function (ctx) {
+          hl([0, 1, 2, 3, 4, 5]);
+          return swap(ctx, function (g) { sceneCapsule(ctx, g); }).then(function () {
+            return ctx.packet([[230, 190], [384, 244], [230, 190]], { cls: 'bad', label: 'debit(700)', ms: 1000 });
+          }).then(function () {
+            ctx.flash(ctx.state.cap.rule);
+            ctx.log('debit(700) → Error: Insufficient funds (balance stays 500)', 'bad');
+            return ctx.packet([[230, 200], [384, 244], [560, 200]], { cls: 'ok', label: 'debit(200)', ms: 900 });
+          }).then(function () {
+            var bal = ctx.state.cap.bal;
+            return ctx.tween(500, function (t) { bal.textContent = String(Math.round(500 - 200 * t)); });
+          }).then(function () { ctx.log('debit(200) → balance 300', 'ok'); });
+        },
+      },
+      {
+        title: 'Abstraction: checkout sees one method',
+        say: 'Checkout depends on <code>PaymentMethod.pay()</code> only. HTTP calls, retries, signatures and error mapping stay behind the contract. Swap the UPI provider and checkout does not change.',
+        run: function (ctx) {
+          hl([6]);
+          return swap(ctx, function (g) { sceneAbstraction(ctx, g); }).then(function () {
+            return ctx.packet([[190, 180], [345, 180], [470, 180], [610, 121], [610, 313]], { cls: 'accent', label: 'pay(499)', ms: 1300 });
+          }).then(function () {
+            ctx.state.abs.rows.forEach(function (r) { ctx.flash(r); });
+            return ctx.packet([[480, 300], [345, 230], [105, 205]], { cls: 'ok', label: 'txn_8812', ms: 900 });
+          }).then(function () {
+            ctx.log('checkout.pay → PaymentMethod.pay(499) → "txn_8812"', 'ok');
+            ctx.log('5 details hidden; checkout knows none of them', 'info');
+          });
+        },
+      },
+      {
+        title: 'Inheritance: write the shared rule once',
+        say: 'An abstract <code>BasePaymentMethod</code> validates the amount in <code>pay()</code>, then calls <code>doPay()</code>. UPI, card and wallet extend it and fill in only <code>doPay()</code>. Solid line with hollow triangle = extends.',
+        run: function (ctx) {
+          hl([7, 8, 9, 10, 11]);
+          return swap(ctx, function (g) { sceneTree(ctx, g, false); }).then(function () {
+            var kids = ctx.state.tree.kids;
+            var chain = Promise.resolve();
+            [0, 1, 2].forEach(function (i) {
+              chain = chain.then(function () { ctx.log(['UpiPayment', 'CardPayment', 'WalletPayment'][i] + ' extends BasePaymentMethod', 'info'); return ctx.fade(kids[i], 1, 350); });
+            });
+            return chain;
+          });
+        },
+      },
+      {
+        title: 'Polymorphism: one call, three behaviours',
+        say: 'Checkout makes the same call, <code>method.pay(250)</code>, three times with three objects. Each call runs the shared validation, then the right <code>doPay()</code> for that object. No <code>if/else</code>.',
+        run: function (ctx) {
+          hl([12, 13]);
+          var t = ctx.state.tree;
+          var labels = ['upi_250', 'card_250', 'wal_250'];
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function (i) {
+            chain = chain.then(function () {
+              return ctx.packet([[200, 95], [395, 95], [395, 225], [t.kids[i].c.b.cx, 225], [t.kids[i].c.b.cx, 290]], { cls: 'ok', label: 'pay(250)', ms: 1000 });
+            }).then(function () {
+              ctx.flash(t.kids[i].c.r);
+              ctx.log('method.pay(250) → ' + ['UpiPayment', 'CardPayment', 'WalletPayment'][i] + '.doPay → ' + labels[i], 'ok');
+            });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Under the hood: the prototype chain',
+        say: 'For <code>walletPay.pay(250)</code>, JS looks on the object, then up the chain. <code>pay</code> is found on the base. Inside it, <code>this.doPay</code> starts again from the object and finds the child\'s version first.',
+        run: function (ctx) {
+          hl([8, 12]);
+          return swap(ctx, function (g) { sceneChain(ctx, g); }).then(function () {
+            var b = ctx.state.chain.boxes;
+            return ctx.packet([[230, b[0].b.cy], [230, b[1].b.cy], [230, b[2].b.cy]], { cls: 'accent', label: 'find pay', ms: 1000 });
+          }).then(function () {
+            var b = ctx.state.chain.boxes;
+            ctx.flash(b[2].r); b[2].r.setAttribute('class', 'box ok');
+            ctx.log('lookup pay: object ✗ → WalletPayment.prototype ✗ → BasePaymentMethod.prototype ✓', 'info');
+            return ctx.packet([[560, b[0].b.cy], [560, b[1].b.cy]], { cls: 'accent', label: 'find this.doPay', ms: 800 });
+          }).then(function () {
+            var b = ctx.state.chain.boxes;
+            ctx.flash(b[1].r); b[1].r.setAttribute('class', 'box ok');
+            ctx.log('lookup doPay: object ✗ → WalletPayment.prototype ✓ (child wins)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A new method is a new class',
+        say: 'Product wants "pay later". We add <code>PayLaterPayment</code>. <code>CheckoutService</code> and the other classes are not opened. Compare with step 1, where every new method edited <code>pay()</code>.',
+        run: function (ctx) {
+          hl([14]);
+          return swap(ctx, function (g) { sceneTree(ctx, g, true); }).then(function () {
+            var t = ctx.state.tree;
+            return ctx.fade(t.kids[3], 1, 500).then(function () {
+              return ctx.packet([[200, 95], [395, 95], [395, 225], [t.kids[3].c.b.cx, 225], [t.kids[3].c.b.cx, 290]], { cls: 'ok', label: 'pay(999)', ms: 1000 });
+            }).then(function () {
+              ctx.flash(t.co.r);
+              T(ctx, t.g, 20, 400, 'CheckoutService: 0 lines changed. PayLaterPayment: 1 new file.', 'small fill-ok');
+              ctx.log('Added PayLaterPayment; checkout unchanged', 'ok');
+            });
+          });
+        },
+      },
+      {
+        title: 'The limit: deep trees spread change',
+        say: 'Inheritance couples a child to every parent above it. Change <code>Vehicle.start()</code> and five classes change behaviour. Keep trees one level deep, and compose the rest.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneDeep(ctx, g); }).then(function () {
+            var b = ctx.state.deep.boxes;
+            var chain = Promise.resolve();
+            b.forEach(function (box, i) {
+              chain = chain.then(function () { box.r.setAttribute('class', 'box bad'); ctx.flash(box.r); return ctx.wait(220); });
+            });
+            return chain.then(function () {
+              ctx.log('Edit Vehicle.start() → 5 classes affected, 5 to re-test', 'bad');
+              return ctx.fade(ctx.state.deep.side, 1, 400);
+            });
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var bal = 500;
+  var out = document.getElementById('try-out');
+  var CLS = { UPI: 'UpiPayment', CARD: 'CardPayment', WALLET: 'WalletPayment', PAY_LATER: 'PayLaterPayment' };
+  function show(lines) {
+    out.innerHTML = '';
+    lines.forEach(function (l) { var d = document.createElement('div'); if (l[1]) d.className = l[1]; d.textContent = l[0]; out.appendChild(d); });
+  }
+  document.getElementById('t-pay').addEventListener('click', function () {
+    var m = document.getElementById('t-method').value;
+    var a = Number(document.getElementById('t-amount').value);
+    var lines = [['checkout.pay(method, ' + a + ')  // method is a ' + CLS[m]], ['→ BasePaymentMethod.pay(' + a + ')  validate amount']];
+    if (!Number.isInteger(a) || a <= 0) { lines.push(['✗ Invalid amount: rejected by the shared rule in the base class', 'bad']); }
+    else {
+      lines.push(['→ ' + CLS[m] + '.doPay(' + a + ')']);
+      if (m === 'WALLET') {
+        lines.push(['→ wallet.debit(' + a + ')  checks amount <= ' + bal]);
+        if (a > bal) lines.push(['✗ Insufficient funds. #balance stays ' + bal, 'bad']);
+        else { bal -= a; lines.push(['✓ txn wal_' + a + '. #balance is now ' + bal, 'ok']); }
+      } else lines.push(['✓ txn ' + m.toLowerCase() + '_' + a, 'ok']);
+    }
+    lines.push(['Wallet balance: ' + bal]);
+    show(lines);
+  });
+  document.getElementById('t-topup').addEventListener('click', function () {
+    bal += 500;
+    show([['wallet.credit(500)  checks amount > 0'], ['✓ Wallet balance: ' + bal, 'ok']]);
+  });
+})();
+</script>
+</body>
+</html>

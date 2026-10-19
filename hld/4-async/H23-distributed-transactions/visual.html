@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H23 Saga and outbox</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .try .btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .try svg { width: 100%; max-width: 720px; height: auto; display: block; margin: 0 auto; }
+  .try svg text { fill: var(--ink); font-family: var(--font-mono); font-size: 12px; }
+  .try svg text.t { font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+  .try svg .b { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+  .try svg .b.ok { stroke: var(--ok); } .try svg .b.bad { stroke: var(--bad); } .try svg .b.warn { stroke: var(--warn); } .try svg .b.acc { stroke: var(--accent); fill: var(--accent-soft); }
+  .try svg .w { stroke: var(--line); stroke-width: 2; } .try svg .w.ok { stroke: var(--ok); } .try svg .w.bad { stroke: var(--bad); stroke-dasharray: 6 5; }
+  .try svg text.ok { fill: var(--ok); } .try svg text.bad { fill: var(--bad); } .try svg text.warn { fill: var(--warn); } .try svg text.mut { fill: var(--muted); }
+  .try .out { font-family: var(--font-mono); font-size: 14px; padding: 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H23 · Async</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Distributed transactions: Saga and Outbox</h1>
+    <p class="lede">One order touches three services, each with its own database. A saga runs one local transaction per service and undoes earlier steps if a later one fails. The outbox makes sure "save the data" and "publish the event" never drift apart. Below the lab, see why 2PC blocks.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 540" role="img" aria-label="Order saga with compensations, then a transactional outbox with a relay"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Command</span>
+        <span><i style="background: var(--signal)"></i>Event</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Failure / undo</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide try">
+      <h3>Try it: two-phase commit under failure</h3>
+      <div class="row">
+        <button class="btn" type="button" data-k="ok" aria-pressed="true">All vote YES</button>
+        <button class="btn" type="button" data-k="no">Payments votes NO</button>
+        <button class="btn" type="button" data-k="crash">Coordinator crashes after PREPARE</button>
+        <button class="btn" type="button" data-k="recover">…coordinator comes back</button>
+      </div>
+      <svg id="tpc" viewBox="0 0 700 190" role="img" aria-label="2PC coordinator with two participants"></svg>
+      <div class="out" id="tpc-out"></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Order, payment and inventory each own their data, so there's no single ACID transaction, and the PSP won't join a 2PC. I'll use an orchestrated saga: each step is a local transaction with a compensation, run in reverse on failure; the charge is the pivot. Every service writes its event to an outbox in the same transaction, and a relay or Debezium publishes it. Delivery is at-least-once, so every handler dedupes on event id."</p>
+    </div>
+    <div class="note">
+      <h3>Rules for good compensations</h3>
+      <ul>
+        <li>A compensation is a new action ("refund", "release"), not a rollback. The original write stays in history.</li>
+        <li>Idempotent and retried until it succeeds. If it keeps failing: NEEDS_ATTENTION + ops queue.</li>
+        <li>Undoable steps before the pivot (charge); retry-forward steps after it; email and shipping last.</li>
+        <li>No isolation: use PENDING states and reservations with a TTL.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>2PC vs saga styles</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Two-phase commit</th><th>Saga: orchestration</th><th>Saga: choreography</th></tr></thead>
+          <tbody>
+            <tr><td>Consistency</td><td>Atomic, strong</td><td>Eventual</td><td>Eventual</td></tr>
+            <tr><td>Failure handling</td><td>Abort everywhere; participants block while the coordinator is down</td><td>Orchestrator runs compensations in reverse</td><td>Each service reacts to failure events</td></tr>
+            <tr><td>Coupling</td><td>Tight: all participants must support XA</td><td>Services know only the orchestrator</td><td>Services know each other's events</td></tr>
+            <tr><td>Seeing the flow</td><td>Easy</td><td>Easy: saga state in one place</td><td>Hard: spread across services</td></tr>
+            <tr><td>Good for</td><td>Shards of one DB product (Spanner, CockroachDB)</td><td>Checkout, booking, payments</td><td>2–3 steps, simple reactions</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why not publish to Kafka first, then write the DB?</summary><div>Same bug in reverse: if the DB write fails after publishing, consumers act on an order that does not exist. Any two separate writes can half-fail. The outbox turns them into one local write.</div></details>
+      <details class="qa"><summary>The orchestrator crashes mid-saga. What happens?</summary><div>It saved the saga state after every step. On restart it reads that state and continues forward or keeps compensating. Steps are idempotent, so repeating the last one is safe.</div></details>
+      <details class="qa"><summary>Polling the outbox vs CDC?</summary><div>Polling (SELECT unsent rows every 100 ms with SKIP LOCKED) is simple but adds DB load and delay. CDC (Debezium on the WAL or binlog) has tens-of-ms delay and keeps commit order, but it is one more system to run.</div></details>
+      <details class="qa"><summary>Why can't an in-doubt 2PC participant just abort?</summary><div>The coordinator may already have logged COMMIT and told the other participant to commit. Aborting alone would break atomicity, so it must wait with its locks held.</div></details>
+    </div>
+    <div class="note">
+      <h3>Files</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (orchestrated saga with compensation, outbox relay with a crash, inbox dedupe)</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---- Part 1 geometry ----
+  var ORCH = { x: 20, y: 100, w: 140, h: 76 };
+  var SVC_X = 262, SVC_W = 178, SVC_H = 56;
+  var SVCS = [
+    { id: 'order', name: 'Order', y: 44 },
+    { id: 'inv', name: 'Inventory', y: 116 },
+    { id: 'pay', name: 'Payment', y: 188 },
+  ];
+  var BUS_X = 211;
+  var ROWS = [
+    ['T1', 'Order: create (PENDING)'],
+    ['T2', 'Inventory: reserve items'],
+    ['T3', 'Payment: charge ₹500'],
+    ['C2', 'Inventory: release items'],
+    ['C1', 'Order: cancel'],
+  ];
+  function cy(id) { var s = SVCS.filter(function (v) { return v.id === id; })[0]; return s.y + SVC_H / 2; }
+
+  // ---- Part 2 geometry ----
+  var SVC2 = { x: 20, y: 320, w: 150, h: 60 };
+  var BROKER = { x: 590, y: 320, w: 150, h: 70 };
+  var DB = { x: 230, y: 400, w: 220, h: 130 };
+  var RELAY = { x: 495, y: 440, w: 145, h: 56 };
+
+  function box(ctx, b, label, sub, cls, parent) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: b.x + 12, y: b.y + 22, class: 'title', text: label }, g);
+    var s = sub === null ? null : ctx.el('text', { x: b.x + 12, y: b.y + 41, class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, t: t, s: s };
+  }
+
+  function setRow(ctx, i, status, kind) {
+    var row = ctx.state.rows[i];
+    row.dot.setAttribute('class', 'dot ' + (kind || 'muted'));
+    row.status.textContent = status || '';
+    row.status.setAttribute('class', 'mono small ' + (kind ? 'fill-' + kind : 'muted'));
+    if (kind) ctx.flash(row.dot);
+  }
+
+  function setSvc(ctx, id, text, cls) {
+    var s = ctx.state.svc[id];
+    s.s.textContent = text;
+    s.r.setAttribute('class', 'box ' + (cls || ''));
+    ctx.flash(s.g);
+  }
+
+  // Orchestrator command to a service and back.
+  function call(ctx, id, cls, back) {
+    var y = cy(id);
+    var there = [[ORCH.x + ORCH.w, ORCH.y + ORCH.h / 2], [SVC_X, y]];
+    return ctx.packet(there, { ms: 650, cls: 'accent' }).then(function () {
+      if (!back) return;
+      return ctx.packet(there.slice().reverse(), { ms: 500, cls: back });
+    });
+  }
+
+  // Choreography: service emits an event onto the bus, another service picks it up.
+  function emit(ctx, from, to, label) {
+    var a = cy(from), b = cy(to);
+    return ctx.packet([[SVC_X, a], [BUS_X, a], [BUS_X, b], [SVC_X, b]], { ms: 900, label: label });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One order, three services',
+      say: 'Order, Inventory and Payment each have their own database. Part 1 places an order where the payment fails. Part 2 shows how a service saves data and publishes an event safely.',
+    },
+    setup: function (ctx) {
+      var st = ctx.state;
+      var defs = ctx.el('defs');
+      var m = ctx.el('marker', { id: 'arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+      ctx.el('path', { d: 'M0,0 L10,5 L0,10 z', class: 'fill-muted' }, m);
+
+      // Part 1
+      ctx.el('text', { x: 20, y: 24, class: 'title', text: 'Part 1 · Order saga' });
+      ctx.el('text', { x: 160, y: 24, class: 'mono small muted', text: 'one local transaction per service' });
+      st.wires = ctx.group();
+      SVCS.forEach(function (s) {
+        ctx.el('line', { x1: ORCH.x + ORCH.w, y1: ORCH.y + ORCH.h / 2, x2: SVC_X, y2: s.y + SVC_H / 2, class: 'wire' }, st.wires);
+      });
+      st.orch = box(ctx, ORCH, 'Orchestrator', 'saga: idle', 'accent');
+      ctx.el('text', { x: ORCH.x + 12, y: ORCH.y + 60, class: 'mono small muted', text: 'owns the flow' }, st.orch.g);
+
+      st.bus = ctx.group({ opacity: 0 });
+      ctx.el('rect', { x: BUS_X - 16, y: 40, width: 32, height: 208, rx: 6, class: 'box signal' }, st.bus);
+      ctx.el('text', { x: BUS_X, y: 144, 'text-anchor': 'middle', class: 'mono small', transform: 'rotate(-90 ' + BUS_X + ' 144)', text: 'event bus (Kafka)' }, st.bus);
+
+      st.svc = {};
+      SVCS.forEach(function (s) {
+        st.svc[s.id] = box(ctx, { x: SVC_X, y: s.y, w: SVC_W, h: SVC_H }, s.name, 'own DB · idle');
+      });
+
+      ctx.el('text', { x: 470, y: 58, class: 'title', text: 'Saga steps' });
+      st.rows = ROWS.map(function (r, i) {
+        var y = 84 + i * 26;
+        var dot = ctx.el('circle', { cx: 478, cy: y - 4, r: 5, class: 'dot muted' });
+        ctx.el('text', { x: 492, y: y, class: 'mono small', text: r[0] + '  ' + r[1] });
+        var status = ctx.el('text', { x: 740, y: y, 'text-anchor': 'end', class: 'mono small muted', text: '' });
+        return { dot: dot, status: status };
+      });
+      ctx.el('line', { x1: 470, y1: 149, x2: 740, y2: 149, class: 'wire dashed' });
+      ctx.el('text', { x: 470, y: 214, class: 'mono small muted', text: 'Undo steps run in reverse order.' });
+      st.mode = ctx.el('text', { x: 470, y: 236, class: 'mono small muted', text: 'mode: orchestration' });
+
+      ctx.el('line', { x1: 0, y1: 268, x2: 760, y2: 268, class: 'wire' });
+
+      // Part 2
+      ctx.el('text', { x: 20, y: 294, class: 'title', text: 'Part 2 · Saving data and publishing an event' });
+      st.direct = ctx.el('line', { x1: SVC2.x + SVC2.w, y1: 350, x2: BROKER.x, y2: 350, class: 'wire', 'marker-end': 'url(#arr)' });
+      ctx.el('path', { d: 'M95,380 L95,465 L230,465', class: 'wire', 'marker-end': 'url(#arr)' });
+      st.svc2 = box(ctx, SVC2, 'Order service', 'Node app');
+      st.broker = box(ctx, BROKER, 'Kafka', 'topic: orders');
+      st.events = ctx.el('text', { x: BROKER.x + 12, y: BROKER.y + 59, class: 'mono small', text: 'events: none' });
+
+      st.db = box(ctx, DB, 'Order DB', null);
+      ctx.el('text', { x: DB.x + 10, y: DB.y + 45, class: 'mono small muted', text: 'orders' });
+      ctx.el('rect', { x: DB.x + 10, y: DB.y + 50, width: 200, height: 26, rx: 4, class: 'box' });
+      st.orderRow = ctx.el('text', { x: DB.x + 18, y: DB.y + 67, class: 'mono small muted', text: '(empty)' });
+      st.outbox = ctx.group({ opacity: 0 });
+      ctx.el('text', { x: DB.x + 10, y: DB.y + 93, class: 'mono small muted', text: 'outbox' }, st.outbox);
+      ctx.el('rect', { x: DB.x + 10, y: DB.y + 98, width: 200, height: 26, rx: 4, class: 'box signal' }, st.outbox);
+      st.outRow = ctx.el('text', { x: DB.x + 18, y: DB.y + 115, class: 'mono small', text: '' }, st.outbox);
+      st.tx = ctx.group({ opacity: 0 });
+      ctx.el('rect', { x: DB.x + 5, y: DB.y + 32, width: 210, height: 94, rx: 6, class: 'wire accent dashed' }, st.tx);
+      ctx.el('text', { x: DB.x + DB.w - 10, y: DB.y + 22, 'text-anchor': 'end', class: 'mono small', style: 'fill: var(--accent)', text: '1 transaction' }, st.tx);
+
+      st.relay = ctx.group({ opacity: 0 });
+      ctx.el('line', { x1: DB.x + DB.w, y1: 468, x2: RELAY.x, y2: 468, class: 'wire', 'marker-end': 'url(#arr)' }, st.relay);
+      ctx.el('path', { d: 'M567,440 L567,412 L665,412 L665,390', class: 'wire', 'marker-end': 'url(#arr)' }, st.relay);
+      st.relayBox = box(ctx, RELAY, 'Outbox relay', 'poll or CDC', '', st.relay);
+
+      st.crash = ctx.group({ opacity: 0 });
+      ctx.el('text', { x: 380, y: 340, 'text-anchor': 'middle', class: 'title', style: 'fill: var(--bad)', text: '✕ crash' }, st.crash);
+      st.relayCrash = ctx.el('text', { x: RELAY.x + RELAY.w + 8, y: RELAY.y + 34, class: 'mono small', style: 'fill: var(--bad)', opacity: 0, text: '✕' });
+      st.consumer = ctx.el('text', { x: 740, y: 528, 'text-anchor': 'end', class: 'mono small muted', text: 'consumer: Inventory' });
+    },
+    steps: [
+      {
+        title: 'T1: the Order service creates the order',
+        say: 'A saga splits one business transaction into local transactions, one per service. First the orchestrator asks the Order service to save order o-42 as <code>PENDING</code>. That commit is final in the Order DB.',
+        run: function (ctx) {
+          ctx.state.orch.s.textContent = 'saga: running T1';
+          return call(ctx, 'order', 'ok', 'ok').then(function () {
+            setSvc(ctx, 'order', 'o-42 PENDING', 'ok');
+            setRow(ctx, 0, 'done', 'ok');
+            ctx.log('T1 Order: o-42 saved as PENDING', 'ok');
+          });
+        },
+      },
+      {
+        title: 'T2: Inventory reserves the items',
+        say: 'Next the orchestrator asks Inventory to reserve 2 items. Inventory commits in its own database. Two services have now committed changes that the other services cannot roll back.',
+        run: function (ctx) {
+          ctx.state.orch.s.textContent = 'saga: running T2';
+          return call(ctx, 'inv', 'ok', 'ok').then(function () {
+            setSvc(ctx, 'inv', '2 items reserved', 'ok');
+            setRow(ctx, 1, 'done', 'ok');
+            ctx.log('T2 Inventory: 2 items reserved', 'ok');
+          });
+        },
+      },
+      {
+        title: 'T3: the payment fails',
+        say: 'The card is declined. There is no global rollback across three databases, and T1 and T2 are already committed. The saga must undo them with <b>compensating transactions</b>.',
+        run: function (ctx) {
+          ctx.state.orch.s.textContent = 'saga: running T3';
+          return call(ctx, 'pay', 'accent', 'bad').then(function () {
+            setSvc(ctx, 'pay', 'card declined', 'bad');
+            setRow(ctx, 2, 'failed', 'bad');
+            ctx.state.orch.s.textContent = 'saga: compensating';
+            ctx.log('T3 Payment: card declined', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Compensate in reverse order',
+        say: 'The orchestrator runs C2 (release items), then C1 (cancel order). A compensation is a new action, not a database rollback, so it must be idempotent and retried until it works. For a short time the user can see a PENDING order: a saga is eventually consistent, with no isolation.',
+        run: function (ctx) {
+          return call(ctx, 'inv', 'bad', 'ok').then(function () {
+            setSvc(ctx, 'inv', 'items released', '');
+            setRow(ctx, 3, 'undone', 'warn');
+            ctx.log('C2 Inventory: reservation released', 'warn');
+            return call(ctx, 'order', 'bad', 'ok');
+          }).then(function () {
+            setSvc(ctx, 'order', 'o-42 CANCELLED', '');
+            setRow(ctx, 4, 'undone', 'warn');
+            ctx.state.orch.s.textContent = 'saga: compensated';
+            ctx.log('C1 Order: o-42 cancelled. Saga ends in a clean state', 'info');
+          });
+        },
+      },
+      {
+        title: 'Choreography: the same saga with events',
+        say: 'Now there is no orchestrator. Each service listens for events and emits its own. The services are loosely coupled, but nobody owns the whole flow, so it is hard to follow and debug. Choose orchestration when there are many steps.',
+        run: function (ctx) {
+          var st = ctx.state;
+          st.mode.textContent = 'mode: choreography (no central owner)';
+          ROWS.forEach(function (r, i) { setRow(ctx, i, '', null); });
+          SVCS.forEach(function (s) { setSvc(ctx, s.id, 'own DB · idle', ''); });
+          ctx.log('Switch to choreography: services react to events', 'info');
+          return Promise.all([ctx.fade(st.orch.g, 0.2, 400), ctx.fade(st.wires, 0.15, 400), ctx.fade(st.bus, 1, 400)])
+            .then(function () {
+              setSvc(ctx, 'order', 'o-43 PENDING', 'ok'); setRow(ctx, 0, 'done', 'ok');
+              ctx.log('Order emits OrderCreated', 'info');
+              return emit(ctx, 'order', 'inv', 'OrderCreated');
+            })
+            .then(function () {
+              setSvc(ctx, 'inv', '2 items reserved', 'ok'); setRow(ctx, 1, 'done', 'ok');
+              ctx.log('Inventory reserves, emits StockReserved', 'info');
+              return emit(ctx, 'inv', 'pay', 'StockReserved');
+            })
+            .then(function () {
+              setSvc(ctx, 'pay', 'card declined', 'bad'); setRow(ctx, 2, 'failed', 'bad');
+              ctx.log('Payment fails, emits PaymentFailed', 'bad');
+              return Promise.all([emit(ctx, 'pay', 'inv', 'PaymentFailed'), emit(ctx, 'pay', 'order', '')]);
+            })
+            .then(function () {
+              setSvc(ctx, 'inv', 'items released', ''); setRow(ctx, 3, 'undone', 'warn');
+              setSvc(ctx, 'order', 'o-43 CANCELLED', ''); setRow(ctx, 4, 'undone', 'warn');
+              ctx.log('Inventory releases, Order cancels', 'warn');
+            });
+        },
+      },
+      {
+        title: 'Part 2: the dual-write problem',
+        say: 'To start the saga, the Order service must save the order <b>and</b> publish <code>OrderCreated</code>. The DB and Kafka share no transaction. If the process crashes between the two writes, the order exists but no event is sent, and the saga never starts.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ctx.packet([[95, 380], [95, 465], [230, 465]], { ms: 700, cls: 'accent' }).then(function () {
+            st.orderRow.textContent = 'o-44  PENDING';
+            st.orderRow.setAttribute('class', 'mono small');
+            ctx.flash(st.orderRow);
+            ctx.log('INSERT orders o-44 → COMMIT', 'ok');
+            return ctx.packet([[170, 350], [370, 350]], { ms: 600, cls: '' });
+          }).then(function () {
+            ctx.log('Process crashes before publishing OrderCreated', 'bad');
+            ctx.log('Order o-44 is stuck: no service ever hears about it', 'bad');
+            st.svc2.r.setAttribute('class', 'box bad');
+            return ctx.fade(st.crash, 1, 300);
+          });
+        },
+      },
+      {
+        title: 'Fix: write the event into an outbox table',
+        say: 'Add an <code>outbox</code> table to the same database. Insert the order and the event in <b>one local transaction</b>. Now both rows exist or neither does. The service no longer talks to Kafka directly.',
+        run: function (ctx) {
+          var st = ctx.state;
+          st.svc2.r.setAttribute('class', 'box');
+          return Promise.all([ctx.fade(st.crash, 0, 300), ctx.fade(st.direct, 0.15, 300), ctx.fade(st.outbox, 1, 400), ctx.fade(st.tx, 1, 400)])
+            .then(function () {
+              ctx.log('BEGIN', 'info');
+              return ctx.packet([[95, 380], [95, 465], [230, 465]], { ms: 700, cls: 'accent' });
+            })
+            .then(function () {
+              st.orderRow.textContent = 'o-45  PENDING';
+              st.outRow.textContent = 'e7  OrderCreated · new';
+              ctx.flash(st.orderRow); ctx.flash(st.outRow);
+              ctx.log('INSERT orders o-45; INSERT outbox e7', 'info');
+              ctx.log('COMMIT: both rows saved together', 'ok');
+            });
+        },
+      },
+      {
+        title: 'A relay publishes from the outbox',
+        say: 'A separate relay reads new outbox rows and publishes them to Kafka, then marks them sent. It can poll the table, or read the database log with CDC (for example Debezium). If Kafka is down, rows wait in the table, so no event is lost.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ctx.fade(st.relay, 1, 400).then(function () {
+            ctx.log('Relay: SELECT unsent rows → e7', 'info');
+            return ctx.packet([[450, 468], [495, 468]], { ms: 450, cls: '' });
+          }).then(function () {
+            return ctx.packet([[567, 440], [567, 412], [665, 412], [665, 390]], { ms: 650, cls: '' });
+          }).then(function () {
+            st.events.textContent = 'events: e7';
+            ctx.flash(st.broker.g);
+            st.outRow.textContent = 'e7  OrderCreated · sent';
+            ctx.log('Published e7 to Kafka, row marked sent', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Relay crash means duplicates, so consumers dedupe',
+        say: 'The relay can crash after publishing but before it marks the row sent. On restart it sends the same event again. So the outbox gives <b>at-least-once</b> delivery. Each consumer stores processed event IDs and skips repeats.',
+        run: function (ctx) {
+          var st = ctx.state;
+          st.outRow.textContent = 'e8  OrderPaid · new';
+          ctx.flash(st.outRow);
+          ctx.log('New outbox row e8', 'info');
+          return ctx.packet([[450, 468], [495, 468]], { ms: 400, cls: '' })
+            .then(function () { return ctx.packet([[567, 440], [567, 412], [665, 412], [665, 390]], { ms: 550, cls: '' }); })
+            .then(function () {
+              st.events.textContent = 'events: e7, e8';
+              st.relayBox.r.setAttribute('class', 'box bad');
+              st.relayCrash.setAttribute('opacity', 1);
+              ctx.log('e8 published, then relay crashes before marking it sent', 'bad');
+              return ctx.wait(500);
+            })
+            .then(function () {
+              st.relayBox.r.setAttribute('class', 'box');
+              st.relayCrash.setAttribute('opacity', 0);
+              ctx.log('Relay restarts: e8 still looks new, so it sends it again', 'warn');
+              return ctx.packet([[567, 440], [567, 412], [665, 412], [665, 390]], { ms: 550, cls: 'bad' });
+            })
+            .then(function () {
+              st.events.textContent = 'events: e7, e8, e8';
+              st.outRow.textContent = 'e8  OrderPaid · sent';
+              st.consumer.textContent = 'Inventory: e8 seen before → skip';
+              st.consumer.setAttribute('class', 'mono small fill-ok');
+              ctx.log('Consumer finds e8 in processed_events and skips it', 'ok');
+            });
+        },
+      },
+    ],
+  });
+  // ---- Try it: 2PC panel (independent of the step player) ----
+  var T = {
+    ok: { c: ['acc', 'COMMIT logged'], i: ['ok', 'prepared → COMMITTED'], p: ['ok', 'prepared → COMMITTED'], w: 'ok',
+      out: 'Atomic: both commit. The cost: 2 round trips, forced log writes, and row locks held from PREPARE until COMMIT arrives.' },
+    no: { c: ['warn', 'ABORT logged'], i: ['warn', 'prepared → ABORTED'], p: ['bad', 'voted NO → ABORTED'], w: 'ok',
+      out: 'One NO aborts everyone. Inventory had already prepared, so it held locks for the whole vote just to throw the work away.' },
+    crash: { c: ['bad', 'CRASHED (no decision sent)'], i: ['warn', 'YES voted · IN DOUBT · locks held'], p: ['warn', 'YES voted · IN DOUBT · locks held'], w: 'bad',
+      out: 'Blocking: both voted YES and may not decide alone. Their rows stay locked; every other transaction on them waits until the coordinator returns.' },
+    recover: { c: ['acc', 'restarted · log: no COMMIT → ABORT'], i: ['ok', 'ABORTED · locks released'], p: ['ok', 'ABORTED · locks released'], w: 'ok',
+      out: 'Recovery: the coordinator reads its log. No COMMIT record, so it aborts (presumed abort) and participants release locks. Spanner avoids the wait by making the coordinator a Paxos group.' },
+  };
+  var svgT = document.getElementById('tpc'), NS = 'http://www.w3.org/2000/svg';
+  function mk(tag, a) { var n = document.createElementNS(NS, tag); Object.keys(a).forEach(function (k) { if (k === 'text') n.textContent = a[k]; else n.setAttribute(k, a[k]); }); svgT.appendChild(n); return n; }
+  function draw(k) {
+    var s = T[k];
+    while (svgT.firstChild) svgT.removeChild(svgT.firstChild);
+    mk('line', { x1: 200, y1: 95, x2: 440, y2: 50, class: 'w ' + s.w });
+    mk('line', { x1: 200, y1: 95, x2: 440, y2: 140, class: 'w ' + s.w });
+    mk('text', { x: 280, y: 60, class: 'mut', text: 'PREPARE / vote' });
+    mk('text', { x: 280, y: 140, class: 'mut', text: 'COMMIT / ABORT' });
+    [['Coordinator', 20, 65, s.c], ['Inventory DB', 440, 20, s.i], ['Payments DB', 440, 110, s.p]].forEach(function (b) {
+      mk('rect', { x: b[1], y: b[2], width: b[0] === 'Coordinator' ? 180 : 250, height: 60, rx: 8, class: 'b ' + b[3][0] });
+      mk('text', { x: b[1] + 12, y: b[2] + 24, class: 't', text: b[0] });
+      mk('text', { x: b[1] + 12, y: b[2] + 46, class: b[3][0] === 'acc' ? '' : b[3][0], text: b[3][1] });
+    });
+    document.getElementById('tpc-out').textContent = s.out;
+    Array.prototype.forEach.call(document.querySelectorAll('.try .btn'), function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-k') === k ? 'true' : 'false'); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.try .btn'), function (b) { b.addEventListener('click', function () { draw(b.getAttribute('data-k')); }); });
+  draw('ok');
+})();
+</script>
+</body>
+</html>

@@ -95,6 +95,6 @@ The internals are **your design**. The tests only use the API above.
 
 ## Concepts used
 
-- [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Chain of Responsibility](../../concepts/patterns/p14-chain-of-responsibility.md) · [SOLID](../../concepts/02-solid.md) · [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md)
-- Related problem: [BookMyShow seat locking](../13-bookmyshow/) (the same reserve-then-confirm idea)
-- Visuals: [Decorator and Chain of Responsibility](../../../visuals/v26-decorator-chain.html) · [Strategy + Factory](../../../visuals/v23-strategy-factory.html) · [Seat locking and race conditions](../../../visuals/v28-seat-locking.html)
+- [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Chain of Responsibility](../../4-behavioral/L25-chain-of-responsibility/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md) · [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- Related problem: [BookMyShow seat locking](../13-bookmyshow) (the same reserve-then-confirm idea)
+- Visuals: [Decorator and Chain of Responsibility](../../3-structural/L14-decorator/visual.html) · [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html) · [Seat locking and race conditions](../../5-machine-coding/L32-concurrency-in-node/visual.html)

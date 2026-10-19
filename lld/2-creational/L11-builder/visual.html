@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L11 Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .rowhl { fill: var(--accent-soft); }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .try label { display: inline-flex; gap: 4px; align-items: center; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L11 · Creational</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Builder</h1>
+    <p class="lede">Build a complex object step by step with named methods, check every rule once in <code>build()</code>, and get back a frozen object. Watch the fields fill in, one rule fail, and the fixed order come out locked.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="A builder collecting fields, validating, and producing a frozen payment order"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <label><input type="checkbox" id="t-cust" checked> customer</label>
+        <label><input type="checkbox" id="t-amt" checked> amount &gt; 0</label>
+        <label><input type="checkbox" id="t-man"> manual capture</label>
+        <label><input type="checkbox" id="t-by"> captureWithin</label>
+        <button class="btn" type="button" id="t-build">build()</button>
+        <span id="try-out">Run to step 2 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Method call</span>
+        <span><i style="background: var(--accent)"></i>Returns <code>this</code> (chaining)</span>
+        <span><i style="background: var(--ok)"></i>Rule passed / frozen object</span>
+        <span><i style="background: var(--bad)"></i>Rule failed / blocked</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">class PaymentOrderBuilder {</span><span class="ln" data-l="2">  private o: Draft = { currency: 'INR', capture: 'auto', notes: {} };</span><span class="ln" data-l="3">  forCustomer(id: string) { this.o.customerId = id; return this; }</span><span class="ln" data-l="4">  amountInPaise(p: number) { this.o.amount = p; return this; }</span><span class="ln" data-l="5">  manualCapture() { this.o.capture = 'manual'; return this; }</span><span class="ln" data-l="6">  captureWithin(h: number) { this.o.captureWithinH = h; return this; }</span><span class="ln" data-l="7">  build(): Readonly&lt;PaymentOrder&gt; {</span><span class="ln" data-l="8">    if (!this.o.customerId) throw new ValidationError('customerId required');</span><span class="ln" data-l="9">    if (!(this.o.amount! &gt; 0)) throw new ValidationError('amount must be &gt; 0');</span><span class="ln" data-l="10">    if (this.o.capture === 'manual' &amp;&amp; !this.o.captureWithinH)</span><span class="ln" data-l="11">      throw new ValidationError('manual capture needs captureWithin');</span><span class="ln" data-l="12">    return Object.freeze({ ...this.o, notes: { ...this.o.notes } });</span><span class="ln" data-l="13">  }</span><span class="ln" data-l="14">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A payment order has many optional fields and rules between them, like 'manual capture needs a capture window'. I use a builder with named methods, keep defaults inside it, and check every rule once in <code>build()</code>. The result is frozen, so the rules stay true. For a simple object with independent fields I'd just use an options object, since TypeScript already gives named fields."</p>
+    </div>
+    <div class="note wide">
+      <h3>Constructor vs options object vs builder</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Positional constructor</th><th>Options object</th><th>Builder</th><th>Step builder</th></tr></thead>
+          <tbody>
+            <tr><td>Readable call site</td><td>No (10 args, which is which?)</td><td>Yes (named fields)</td><td>Yes (named methods)</td><td>Yes</td></tr>
+            <tr><td>Rules between fields</td><td>In the constructor</td><td>In the function</td><td>In <code>build()</code>, one place</td><td>Some enforced by types</td></tr>
+            <tr><td>Assemble over several steps</td><td>No</td><td>Awkward</td><td>Yes</td><td>Yes, in a fixed order</td></tr>
+            <tr><td>Required fields checked at</td><td>Compile time</td><td>Compile time</td><td>Runtime (<code>build()</code>)</td><td>Compile time</td></tr>
+            <tr><td>Use when</td><td>2–3 fields</td><td>Independent fields</td><td>Many optional parts + rules</td><td>Public APIs, SDKs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why validate in <code>build()</code> and not in each setter?</summary><div>Some rules involve several fields ("manual capture needs captureWithin"). While the builder is half filled, those rules are not checkable yet. <code>build()</code> is the one moment when all fields are known.</div></details>
+      <details class="qa"><summary>Why copy <code>notes</code> into the result instead of passing the same object?</summary><div>So later calls on the builder (<code>.note('x', 'y')</code>) cannot change an object that was already built and validated. <code>Object.freeze</code> is shallow, so nested objects need their own copy (and freeze if you want).</div></details>
+      <details class="qa"><summary>Builder vs Factory?</summary><div>Factory decides <b>which</b> class to create, in one call. Builder decides <b>how</b> to assemble one object over several calls. They can combine: a factory returns a pre-filled builder.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var FIELDS = ['customerId', 'amount', 'currency', 'capture', 'captureWithinH', 'notes'];
+  var DEF = { customerId: '—', amount: '—', currency: "'INR' (default)", capture: "'auto' (default)", captureWithinH: '—', notes: '{}' };
+  var CHAIN = [
+    'new PaymentOrderBuilder()',
+    "  .forCustomer('cust_9')",
+    '  .amountInPaise(49900)',
+    '  .manualCapture()',
+    "  .note('cart', 'c_77')",
+    '  .build()      // throws',
+    '  .captureWithin(24)',
+    '  .build()      // ok',
+  ];
+  var BX = 275, BW = 230, BY = 104, RH = 22;
+  var RX = 530, RW = 210;
+  var RULES = ['customerId is set', 'amount > 0', 'manual ⇒ captureWithin'];
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+
+  function box(ctx, parent, x, y, w, h, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: x + 10, y: y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: x + 10, y: y + 37 + i * 16, class: 'mono small', text: l }, g);
+    });
+    return g;
+  }
+  function clearG(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  function showChain(ctx, i) {
+    var s = ctx.state;
+    s.chain[i].setAttribute('opacity', 1);
+    s.chainHl.setAttribute('opacity', 1);
+    return ctx.animate(s.chainHl, { y: 112 + i * 22 - 15 }, 200);
+  }
+  function rowY(fi) { return BY + 34 + fi * RH; }
+
+  // A setter call: chain line → builder field fills → `this` comes back.
+  function setField(ctx, ci, fi, value, warn) {
+    var s = ctx.state;
+    return showChain(ctx, ci).then(function () {
+      ctx.log('builder' + s.chainText[ci].trim() + ' → returns this', 'info');
+      return ctx.packet([[240, 112 + ci * 22 - 4], [BX, rowY(fi) - 4]], { ms: 420 });
+    }).then(function () {
+      s.vals[fi].textContent = value;
+      s.vals[fi].setAttribute('class', 'mono small ' + (warn ? 'fill-warn' : 'fill-ok'));
+      ctx.flash(s.vals[fi]);
+      return ctx.packet([[BX, rowY(fi) + 2], [240, 112 + ci * 22 + 2]], { ms: 300, cls: 'accent', label: 'this' });
+    });
+  }
+
+  // Run the rules against a draft; animate each check. Returns true if all pass.
+  function validate(ctx, d) {
+    var s = ctx.state;
+    var res = [!!d.customerId, d.amount > 0, !(d.manual && !d.within)];
+    s.rules.forEach(function (r) { r.mark.textContent = '·'; r.mark.setAttribute('class', 'mono muted'); r.txt.setAttribute('class', 'mono small'); });
+    var chain = ctx.packet([[BX + BW, BY + 60], [RX, 128]], { ms: 400, label: 'build()' });
+    var failed = -1;
+    res.forEach(function (ok, i) {
+      chain = chain.then(function () {
+        if (failed >= 0) return;
+        var r = s.rules[i];
+        r.mark.textContent = ok ? '✓' : '✗';
+        r.mark.setAttribute('class', 'mono ' + (ok ? 'fill-ok' : 'fill-bad'));
+        r.txt.setAttribute('class', 'mono small ' + (ok ? 'fill-ok' : 'fill-bad'));
+        ctx.flash(r.txt);
+        if (!ok) failed = i;
+        return ctx.tween(220, function () {});
+      });
+    });
+    return chain.then(function () { return failed; });
+  }
+
+  function showResult(ctx, d) {
+    var s = ctx.state;
+    s.res.t.textContent = 'PaymentOrder';
+    s.res.r.setAttribute('class', 'box ok');
+    var lines = ["customerId: '" + d.customerId + "'", 'amount: ' + d.amount, "capture: '" + (d.manual ? 'manual' : 'auto') + "'" + (d.within ? ', 24h' : ''), "currency: 'INR'", 'Object.isFrozen → true'];
+    s.res.lines.forEach(function (l, i) { l.textContent = lines[i] || ''; l.setAttribute('class', 'mono small'); });
+    s.lock.setAttribute('opacity', 1);
+    return ctx.fade(s.res, 1, 300);
+  }
+  function showError(ctx, msg) {
+    var s = ctx.state;
+    s.res.t.textContent = 'throw ValidationError';
+    s.res.r.setAttribute('class', 'box bad');
+    s.res.lines.forEach(function (l, i) { l.textContent = i === 0 ? msg : i === 1 ? 'no object is created' : ''; l.setAttribute('class', 'mono small fill-bad'); });
+    s.lock.setAttribute('opacity', 0);
+    return ctx.fade(s.res, 1, 300);
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A payment order with many optional parts',
+      say: 'Customer, amount, currency, capture mode, a capture window and free-form notes. Some are required, some have defaults, and one rule links two fields.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      // the "before" strip
+      s.before = ctx.group();
+      ctx.el('text', { x: 20, y: 26, class: 'mono small muted', text: 'Before: telescoping constructor' }, s.before);
+      var args = ["'ord_1'", '49900', "'INR'", 'undefined', 'undefined', 'true', '3', "'cust_9'", 'undefined', "'note'"];
+      s.args = args.map(function (a, i) {
+        var g = ctx.group({}, s.before);
+        g.r = ctx.el('rect', { x: 20 + i * 73, y: 36, width: 68, height: 30, rx: 5, class: 'box' }, g);
+        ctx.el('text', { x: 54 + i * 73, y: 55, 'text-anchor': 'middle', class: 'mono small', text: a }, g);
+        return g;
+      });
+      s.argNote = ctx.el('text', { x: 20, y: 84, class: 'mono small', text: 'new PaymentOrder(…10 positional args…)' }, s.before);
+      ctx.el('line', { x1: 10, y1: 92, x2: 750, y2: 92, class: 'divider' });
+      // caller chain
+      s.mainG = ctx.group({ opacity: 0 });
+      s.chainHl = ctx.el('rect', { x: 14, y: 97, width: 236, height: 20, rx: 4, class: 'rowhl', opacity: 0 }, s.mainG);
+      s.chainText = CHAIN;
+      s.chain = CHAIN.map(function (c, i) {
+        return ctx.el('text', { x: 20, y: 112 + i * 22, class: 'mono', text: c, opacity: 0 }, s.mainG);
+      });
+      // builder
+      var b = box(ctx, s.mainG, BX, BY, BW, 34 + FIELDS.length * RH + 6, 'PaymentOrderBuilder', [], 'signal');
+      s.builder = b;
+      s.vals = FIELDS.map(function (f, i) {
+        ctx.el('text', { x: BX + 10, y: rowY(i) + 4, class: 'mono small muted', text: f + ':' }, s.mainG);
+        return ctx.el('text', { x: BX + 118, y: rowY(i) + 4, class: 'mono small', text: DEF[f] }, s.mainG);
+      });
+      // rules
+      var rb = box(ctx, s.mainG, RX, BY, RW, 100, 'build() checks', [], '');
+      s.rules = RULES.map(function (r, i) {
+        return {
+          mark: ctx.el('text', { x: RX + 12, y: BY + 44 + i * 20, class: 'mono muted', text: '·' }, s.mainG),
+          txt: ctx.el('text', { x: RX + 30, y: BY + 44 + i * 20, class: 'mono small', text: r }, s.mainG),
+        };
+      });
+      // result
+      s.res = box(ctx, null, RX, 222, RW, 112, 'result', ['', '', '', '', ''], '');
+      s.res.setAttribute('opacity', 0);
+      s.lock = ctx.el('text', { x: RX + RW - 14, y: 241, 'text-anchor': 'end', class: 'mono fill-ok', text: '[locked]', opacity: 0 });
+      ctx.el('line', { x1: 10, y1: 350, x2: 750, y2: 350, class: 'divider' });
+      s.panel = ctx.group();
+      s.draft = { manual: false, within: false };
+    },
+    steps: [
+      {
+        title: 'Before: the telescoping constructor',
+        say: 'Ten positional arguments. Is <code>true</code> auto-capture? Is <code>3</code> retries or a capture window? Swap two of them and it still compiles. Validation is spread over many call sites.',
+        run: function (ctx) {
+          var s = ctx.state;
+          ctx.log("new PaymentOrder('ord_1', 49900, 'INR', undefined, undefined, true, 3, …)", 'info');
+          return ctx.tween(300, function () {}).then(function () {
+            [5, 6].forEach(function (i) { s.args[i].r.setAttribute('class', 'box bad'); ctx.flash(s.args[i].r); });
+            s.argNote.textContent = 'true = autoCapture? 3 = retries or hours? both numbers/booleans → swap compiles';
+            s.argNote.setAttribute('class', 'mono small fill-bad');
+            ctx.log('args 6 and 7 swapped: no compile error, wrong behaviour', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Create a builder with defaults',
+        say: '<code>new PaymentOrderBuilder()</code> starts with safe defaults: currency INR, auto capture, empty notes. Required fields are still empty.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([1, 2]);
+          s.ready = true;
+          return ctx.fade(s.before, 0.35, 300).then(function () { return ctx.fade(s.mainG, 1, 400); })
+            .then(function () { return showChain(ctx, 0); })
+            .then(function () { ctx.flash(s.builder.r); ctx.log('new PaymentOrderBuilder(): defaults set', 'info'); });
+        },
+      },
+      {
+        title: 'Named steps fill the fields',
+        say: 'Each method sets one field and returns <code>this</code>, so calls chain. The call site reads like a sentence: for customer, amount in paise.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([3, 4]);
+          return setField(ctx, 1, 0, "'cust_9'").then(function () { s.draft.customerId = 'cust_9'; return setField(ctx, 2, 1, '49900 (paise)'); })
+            .then(function () { s.draft.amount = 49900; });
+        },
+      },
+      {
+        title: 'manualCapture() creates a rule',
+        say: 'Manual capture means we authorise now and capture later. That needs a capture window. The builder cannot check this yet: the window might come in a later call.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([5]);
+          return setField(ctx, 3, 3, "'manual'", true).then(function () {
+            s.draft.manual = true;
+            return setField(ctx, 4, 5, "{ cart: 'c_77' }");
+          }).then(function () { ctx.log('rule now pending: manual ⇒ captureWithin', 'warn'); });
+        },
+      },
+      {
+        title: 'build() checks every rule, and one fails',
+        say: '<code>build()</code> is the one place where all fields are known, so it checks them all. The capture window is missing, so it throws. No half-valid order ever exists.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([7, 8, 9, 10, 11]);
+          return showChain(ctx, 5).then(function () { return validate(ctx, s.draft); }).then(function (f) {
+            ctx.log("ValidationError: manual capture needs captureWithin", 'bad');
+            return showError(ctx, 'manual capture needs captureWithin');
+          });
+        },
+      },
+      {
+        title: 'Add the missing step, build again',
+        say: 'Call <code>.captureWithin(24)</code>, then <code>build()</code>. All three rules pass. The builder copies its fields into a new object and freezes it.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([6, 12]);
+          return setField(ctx, 6, 4, '24 (hours)').then(function () {
+            s.draft.within = true;
+            return showChain(ctx, 7);
+          }).then(function () { return validate(ctx, s.draft); }).then(function () {
+            ctx.log('Object.freeze({ ...fields, notes: { ...notes } })', 'ok');
+            return showResult(ctx, s.draft);
+          });
+        },
+      },
+      {
+        title: 'The built object cannot change',
+        say: 'Some later code tries <code>order.amount = 1</code>. TypeScript rejects it (<code>readonly</code>), and at runtime the frozen object ignores it (or throws in strict mode). The checks done in <code>build()</code> stay true.',
+        run: function (ctx) {
+          var s = ctx.state;
+          ctx.log('order.amount = 1', 'info');
+          return ctx.packet([[RX - 60, 300], [RX, 270], [RX - 60, 300]], { ms: 700, cls: 'bad', label: 'amount = 1' }).then(function () {
+            ctx.flash(s.res.r);
+            ctx.log("TS2540: Cannot assign to 'amount' because it is a read-only property", 'bad');
+            ctx.log('runtime: TypeError in strict mode, amount still 49900', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Step builder: let the types force the order',
+        say: 'For a public API you can make required steps a compile-time check. Each method returns an interface with only the next allowed methods. <code>build()</code> does not exist until customer and amount are set.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([]);
+          clearG(p);
+          ctx.el('text', { x: 20, y: 374, class: 'title', text: 'Step builder' }, p);
+          var st = [
+            { n: 'NeedsCustomer', m: 'forCustomer()' },
+            { n: 'NeedsAmount', m: 'amountInPaise()' },
+            { n: 'Optional', m: 'manualCapture() … build()' },
+          ];
+          var boxes = st.map(function (x, i) {
+            if (i < 2) ctx.el('path', { d: 'M' + (230 + i * 250) + ',415 H' + (270 + i * 250), class: 'uml' }, p);
+            var g = box(ctx, p, 20 + i * 250, 390, 210, 50, x.n, [x.m], i === 2 ? 'ok' : 'accent');
+            g.setAttribute('opacity', 0);
+            return g;
+          });
+          var chain = Promise.resolve();
+          boxes.forEach(function (b, i) {
+            chain = chain.then(function () { return ctx.fade(b, 1, 250); }).then(function () {
+              if (i < 2) return ctx.packet([[230 + i * 250, 415], [270 + i * 250, 415]], { ms: 300, label: i ? '' : '' });
+            });
+          });
+          return chain.then(function () {
+            ctx.log('PaymentOrder.builder().build() → TS2339: build does not exist on NeedsCustomer', 'bad');
+            ctx.log('required fields: checked by the compiler, not at runtime', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: build a draft from the checkboxes ----
+  var out = document.getElementById('try-out');
+  document.getElementById('t-build').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.ready) { out.textContent = 'Run to step 2 first (the builder must exist).'; return; }
+    var d = {
+      customerId: document.getElementById('t-cust').checked ? 'cust_9' : '',
+      amount: document.getElementById('t-amt').checked ? 49900 : 0,
+      manual: document.getElementById('t-man').checked,
+      within: document.getElementById('t-by').checked,
+    };
+    s.vals[0].textContent = d.customerId ? "'cust_9'" : '—';
+    s.vals[1].textContent = d.amount ? '49900 (paise)' : '0';
+    s.vals[3].textContent = d.manual ? "'manual'" : "'auto'";
+    s.vals[4].textContent = d.within ? '24 (hours)' : '—';
+    ctx.log('try it: build() with your fields', 'info');
+    validate(ctx, d).then(function (f) {
+      if (f >= 0) {
+        var msg = ['customerId required', 'amount must be > 0', 'manual capture needs captureWithin'][f];
+        out.textContent = 'ValidationError: ' + msg;
+        ctx.log('ValidationError: ' + msg, 'bad');
+        return showError(ctx, msg);
+      }
+      out.textContent = 'Built and frozen.';
+      ctx.log('build() ok → frozen PaymentOrder', 'ok');
+      return showResult(ctx, d);
+    });
+  });
+})();
+</script>
+</body>
+</html>

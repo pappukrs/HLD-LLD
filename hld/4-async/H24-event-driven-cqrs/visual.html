@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H24 CQRS and event sourcing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage .cell { fill: var(--surface); stroke: var(--signal); stroke-width: 1.5; }
+  .stage .cell.old { stroke: var(--line); }
+  .stage .cell.snap { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .stage .cell.bad { stroke: var(--bad); stroke-width: 2; }
+  .es .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; font-size: 14px; }
+  .es input[type="number"] { width: 90px; }
+  .es input[type="range"] { flex: 1; min-width: 160px; }
+  .es ol { font-family: var(--font-mono); font-size: 13px; margin: 0 0 10px; padding-left: 28px; max-height: 180px; overflow: auto; }
+  .es ol li.future { opacity: 0.35; }
+  .es ol li.bad { color: var(--bad); }
+  .es .out { font-family: var(--font-mono); font-size: 14px; padding: 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H24 · Async</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Event-driven, CQRS and event sourcing</h1>
+    <p class="lede">The write side checks rules and emits facts. Projectors turn those facts into read models shaped for each screen. With event sourcing, the facts themselves are the database and the current state is a fold over them.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Write service and database with outbox, a Kafka log, three read models, and an event-sourced wallet stream"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Command / write</span>
+        <span><i style="background: var(--signal)"></i>Event</span>
+        <span><i style="background: var(--ok)"></i>Read model updated</span>
+        <span><i style="background: var(--bad)"></i>Stale / rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide es">
+      <h3>Try it: an event-sourced wallet</h3>
+      <div class="row">
+        Amount ₹ <input type="number" id="es-amt" value="300" min="1" step="50">
+        <button class="btn" type="button" id="es-dep">Deposit</button>
+        <button class="btn" type="button" id="es-wd">Withdraw</button>
+        <button class="btn" type="button" id="es-clear">Start over</button>
+      </div>
+      <ol id="es-log"></ol>
+      <div class="row">State as of version <input type="range" id="es-ver" min="0" max="0" value="0"> <span id="es-ver-v">0</span></div>
+      <div class="out" id="es-out"></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The order service owns writes in Postgres and writes an outbox event in the same transaction; Debezium puts it on Kafka keyed by order id. Search, dashboards and loyalty each build their own read model and keep the last applied version per order, so duplicates and replays are no-ops. Read models lag by up to a second, so the user's own order is read from the write side right after checkout. Only the wallet ledger is event-sourced, with expected-version appends and snapshots."</p>
+    </div>
+    <div class="note">
+      <h3>The two key code lines</h3>
+<pre class="code">// projector: idempotent and order-safe
+if (evt.version &lt;= view.lastVersion) return;
+
+// event store: optimistic concurrency
+store.append(streamId, evt, { expectedVersion });
+// → ConcurrencyError if someone appended first</pre>
+    </div>
+    <div class="note wide">
+      <h3>How far to go</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>CRUD + events (outbox)</th><th>CQRS</th><th>Event sourcing</th></tr></thead>
+          <tbody>
+            <tr><td>Source of truth</td><td>Current-state tables</td><td>Write DB; read models are derived</td><td>The event stream</td></tr>
+            <tr><td>Reads</td><td>Same DB</td><td>Separate views per query (ES, Redis, Cassandra)</td><td>Projections only; never query the stream</td></tr>
+            <tr><td>History</td><td>Only what events carry</td><td>Same</td><td>Complete, replayable, "state as of T"</td></tr>
+            <tr><td>Cost</td><td>Outbox + relay</td><td>Lag, two models, more infra</td><td>Versioning, snapshots, replays, learning curve</td></tr>
+            <tr><td>Use for</td><td>Most services that others react to</td><td>Read ≫ write, very different shapes</td><td>Ledgers, wallets, order lifecycles, audit-heavy domains</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>"SendWelcomeEmail" or "UserRegistered": which is the event?</summary><div><code>UserRegistered</code>: a past-tense fact owned by the producer. <code>SendWelcomeEmail</code> is a command to one service.</div></details>
+      <details class="qa"><summary>How do you add a new read model a year later?</summary><div>Start a new consumer group from the earliest offset (long retention or a compacted topic), or bootstrap from a DB snapshot and then stream from its position.</div></details>
+      <details class="qa"><summary>Two withdrawals at the same version: what stops a double spend?</summary><div>Both append with <code>expectedVersion</code>. One wins; the other gets a conflict, reloads the stream, re-checks the balance and retries or rejects.</div></details>
+      <details class="qa"><summary>How do you delete personal data from an immutable log?</summary><div>Crypto-shredding: encrypt personal fields with a per-user key kept elsewhere, and delete the key.</div></details>
+    </div>
+    <div class="note">
+      <h3>Files</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (CQRS projectors, replay, event-sourced wallet)</li>
+        <li>Hands-on: <a href="hands-on/README.md">hands-on/README.md</a> (Kafka + Postgres CQRS)</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CL = { x: 16, y: 150, w: 100, h: 60 };
+  var WS = { x: 150, y: 24, w: 160, h: 60 };
+  var WDB = { x: 150, y: 112, w: 160, h: 158 };
+  var KX = 340, KY = 182, KW = 74, KH = 36;
+  var VX = 612, VW = 134;
+  var VIEWS = { search: { y: 24, title: 'Search view' }, dash: { y: 112, title: 'Dashboard view' }, loyal: { y: 200, title: 'Loyalty view' } };
+  var VH = 78;
+  var ESY = 312, EX0 = 16, EW = 92, EH = 44;
+  var P = {
+    cmd: [[CL.x + CL.w, 170], [132, 170], [132, 54], [WS.x, 54]],
+    tx: [[230, WS.y + WS.h], [230, WDB.y]],
+    query: [[66, CL.y + CL.h], [66, 290], [596, 290], [596, 63], [VX, 63]],
+  };
+  function rev(p) { return p.slice().reverse(); }
+  function kcx(i) { return KX + i * (KW + 4) + KW / 2; }
+  function relayPath(i) { return [[WDB.x + WDB.w, 230], [326, 230], [326, KY + KH / 2], [kcx(i) - KW / 2, KY + KH / 2]]; }
+  function projPath(i, view) { var vy = VIEWS[view].y + VH / 2; return [[kcx(i), KY], [kcx(i), KY - 14], [596, KY - 14], [596, vy], [VX, vy]]; }
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) { return p.then(function () { if (ctx.state !== s) return; return f(); }); }, Promise.resolve());
+  }
+  function clear(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  function box(ctx, b, title, sub, cls) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: b.x + 10, y: b.y + 20, class: 'title', text: title }, g);
+    if (sub) ctx.el('text', { x: b.x + 10, y: b.y + 36, class: 'mono small muted', text: sub }, g);
+    return { g: g, r: r };
+  }
+
+  function render(ctx) {
+    var S = ctx.state;
+    clear(S.dbG);
+    ctx.el('text', { x: WDB.x + 10, y: WDB.y + 44, class: 'mono small muted', text: 'orders' }, S.dbG);
+    Object.keys(S.orders).forEach(function (id, i) {
+      ctx.el('text', { x: WDB.x + 10, y: WDB.y + 60 + i * 15, class: 'mono small', text: id + ' ' + S.orders[id].st + ' v' + S.orders[id].v }, S.dbG);
+    });
+    ctx.el('text', { x: WDB.x + 10, y: WDB.y + 100, class: 'mono small muted', text: 'outbox' }, S.dbG);
+    S.outbox.slice(-3).forEach(function (o, i) {
+      ctx.el('text', { x: WDB.x + 10, y: WDB.y + 116 + i * 15, class: 'mono small ' + (o.sent ? 'muted' : 'fill-signal'), text: o.label + (o.sent ? ' · sent' : ' · new') }, S.dbG);
+    });
+    clear(S.logG);
+    S.log.forEach(function (e, i) {
+      ctx.el('rect', { x: kcx(i) - KW / 2, y: KY, width: KW, height: KH, rx: 4, class: 'cell' + (e.cls ? ' ' + e.cls : '') }, S.logG);
+      ctx.el('text', { x: kcx(i), y: KY + 15, 'text-anchor': 'middle', class: 'mono small', text: e.short }, S.logG);
+      ctx.el('text', { x: kcx(i), y: KY + 29, 'text-anchor': 'middle', class: 'mono small muted', text: 'off ' + i }, S.logG);
+    });
+    Object.keys(VIEWS).forEach(function (k) {
+      var v = S.v[k], g = S.vg[k];
+      clear(g);
+      v.lines().forEach(function (t, i) { ctx.el('text', { x: VX + 10, y: VIEWS[k].y + 40 + i * 15, class: 'mono small ' + (v.cls || ''), text: t }, g); });
+    });
+    clear(S.esG);
+    S.es.forEach(function (e, i) {
+      var x = EX0 + i * (EW + 4);
+      ctx.el('rect', { x: x, y: ESY + 18, width: EW, height: EH, rx: 4, class: 'cell' + (e.cls ? ' ' + e.cls : '') }, S.esG);
+      ctx.el('text', { x: x + EW / 2, y: ESY + 36, 'text-anchor': 'middle', class: 'mono small', text: 'v' + e.v + ' ' + e.type }, S.esG);
+      ctx.el('text', { x: x + EW / 2, y: ESY + 52, 'text-anchor': 'middle', class: 'mono small muted', text: e.amt ? '₹' + e.amt : '' }, S.esG);
+    });
+    S.fold.textContent = S.es.length ? 'balance ₹' + S.bal + ' · version ' + S.es.length : '(empty stream)';
+    S.note.textContent = S.esNote || '';
+  }
+
+  function viewLines(k) {
+    return function () {
+      var S = this.S;
+      if (k === 'search') return Object.keys(S.sv).length ? Object.keys(S.sv).map(function (id) { return id + ': ' + S.sv[id].st + ' (v' + S.sv[id].v + ')'; }) : ['(empty)'];
+      if (k === 'dash') return ['orders: ' + S.dv.n, 'revenue: ₹' + S.dv.rev, 'last v: ' + JSON.stringify(S.dv.last).replace(/"/g, '')];
+      return S.lv.on ? ['points: ' + S.lv.pts, 'read up to off ' + S.lv.off] : ['(not created yet)'];
+    };
+  }
+
+  // Apply one Kafka event to a view; versions make it idempotent.
+  function project(ctx, i, view) {
+    var S = ctx.state, e = S.log[i];
+    return ctx.packet(projPath(i, view), { ms: 600, cls: e.dup ? 'bad' : 'ok', r: 5 }).then(function () {
+      if (ctx.state !== S) return;
+      if (view === 'search') {
+        var cur = S.sv[e.order];
+        if (cur && cur.v >= e.v) { ctx.log('search: ' + e.order + ' v' + e.v + ' ≤ v' + cur.v + ' → skip (duplicate)', 'warn'); return; }
+        S.sv[e.order] = { st: e.st, v: e.v };
+      } else if (view === 'dash') {
+        var last = S.dv.last[e.order] || 0;
+        if (e.v <= last) { ctx.log('dashboard: v' + e.v + ' already applied → skip', 'warn'); return; }
+        S.dv.last[e.order] = e.v;
+        if (e.st === 'PLACED') S.dv.n++;
+        if (e.st === 'PAID') S.dv.rev += e.amt;
+      } else {
+        S.lv.off = i + 1;
+        if (e.st === 'PAID') S.lv.pts += e.amt / 10;
+      }
+      render(ctx);
+      ctx.flash(S.vg[view]);
+    });
+  }
+
+  function command(ctx, label, order, st, amt) {
+    var S = ctx.state;
+    return seq(ctx, [
+      function () { return ctx.packet(P.cmd, { ms: 600, cls: 'accent', label: label }); },
+      function () { return ctx.packet(P.tx, { ms: 300, cls: 'accent', r: 5 }); },
+      function () {
+        var v = (S.orders[order] ? S.orders[order].v : 0) + 1;
+        S.orders[order] = { st: st, v: v };
+        S.outbox.push({ label: order + ' ' + st + ' v' + v, sent: false, ev: { order: order, st: st, v: v, amt: amt, short: st + ' v' + v } });
+        render(ctx);
+        ctx.flash(S.dbBox.g);
+        ctx.log('BEGIN; ' + order + ' → ' + st + ' (v' + v + '); INSERT outbox; COMMIT', 'ok');
+      },
+    ]);
+  }
+  function relay(ctx) {
+    var S = ctx.state, row = S.outbox.filter(function (o) { return !o.sent; })[0], i = S.log.length;
+    return ctx.packet(relayPath(i), { ms: 600, label: 'relay' }).then(function () {
+      if (ctx.state !== S) return;
+      row.sent = true;
+      S.log.push(row.ev);
+      render(ctx);
+      ctx.log('Relay/CDC → Kafka offset ' + i + ': ' + row.ev.short, 'info');
+      return i;
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One write model, many read models',
+      say: 'Top half: CQRS. The write service owns Postgres; a relay moves outbox rows to Kafka; projectors build three read models. Bottom half: an event-sourced wallet where the events are the database.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.orders = {}; S.outbox = []; S.log = []; S.sv = {}; S.dv = { n: 0, rev: 0, last: {} }; S.lv = { on: false, pts: 0, off: 0 };
+      S.es = []; S.bal = 0; S.esNote = '';
+      Object.keys(P).forEach(function (k) { ctx.el('polyline', { points: P[k].join(' '), class: 'wire' + (k === 'query' ? ' dashed' : '') }); });
+      ctx.el('polyline', { points: relayPath(0).join(' '), class: 'wire' });
+      ctx.el('line', { x1: 596, y1: KY - 14, x2: 596, y2: VIEWS.loyal.y + VH / 2, class: 'wire' });
+      Object.keys(VIEWS).forEach(function (k) { ctx.el('line', { x1: 596, y1: VIEWS[k].y + VH / 2, x2: VX, y2: VIEWS[k].y + VH / 2, class: 'wire' }); });
+      ctx.el('line', { x1: KX, y1: KY - 14, x2: 596, y2: KY - 14, class: 'wire' });
+      box(ctx, CL, 'Client', 'app');
+      box(ctx, WS, 'Write service', 'checks rules', 'accent');
+      S.dbBox = box(ctx, WDB, 'Write DB', null);
+      ctx.el('text', { x: WDB.x + WDB.w - 10, y: WDB.y + 20, 'text-anchor': 'end', class: 'mono small muted', text: 'Postgres' });
+      ctx.el('text', { x: KX, y: KY - 22, class: 'title', text: 'Kafka: order-events' });
+      ctx.el('text', { x: 340, y: 288 - 4, class: 'mono small muted', text: 'query' });
+      S.v = {}; S.vg = {};
+      Object.keys(VIEWS).forEach(function (k) {
+        var b = box(ctx, { x: VX, y: VIEWS[k].y, w: VW, h: VH }, VIEWS[k].title, null, k === 'loyal' ? 'dim' : '');
+        S.v[k] = { lines: viewLines(k), S: S };
+        S.v[k].lines = S.v[k].lines.bind(S.v[k]);
+        S.vg[k] = ctx.group();
+        S.vbox = S.vbox || {}; S.vbox[k] = b;
+      });
+      ctx.el('line', { x1: 16, y1: ESY - 8, x2: 744, y2: ESY - 8, class: 'wire dashed' });
+      ctx.el('text', { x: 16, y: ESY + 8, class: 'title', text: 'Event sourcing: stream acct-7' });
+      ctx.el('rect', { x: 560, y: ESY + 18, width: 184, height: 64, rx: 8, class: 'box accent' });
+      ctx.el('text', { x: 572, y: ESY + 38, class: 'mono small muted', text: 'fold(events) →' });
+      S.fold = ctx.el('text', { x: 572, y: ESY + 58, class: 'mono', text: '' });
+      S.note = ctx.el('text', { x: 16, y: ESY + 86, class: 'mono small muted', text: '' });
+      S.dbG = ctx.group(); S.logG = ctx.group(); S.esG = ctx.group();
+      render(ctx);
+    },
+    steps: [
+      {
+        title: 'A command changes the write model',
+        say: 'The client sends <code>PlaceOrder o-1</code>. The write service checks the rules and, in <b>one local transaction</b>, saves the order row and an outbox row. No direct call to search, dashboards or loyalty.',
+        run: function (ctx) { return command(ctx, 'PlaceOrder', 'o-1', 'PLACED', 0); },
+      },
+      {
+        title: 'The fact goes on the log',
+        say: 'A relay (or Debezium reading the WAL) publishes the outbox row to Kafka as <code>OrderPlaced</code>, keyed by order id. The producer does not know who will listen.',
+        run: function (ctx) { return relay(ctx); },
+      },
+      {
+        title: 'Projectors build read models',
+        say: 'Each projector is its own consumer group. Search stores the order and its status; the dashboard counts orders. Each view is shaped for one screen and can live in a different store (Elasticsearch, Redis).',
+        run: function (ctx) {
+          return Promise.all([project(ctx, 0, 'search'), project(ctx, 0, 'dash')]).then(function () { ctx.log('Both views now show o-1 PLACED', 'ok'); });
+        },
+      },
+      {
+        title: 'Read right after a write: stale',
+        say: 'The user pays (<code>PayOrder</code>, v2) and instantly opens the order page, which queries the search view. The projector has not run yet, so the page shows <b>PLACED</b>. That is read-model lag. Fix: render from the command response, or read this one order from the write side.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return command(ctx, 'PayOrder ₹500', 'o-1', 'PAID', 500); },
+            function () { return ctx.packet(P.query, { ms: 700, label: 'GET o-1' }); },
+            function () { ctx.log('Search view still says o-1 PLACED (v1): stale', 'bad'); S.v.search.cls = 'fill-bad'; render(ctx); return ctx.packet(rev(P.query), { ms: 600, cls: 'bad', label: 'PLACED' }); },
+            function () { return relay(ctx); },
+            function () { S.v.search.cls = ''; return Promise.all([project(ctx, 1, 'search'), project(ctx, 1, 'dash')]); },
+            function () { ctx.log('Projectors catch up: o-1 PAID, revenue ₹500', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'A duplicate event is skipped',
+        say: 'The relay crashed after publishing v2 and sends it again (outbox is at-least-once). Each projector stores the last version per order and skips anything ≤ it. Without that check the dashboard would count ₹1000.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var dup = { order: 'o-1', st: 'PAID', v: 2, amt: 500, short: 'PAID v2', dup: true, cls: 'bad' };
+          return seq(ctx, [
+            function () { return ctx.packet(relayPath(S.log.length), { ms: 500, cls: 'bad', label: 'again' }); },
+            function () { S.log.push(dup); render(ctx); ctx.log('Kafka offset 2: duplicate of v2', 'warn'); return Promise.all([project(ctx, 2, 'search'), project(ctx, 2, 'dash')]); },
+            function () { ctx.log('Revenue stays ₹' + S.dv.rev, 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'A new read model, a year later',
+        say: 'Marketing wants loyalty points. Add a new consumer group that starts at <b>offset 0</b> and replays the log. No change to the write service. A read model is disposable: drop it and rebuild it the same way.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.lv.on = true;
+          S.vbox.loyal.r.setAttribute('class', 'box');
+          render(ctx);
+          ctx.log('New consumer group "loyalty" from earliest offset', 'info');
+          return seq(ctx, [
+            function () { return project(ctx, 0, 'loyal'); },
+            function () { return project(ctx, 1, 'loyal'); },
+            function () { S.lv.off = 3; render(ctx); ctx.log('Loyalty view caught up: ' + S.lv.pts + ' points (dup at off 2 skipped by version)', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'Event sourcing: the events are the data',
+        say: 'Now the wallet. Instead of a <code>balance</code> column we append facts: Opened, Deposited ₹1000, Withdrew ₹300. Current state is a fold over the stream: balance ₹700 at version 3.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var evs = [{ type: 'Opened', amt: 0 }, { type: 'Deposit', amt: 1000 }, { type: 'Withdraw', amt: 300 }];
+          return evs.reduce(function (p, e) {
+            return p.then(function () {
+              if (ctx.state !== S) return;
+              var i = S.es.length;
+              return ctx.packet([[CL.x + CL.w / 2, CL.y + CL.h], [CL.x + CL.w / 2, ESY - 20], [EX0 + i * (EW + 4) + EW / 2, ESY - 20], [EX0 + i * (EW + 4) + EW / 2, ESY + 18]], { ms: 500, cls: 'accent', r: 5 }).then(function () {
+                if (ctx.state !== S) return;
+                S.es.push({ v: i + 1, type: e.type, amt: e.amt });
+                S.bal += e.type === 'Withdraw' ? -e.amt : e.amt;
+                render(ctx);
+                ctx.log('append v' + (i + 1) + ' ' + e.type + (e.amt ? ' ₹' + e.amt : ''), 'info');
+              });
+            });
+          }, Promise.resolve()).then(function () { ctx.log('fold → balance ₹' + S.bal + ' at v3', 'ok'); });
+        },
+      },
+      {
+        title: 'Two withdrawals race: expected version',
+        say: 'Two requests both loaded the stream at v3 (₹700) and each wants to withdraw ₹500. Both append with <code>expectedVersion = 3</code>. The first wins and becomes v4. The second fails, reloads, sees ₹200, and is rejected. No double spend, no locks.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var x4 = EX0 + 3 * (EW + 4) + EW / 2;
+          return seq(ctx, [
+            function () {
+              return Promise.all([
+                ctx.packet([[x4 - 30, ESY - 20], [x4, ESY + 18]], { ms: 500, cls: 'accent', label: 'A' }),
+                ctx.packet([[x4 + 40, ESY - 20], [x4, ESY + 18]], { ms: 650, cls: 'accent', label: 'B' }),
+              ]);
+            },
+            function () {
+              S.es.push({ v: 4, type: 'Withdraw', amt: 500 }); S.bal -= 500; render(ctx);
+              ctx.log('A: append @expected v3 → ok, now v4', 'ok');
+              ctx.log('B: append @expected v3 → ConcurrencyError', 'bad');
+              S.esNote = 'B reloads: balance ₹' + S.bal + ' < ₹500 → InsufficientFunds';
+              render(ctx);
+              return ctx.packet([[x4, ESY + 18], [x4 + 40, ESY - 20]], { ms: 450, cls: 'bad', label: 'conflict' });
+            },
+          ]);
+        },
+      },
+      {
+        title: 'Snapshots and time travel',
+        say: 'Folding 10,000 events per request is slow, so every N events we save a snapshot (here at v4: ₹200). Loading = snapshot + events after it. And because nothing is overwritten, "balance as of v2" is just a fold that stops early: ₹1000.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.es[3].cls = 'snap';
+          S.esNote = 'snapshot @v4 = ₹200 · load = snapshot + later events · as of v2 = ₹1000';
+          render(ctx);
+          ctx.log('Snapshot saved at v4 (balance ₹200)', 'info');
+          ctx.log('Time travel: fold v1..v2 → ₹1000', 'ok');
+          return ctx.wait(400);
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: event-sourced wallet (independent of the player) ----
+  var events = [], $ = function (id) { return document.getElementById(id); };
+  function fold(upTo) {
+    var bal = 0;
+    events.slice(0, upTo).forEach(function (e) { if (e.ok) bal += e.type === 'Deposited' ? e.amt : -e.amt; });
+    return bal;
+  }
+  function draw(keepVer) {
+    var n = events.length, ver = $('es-ver');
+    ver.max = n;
+    if (!keepVer) ver.value = n;
+    var v = +ver.value;
+    $('es-ver-v').textContent = v;
+    var ol = $('es-log');
+    ol.innerHTML = '';
+    events.forEach(function (e, i) {
+      var li = document.createElement('li');
+      li.textContent = e.ok ? 'v' + e.v + ' ' + e.type + ' ₹' + e.amt : 'rejected: Withdraw ₹' + e.amt + ' (InsufficientFunds, nothing appended)';
+      if (!e.ok) li.className = 'bad'; else if (i >= v) li.className = 'future';
+      ol.appendChild(li);
+    });
+    var applied = events.slice(0, v).filter(function (e) { return e.ok; }).length;
+    $('es-out').textContent = 'fold(v1..v' + v + ') → balance ₹' + fold(v) + '  (' + applied + ' events applied' + (v < n ? '; later events ignored: this is "state as of" a past version' : '') + ')';
+  }
+  function lastVersion() { var ok = events.filter(function (e) { return e.ok; }); return ok.length ? ok[ok.length - 1].v : 0; }
+  $('es-dep').addEventListener('click', function () { events.push({ ok: true, v: lastVersion() + 1, type: 'Deposited', amt: Math.max(1, +$('es-amt').value || 0) }); draw(); });
+  $('es-wd').addEventListener('click', function () {
+    var amt = Math.max(1, +$('es-amt').value || 0);
+    if (fold(events.length) < amt) { draw(); $('es-out').textContent = 'Withdraw ₹' + amt + ' rejected: balance ₹' + fold(events.length) + '. Nothing is appended, so the stream stays valid.'; return; }
+    events.push({ ok: true, v: lastVersion() + 1, type: 'Withdrew', amt: amt });
+    draw();
+  });
+  $('es-clear').addEventListener('click', function () { events = [{ ok: true, v: 1, type: 'Deposited', amt: 1000 }]; draw(); });
+  $('es-ver').addEventListener('input', function () { draw(true); });
+  events = [{ ok: true, v: 1, type: 'Deposited', amt: 1000 }];
+  draw();
+})();
+</script>
+</body>
+</html>

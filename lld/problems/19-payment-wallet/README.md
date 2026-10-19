@@ -91,6 +91,6 @@ Order inside every write: idempotency check → validate → check funds → pos
 
 ## Concepts used
 
-- [Command and Memento](../../concepts/patterns/p13-command.md) · [Repository and DI](../../concepts/patterns/p18-repository-di.md) · [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md)
-- HLD: [Payments domain](../../../hld/concepts/35-payments-domain.md) · [Idempotency and delivery semantics](../../../hld/concepts/19-idempotency-delivery-semantics.md) · [SQL deep dive](../../../hld/concepts/10-sql-deep-dive.md) · [Payment System](../../../hld/problems/08-payment-system/) · [Digital Wallet / UPI](../../../hld/problems/28-digital-wallet/)
-- Visuals: [Delivery semantics and idempotency](../../../visuals/v11-delivery-semantics.html) · [Transaction isolation levels](../../../visuals/v20-isolation-levels.html)
+- [Command and Memento](../../4-behavioral/L23-command/README.md) · [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md) · [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- HLD: [Payments domain](../../../hld/6-building-blocks/H38-payments-domain/README.md) · [Idempotency and delivery semantics](../../../hld/4-async/H22-delivery-semantics/README.md) · [SQL deep dive](../../../hld/3-databases/H11-indexing/README.md) · [Payment System](../../../hld/case-studies/08-payment-system) · [Digital Wallet / UPI](../../../hld/case-studies/28-digital-wallet)
+- Visuals: [Delivery semantics and idempotency](../../../hld/4-async/H22-delivery-semantics/visual.html) · [Transaction isolation levels](../../../hld/3-databases/H12-transactions-isolation/visual.html)

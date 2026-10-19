@@ -94,6 +94,6 @@ Why not just use a JS `Map` for LRU (delete and re-insert to move a key to the e
 
 ## Concepts used
 
-- [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [TypeScript for LLD](../../concepts/05-ts-for-lld.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- HLD links: [Caching](../../../hld/concepts/08-caching.md) · [Distributed Cache (Redis)](../../../hld/problems/17-distributed-cache/)
-- Visuals: [LRU cache internals](../../../visuals/v29-lru-cache.html) · [Caching patterns](../../../visuals/v03-caching-patterns.html)
+- [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [TypeScript for LLD](../../1-foundations/L01-classes-and-interfaces/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- HLD links: [Caching](../../../hld/2-scaling/H09-caching/README.md) · [Distributed Cache (Redis)](../../../hld/case-studies/17-distributed-cache)
+- Visuals: [LRU cache internals](../../../hld/2-scaling/H09-caching/visual.html) · [Caching patterns](../../../hld/2-scaling/H09-caching/visual.html)

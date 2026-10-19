@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L12 Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .ptr { fill: none; stroke: var(--muted); stroke-width: 1.8; }
+  .stage .ptr.shared { stroke: var(--bad); stroke-width: 2.2; }
+  .stage .ptr.own { stroke: var(--ok); stroke-width: 2.2; }
+  .stage .arrowhead { fill: var(--muted); }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L12 · Creational</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Prototype</h1>
+    <p class="lede">Make new objects by copying a configured one. The whole pattern is about one question: after the copy, which nested objects are <b>shared</b> and which are <b>owned</b>? Watch the references.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Object references during shallow and deep copies"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <button class="btn" type="button" id="t-tpl">template.retry.max++</button>
+        <button class="btn" type="button" id="t-cl">clone.tags.push('promo')</button>
+        <span id="try-out">Run to step 5 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Write / call</span>
+        <span><i style="background: var(--bad)"></i>Shared reference (danger)</span>
+        <span><i style="background: var(--ok)"></i>Own copy (safe)</span>
+        <span><i style="background: var(--accent)"></i>Prototype / template</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">class NotificationTemplate implements Cloneable&lt;NotificationTemplate&gt; {</span><span class="ln" data-l="2">  constructor(public channel: Channel,</span><span class="ln" data-l="3">              public retry: { max: number; backoffMs: number },</span><span class="ln" data-l="4">              public tags: string[]) {}</span><span class="ln" data-l="5">  clone() {</span><span class="ln" data-l="6">    return new NotificationTemplate(this.channel,</span><span class="ln" data-l="7">      { ...this.retry }, [...this.tags]);  // copy what the clone may change</span><span class="ln" data-l="8">  }</span><span class="ln" data-l="9">}</span><span class="ln" data-l="10">const otp = { ...template };      // shallow: retry and tags are SHARED</span><span class="ln" data-l="11">const otp2 = registry.create('transactional'); // calls clone()</span><span class="ln" data-l="12">structuredClone(money);  // deep, but a plain object: methods gone</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each notification type starts from a template. I keep templates in a registry and give the class a <code>clone()</code> that copies the nested parts a clone may change, so editing one OTP notification never changes the template. Spread is only a shallow copy. For plain data <code>structuredClone</code> works, but it drops the class prototype, so methods are gone."</p>
+    </div>
+    <div class="note wide">
+      <h3>Ways to copy in JS/TS</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th><code>{ ...obj }</code> / <code>Object.assign</code></th><th><code>JSON.parse(JSON.stringify())</code></th><th><code>structuredClone()</code></th><th>Your own <code>clone()</code></th></tr></thead>
+          <tbody>
+            <tr><td>Depth</td><td>Shallow (top level only)</td><td>Deep</td><td>Deep</td><td>Whatever you choose</td></tr>
+            <tr><td>Keeps class / methods</td><td>No (plain object)</td><td>No</td><td>No</td><td>Yes</td></tr>
+            <tr><td>Date, Map, Set</td><td>Shared by reference</td><td>Date → string; Map/Set → <code>{}</code></td><td>Kept</td><td>Yes, if you copy them</td></tr>
+            <tr><td>Functions, BigInt</td><td>Copied by reference</td><td>Functions dropped; BigInt throws</td><td>Functions throw; BigInt ok</td><td>Yes</td></tr>
+            <tr><td>Use for</td><td>Flat data or immutable nested parts</td><td>Avoid</td><td>Plain data snapshots</td><td>Domain objects with methods</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary><code>const b = { ...a }; b.items.push(x)</code>. What happens to <code>a</code>?</summary><div><code>a.items</code> also gets <code>x</code>. Spread copies only the top level, so both objects point to the same array.</div></details>
+      <details class="qa"><summary>What does <code>structuredClone(new Money(100, 'INR'))</code> return?</summary><div>A plain object <code>{ amount: 100, currency: 'INR' }</code>. It is not an instance of <code>Money</code>, so <code>money.format()</code> is undefined.</div></details>
+      <details class="qa"><summary>When is a shallow copy enough?</summary><div>When the nested values are immutable (strings, numbers, frozen objects) or are meant to be shared and nobody mutates them (a reference to a <code>Product</code>). Deep-copy only what the clone will change.</div></details>
+      <details class="qa"><summary>Is JavaScript's prototype chain the same thing as this pattern?</summary><div>No. <code>Object.create(proto)</code> links to another object to <b>inherit methods</b>; nothing is copied. The Prototype pattern <b>copies state</b> to make a new, independent object.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var T = { x: 20, y: 46, w: 200, h: 92 };
+  var R = { x: 290, y: 30, w: 175, h: 52 };
+  var G = { x: 290, y: 118, w: 175, h: 52 };
+  var C = { x: 560, y: 46, w: 180, h: 92 };
+  var D = { x: 560, y: 30, w: 180, h: 92 };
+  var R2 = { x: 530, y: 160, w: 95, h: 52 };
+  var G2 = { x: 635, y: 160, w: 115, h: 52 };
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+
+  function box(ctx, parent, b, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: b.x + 10, y: b.y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: b.x + 10, y: b.y + 37 + i * 16, class: 'mono small', text: l }, g);
+    });
+    return g;
+  }
+  function ptr(ctx, parent, d, cls) {
+    return ctx.el('path', { d: d, class: 'ptr ' + (cls || ''), 'marker-end': 'url(#pt-arr)', opacity: 0 }, parent);
+  }
+  function clearG(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+  function setLine(ctx, node, text, cls) { node.textContent = text; node.setAttribute('class', 'mono small ' + (cls || '')); ctx.flash(node); }
+
+  function retryText(r) { return 'max: ' + r.max + ', backoff: 500'; }
+  function tagsText(t) { return "['" + t.join("', '") + "']"; }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A template with nested parts',
+      say: 'The "transactional" notification template has a channel (a string), a retry policy (a nested object) and tags (an array). OTP, receipt and refund messages all start from it.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      var d = ctx.el('defs');
+      var m = ctx.el('marker', { id: 'pt-arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse' }, d);
+      ctx.el('path', { d: 'M0,0 L10,5 L0,10 Z', class: 'arrowhead' }, m);
+      s.tplData = { retry: { max: 3 }, tags: ['txn'] };
+      s.top = ctx.group();
+      ctx.el('text', { x: T.x, y: 30, class: 'mono small muted', text: "registry.get('transactional')" }, s.top);
+      s.tpl = box(ctx, s.top, T, 'template', ["channel: 'EMAIL'", 'retry: ●', 'tags:  ●'], 'accent');
+      s.R = box(ctx, s.top, R, '{ } retry', [retryText(s.tplData.retry)], '');
+      s.G = box(ctx, s.top, G, '[ ] tags', [tagsText(s.tplData.tags)], '');
+      s.tplPtrs = [
+        ptr(ctx, s.top, 'M' + (T.x + 60) + ',' + (T.y + 50) + ' C 240,' + (T.y + 53) + ' 240,' + (R.y + 26) + ' ' + R.x + ',' + (R.y + 26)),
+        ptr(ctx, s.top, 'M' + (T.x + 60) + ',' + (T.y + 66) + ' C 240,' + (T.y + 69) + ' 240,' + (G.y + 26) + ' ' + G.x + ',' + (G.y + 26)),
+      ];
+      s.tplPtrs.forEach(function (p) { p.setAttribute('opacity', 1); });
+      s.tplNote = ctx.el('text', { x: T.x, y: 205, class: 'mono small muted', text: 'template intact' }, s.top);
+      s.copyG = ctx.group();
+      s.cloneG = ctx.group();
+      ctx.el('line', { x1: 10, y1: 290, x2: 750, y2: 290, class: 'divider' });
+      s.panel = ctx.group();
+    },
+    steps: [
+      {
+        title: 'Copy with spread: { ...template }',
+        say: 'Spread copies the <b>top level</b> only. <code>channel</code> is a string, so it is copied. But <code>retry</code> and <code>tags</code> are references: the copy points to the <b>same</b> nested objects.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([10]);
+          s.copy = box(ctx, s.copyG, C, 'otp = {...template}', ["channel: 'EMAIL'", '● retry', '● tags'], 'signal');
+          s.copy.setAttribute('opacity', 0);
+          s.copyPtrs = [
+            ptr(ctx, s.copyG, 'M' + (C.x + 13) + ',' + (C.y + 50) + ' C 510,' + (C.y + 53) + ' 510,' + (R.y + 26) + ' ' + (R.x + R.w) + ',' + (R.y + 26), 'shared'),
+            ptr(ctx, s.copyG, 'M' + (C.x + 13) + ',' + (C.y + 66) + ' C 510,' + (C.y + 69) + ' 510,' + (G.y + 26) + ' ' + (G.x + G.w) + ',' + (G.y + 26), 'shared'),
+          ];
+          ctx.log('const otp = { ...template }', 'info');
+          return ctx.packet([[T.x + T.w, T.y + 20], [C.x, C.y + 20]], { ms: 550, label: 'spread' })
+            .then(function () { return ctx.fade(s.copy, 1, 300); })
+            .then(function () { return Promise.all(s.copyPtrs.map(function (p) { return ctx.fade(p, 1, 400); })); })
+            .then(function () {
+              s.R.r.setAttribute('class', 'box bad'); s.G.r.setAttribute('class', 'box bad');
+              ctx.log('otp.retry === template.retry → true (shared)', 'bad');
+              ctx.log('otp.tags === template.tags → true (shared)', 'bad');
+            });
+        },
+      },
+      {
+        title: 'Change the copy, break the template',
+        say: 'OTP should retry only once: <code>otp.retry.max = 1</code>, and tag it: <code>otp.tags.push(\'otp\')</code>. Both writes follow the shared pointers and change the <b>template</b>. Every future email now retries once.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([10]);
+          ctx.log('otp.retry.max = 1', 'info');
+          return ctx.packet([[C.x + 13, C.y + 50], [510, C.y + 50], [R.x + R.w, R.y + 26]], { ms: 600, label: 'max = 1' })
+            .then(function () {
+              s.tplData.retry.max = 1;
+              setLine(ctx, s.R.lines[0], retryText(s.tplData.retry), 'fill-bad');
+              ctx.log('otp.tags.push("otp")', 'info');
+              return ctx.packet([[C.x + 13, C.y + 66], [510, C.y + 66], [G.x + G.w, G.y + 26]], { ms: 600, label: 'push' });
+            })
+            .then(function () {
+              s.tplData.tags.push('otp');
+              setLine(ctx, s.G.lines[0], tagsText(s.tplData.tags), 'fill-bad');
+              s.tplNote.textContent = 'template.retry.max is now 1, tags has "otp"';
+              s.tplNote.setAttribute('class', 'mono small fill-bad');
+              ctx.flash(s.tpl.r);
+              ctx.log('template changed through the copy: every future email affected', 'bad');
+            });
+        },
+      },
+      {
+        title: 'Give the class a clone()',
+        say: 'Fresh start. The template class gets a <code>clone()</code> that copies the parts a clone may change: a new <code>retry</code> object and a new <code>tags</code> array. Strings are immutable, so they can be shared.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([5, 6, 7, 8]);
+          s.tplData = { retry: { max: 3 }, tags: ['txn'] };
+          setLine(ctx, s.R.lines[0], retryText(s.tplData.retry), '');
+          setLine(ctx, s.G.lines[0], tagsText(s.tplData.tags), '');
+          s.R.r.setAttribute('class', 'box'); s.G.r.setAttribute('class', 'box');
+          s.tplNote.textContent = 'template intact (app restarted)';
+          s.tplNote.setAttribute('class', 'mono small muted');
+          ctx.log('restart; NotificationTemplate.clone() added', 'info');
+          return ctx.fade(s.copyG, 0, 400);
+        },
+      },
+      {
+        title: "registry.create('transactional') calls clone()",
+        say: 'The registry never hands out the template itself. It returns <code>template.clone()</code>. The clone gets its <b>own</b> retry object and its own tags array: new boxes, green pointers.',
+        run: function (ctx) {
+          var s = ctx.state, g = s.cloneG;
+          hl([11, 6, 7]);
+          s.clData = { retry: { max: 3 }, tags: ['txn'] };
+          s.cl = box(ctx, g, D, 'otp = template.clone()', ["channel: 'EMAIL'", 'retry: ●', 'tags:  ●'], 'signal');
+          s.R2 = box(ctx, g, R2, '{ } retry′', ['max: 3'], 'ok');
+          s.G2 = box(ctx, g, G2, '[ ] tags′', [tagsText(s.clData.tags)], 'ok');
+          [s.cl, s.R2, s.G2].forEach(function (n) { n.setAttribute('opacity', 0); });
+          s.clPtrs = [
+            ptr(ctx, g, 'M' + (D.x + 60) + ',' + (D.y + 50) + ' C 580,' + (D.y + 50) + ' 577,130 ' + (R2.x + R2.w / 2) + ',' + R2.y, 'own'),
+            ptr(ctx, g, 'M' + (D.x + 60) + ',' + (D.y + 66) + ' C 692,' + (D.y + 66) + ' 692,130 ' + (G2.x + G2.w / 2) + ',' + G2.y, 'own'),
+          ];
+          ctx.log("registry.create('transactional') → template.clone()", 'info');
+          return ctx.packet([[T.x + T.w, T.y + 20], [D.x, D.y + 20]], { ms: 500, label: 'clone()' })
+            .then(function () { return ctx.fade(s.cl, 1, 300); })
+            .then(function () {
+              return Promise.all([
+                ctx.packet([[R.x + R.w, R.y + 40], [R2.x, R2.y + 26]], { ms: 500, cls: 'ok', label: 'copy' }),
+                ctx.packet([[G.x + G.w, G.y + 40], [G2.x, G2.y + 26]], { ms: 500, cls: 'ok', label: 'copy' }),
+              ]);
+            })
+            .then(function () { return Promise.all([ctx.fade(s.R2, 1, 250), ctx.fade(s.G2, 1, 250)]); })
+            .then(function () { return Promise.all(s.clPtrs.map(function (p) { return ctx.fade(p, 1, 300); })); })
+            .then(function () { ctx.log('otp.retry === template.retry → false (own copy)', 'ok'); });
+        },
+      },
+      {
+        title: 'Change the clone: the template is safe',
+        say: 'Same writes as before: <code>max = 1</code> and push <code>\'otp\'</code>. This time they land on the clone\'s own boxes. The template still says <code>max: 3</code> and <code>[\'txn\']</code>.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([7]);
+          return ctx.packet([[D.x + 60, D.y + 50], [577, 140], [R2.x + R2.w / 2, R2.y + 20]], { ms: 500, label: 'max = 1' })
+            .then(function () {
+              s.clData.retry.max = 1;
+              setLine(ctx, s.R2.lines[0], 'max: 1', 'fill-ok');
+              return ctx.packet([[D.x + 60, D.y + 66], [692, 140], [G2.x + G2.w / 2, G2.y + 20]], { ms: 500, label: 'push' });
+            })
+            .then(function () {
+              s.clData.tags.push('otp');
+              setLine(ctx, s.G2.lines[0], tagsText(s.clData.tags), 'fill-ok');
+              s.tplNote.textContent = 'template intact: max 3, [\'txn\']';
+              s.tplNote.setAttribute('class', 'mono small fill-ok');
+              ctx.log('clone changed; template untouched', 'ok');
+              s.ready = true;
+            });
+        },
+      },
+      {
+        title: 'structuredClone: deep, but the class is gone',
+        say: 'Node 17+ has <code>structuredClone()</code>. It copies deeply (Map, Set, Date too), but the result is a <b>plain object</b>. The class prototype is not kept, so methods like <code>format()</code> disappear.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([12]);
+          clearG(p);
+          ctx.el('text', { x: 20, y: 314, class: 'title', text: 'structuredClone(new Money(49900, "INR"))' }, p);
+          var a = box(ctx, p, { x: 20, y: 330, w: 250, h: 84 }, 'Money instance', ['amount: 49900', '[[Prototype]]: Money.prototype', 'format() → "₹499.00"'], 'accent');
+          var b = box(ctx, p, { x: 470, y: 330, w: 270, h: 84 }, 'plain object', ['amount: 49900', '[[Prototype]]: Object.prototype', 'format → undefined'], 'bad');
+          b.setAttribute('opacity', 0);
+          return ctx.packet([[270, 372], [470, 372]], { ms: 600, label: 'structuredClone' })
+            .then(function () { return ctx.fade(b, 1, 300); })
+            .then(function () {
+              ctx.log('copy instanceof Money → false', 'bad');
+              return ctx.packet([[470, 440], [600, 440], [600, 414]], { ms: 450, cls: 'bad', label: 'copy.format()' });
+            })
+            .then(function () { ctx.flash(b.r); ctx.log('TypeError: copy.format is not a function', 'bad'); });
+        },
+      },
+      {
+        title: 'Real use: clone the chess board to test a move',
+        say: 'To check "does this move leave my king in check?", clone the board, apply the move on the copy, and test. Illegal? Throw the copy away. The real board never changed.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([]);
+          clearG(p);
+          ctx.el('text', { x: 20, y: 314, class: 'title', text: 'Chess: try a move on a copy' }, p);
+          var real = box(ctx, p, { x: 20, y: 330, w: 200, h: 84 }, 'board (real)', ['K e1, R e2', 'enemy Q e8', 'turn: white'], 'accent');
+          var copy = box(ctx, p, { x: 290, y: 330, w: 200, h: 84 }, 'board.clone()', ['K e1, R e2', 'enemy Q e8', ''], 'signal');
+          var verdict = box(ctx, p, { x: 560, y: 330, w: 180, h: 84 }, 'isInCheck(white)?', ['', '', ''], '');
+          copy.setAttribute('opacity', 0); verdict.setAttribute('opacity', 0);
+          return ctx.packet([[220, 372], [290, 372]], { ms: 450, label: 'clone' })
+            .then(function () { return ctx.fade(copy, 1, 250); })
+            .then(function () {
+              copy.lines[0].textContent = 'K e1, R a2   (moved)';
+              copy.lines[2].textContent = 'e-file now open';
+              copy.lines[2].setAttribute('class', 'mono small fill-warn');
+              ctx.flash(copy.r);
+              ctx.log('copy.apply(Re2→a2)', 'info');
+              return ctx.packet([[490, 372], [560, 372]], { ms: 400 });
+            })
+            .then(function () {
+              verdict.lines[0].textContent = 'Q e8 attacks K e1';
+              verdict.lines[1].textContent = 'yes → move illegal';
+              verdict.lines[1].setAttribute('class', 'mono small fill-bad');
+              verdict.r.setAttribute('class', 'box bad');
+              ctx.fade(verdict, 1, 250);
+              ctx.log('king in check on the copy → reject move', 'bad');
+              return ctx.fade(copy, 0.2, 500);
+            })
+            .then(function () {
+              ctx.flash(real.r);
+              ctx.log('copy discarded; real board unchanged', 'ok');
+            });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: write to the template or to the clone ----
+  var out = document.getElementById('try-out');
+  document.getElementById('t-tpl').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.ready) { out.textContent = 'Run to step 5 first (a real clone must exist).'; return; }
+    ctx.packet([[T.x + 60, T.y + 50], [R.x, R.y + 26]], { ms: 400, label: 'max++' }).then(function () {
+      s.tplData.retry.max++;
+      setLine(ctx, s.R.lines[0], retryText(s.tplData.retry), 'fill-warn');
+      ctx.log('template.retry.max = ' + s.tplData.retry.max + '; clone still max ' + s.clData.retry.max, 'ok');
+      out.textContent = 'Template: max ' + s.tplData.retry.max + '. Clone: max ' + s.clData.retry.max + ' (independent).';
+    });
+  });
+  document.getElementById('t-cl').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.ready) { out.textContent = 'Run to step 5 first (a real clone must exist).'; return; }
+    ctx.packet([[D.x + 60, D.y + 66], [692, 140], [G2.x + G2.w / 2, G2.y + 20]], { ms: 400, label: 'push' }).then(function () {
+      if (s.clData.tags.length < 4) s.clData.tags.push('promo');
+      setLine(ctx, s.G2.lines[0], tagsText(s.clData.tags).slice(0, 14) + (s.clData.tags.length > 2 ? '…' : ''), 'fill-ok');
+      ctx.log('clone.tags has ' + s.clData.tags.length + ' items; template.tags still ' + tagsText(s.tplData.tags), 'ok');
+      out.textContent = 'Clone tags: ' + s.clData.tags.length + '. Template tags: ' + s.tplData.tags.length + '.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

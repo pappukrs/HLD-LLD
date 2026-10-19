@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H01 HLD round</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try .btn.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H01 · Basics</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>How to run a 45-minute HLD round</h1>
+    <p class="lede">Watch the whiteboard fill up in the right order: scope, numbers that decide something, APIs, one end-to-end diagram with a write and a read walked through it, a check-in, two problem-specific deep dives, and a wrap-up on failures.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 490" role="img" aria-label="Timeline of an HLD round and the whiteboard being filled"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Problem</span>
+        <button class="btn" type="button" data-p="url">URL shortener</button>
+        <button class="btn" type="button" data-p="chat">Chat</button>
+        <button class="btn" type="button" data-p="pay">Payments</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>On the board</span>
+        <span><i style="background: var(--signal)"></i>Request walk / clock</span>
+        <span><i style="background: var(--ok)"></i>Decision / fix</span>
+        <span><i style="background: var(--bad)"></i>Risk / SPOF</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Before I design, I'd like a few minutes on requirements and scale. I'll focus on the core flows and keep the rest out of scope unless you want it."</p>
+      <p class="say">"I have the end-to-end design. The interesting parts are X and Y. Which would you like me to go deeper on?"</p>
+      <p class="say">"The main risks left are the single primary and the hot key. With more time I'd add multi-region failover and these four alerts."</p>
+    </div>
+    <div class="note">
+      <h3>Phase checklist</h3>
+      <ul>
+        <li><b>0–5</b> 3–5 functional, non-functional, out of scope</li>
+        <li><b>5–10</b> peak QPS, storage/year, read:write, each with a decision</li>
+        <li><b>10–15</b> 3–5 endpoints, entities, lookup keys</li>
+        <li><b>15–25</b> one diagram; walk 1 write and 1 read</li>
+        <li><b>25–40</b> 2–3 deep dives unique to the problem</li>
+        <li><b>40–45</b> SPOFs, 10× plan, metrics</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>What gets scored</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Signal</th><th>SDE-2 bar</th><th>Senior bar</th></tr></thead>
+          <tbody>
+            <tr><td>Requirements</td><td>Asks the right questions with some prompting</td><td>Finds the hidden requirement alone</td></tr>
+            <tr><td>Design</td><td>Correct, working, standard parts</td><td>Shaped by numbers and constraints</td></tr>
+            <tr><td>Depth</td><td>Deep on 1–2 parts when asked</td><td>Picks the right parts unprompted</td></tr>
+            <tr><td>Trade-offs</td><td>One per main choice</td><td>Compared with numbers and failure modes</td></tr>
+            <tr><td>Operations</td><td>Mentions monitoring and failures</td><td>Rollout, migration, multi-region, cost</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Minute 20, no diagram. What now?</summary><div>Say "let me put up the high-level design now", draw the simplest end-to-end version in 3–4 minutes, then deep dive.</div></details>
+      <details class="qa"><summary>Why walk one write and one read?</summary><div>It proves the diagram actually works end to end and shows where the cache, queue and DB sit on the hot path.</div></details>
+      <details class="qa"><summary>Which deep dives for payments?</summary><div>Idempotency, the ledger, reconciliation, provider failover. Not the load balancer.</div></details>
+      <details class="qa"><summary>"What if this box dies?"</summary><div>Stateless: health checks route around it. Stateful: a replica is promoted; say what data can be lost and the user impact.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../case-studies/01-url-shortener/README.md">URL shortener</a></li>
+        <li><a href="../../case-studies/06-chat-system/README.md">Chat system</a></li>
+        <li><a href="../../case-studies/08-payment-system/README.md">Payment system</a></li>
+        <li>Next: <a href="../H02-back-of-envelope/visual.html">H02 Estimation</a></li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var PROBS = {
+    url: {
+      name: 'URL shortener',
+      fr: ['create short link', 'redirect fast', 'out: analytics, auth'],
+      nfr: ['100M DAU, reads 100:1', 'p99 redirect < 50 ms'],
+      est: ['~14k reads/s peak', '~140 writes/s', '→ cache in front of DB'],
+      api: ['POST /v1/urls {longUrl}', 'GET /{code} → 302'],
+      cache: 'Redis cache', db: 'Postgres', dbSub: 'urls by code',
+      deep: [['ID gen: base62 counter', 'db'], ['hot links: cache + CDN', 'cache']],
+      ask: 'ID generation or hot links?',
+    },
+    chat: {
+      name: 'Chat',
+      fr: ['send 1:1 / group msg', 'delivery + read state', 'out: voice, video'],
+      nfr: ['50M DAU, ~1:1 r:w', 'delivery < 200 ms'],
+      est: ['~1M open sockets', '~40k msgs/s peak', '→ WS gateway fleet'],
+      api: ['WS send {to, text}', 'GET /history?before='],
+      cache: 'Redis pub/sub', db: 'Cassandra', dbSub: 'msgs by conv_id',
+      deep: [['ordering per conversation', 'db'], ['fan-out across gateways', 'cache']],
+      ask: 'ordering or cross-node fan-out?',
+    },
+    pay: {
+      name: 'Payments',
+      fr: ['charge', 'refund', 'out: payouts, FX'],
+      nfr: ['1k TPS peak', 'never double-charge'],
+      est: ['~1k writes/s', '1:1 to 10:1 r:w', '→ one PG primary OK'],
+      api: ['POST /v1/payments {idemKey}', 'POST /v1/refunds'],
+      cache: 'Idempotency store', db: 'Postgres ledger', dbSub: 'double-entry',
+      deep: [['idempotency keys', 'cache'], ['ledger + reconciliation', 'db']],
+      ask: 'idempotency or the ledger?',
+    },
+  };
+  var P = 'url';
+  var X0 = 40, X1 = 720, TY = 40;
+  var PH = [[0, 5, 'Req'], [5, 10, 'Est'], [10, 15, 'API'], [15, 25, 'High-level'], [25, 40, 'Deep dives'], [40, 45, 'Wrap']];
+  function mx(m) { return X0 + (X1 - X0) * (m / 45); }
+  var N = { client: [262, 210], lb: [372, 210], api: [482, 210], cache: [610, 140], db: [610, 262] };
+  var W = 96, H = 40;
+  function c(k) { return [N[k][0] + W / 2, N[k][1] + H / 2]; }
+
+  function clockTo(ctx, m) {
+    ctx.state.clockLabel.textContent = 'min ' + m;
+    return ctx.move(ctx.state.clock, mx(m), TY, 600);
+  }
+  function fillPhase(ctx, i) {
+    var r = ctx.state.phases[i];
+    r.setAttribute('class', 'fill-accent');
+    return ctx.fade(r, 0.85, 300);
+  }
+  function note(ctx, text, cls) {
+    var y = ctx.state.noteY; ctx.state.noteY += 16;
+    var t = ctx.el('text', { x: 24, y: y, class: 'mono small ' + (cls || ''), text: text, opacity: 0 });
+    return ctx.fade(t, 1, 200);
+  }
+  function head(ctx, text) {
+    ctx.state.noteY += 3;
+    var t = ctx.el('text', { x: 20, y: ctx.state.noteY, class: 'mono small muted', text: text });
+    ctx.state.noteY += 15;
+    return t;
+  }
+  function seq(list) { return list.reduce(function (p, f) { return p.then(f); }, Promise.resolve()); }
+  function node(ctx, k, label, sub, cls) {
+    var g = ctx.group({ opacity: 0 });
+    var r = ctx.el('rect', { x: 0, y: 0, width: W, height: H, rx: 7, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: W / 2, y: sub ? 17 : 24, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    if (sub) ctx.el('text', { x: W / 2, y: 31, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g);
+    ctx.place(g, N[k][0], N[k][1]);
+    g._r = r;
+    ctx.state.nodes[k] = g;
+    return g;
+  }
+  function wire(ctx, a, b) {
+    var pa = c(a), pb = c(b);
+    var l = ctx.el('line', { x1: pa[0] + (pb[0] > pa[0] ? W / 2 : 0), y1: pa[1], x2: pb[0] - (pb[0] > pa[0] ? W / 2 : 0), y2: pb[1], class: 'wire accent', opacity: 0 });
+    ctx.svg.insertBefore(l, ctx.svg.firstChild);
+    return ctx.fade(l, 1, 250);
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: { title: 'One line from the interviewer', say: '"Design a URL shortener" (or chat, or payments: pick in Try it). Only the content on the board changes between problems; the order never does.' },
+    setup: function (ctx) {
+      var pr = PROBS[P];
+      ctx.state.nodes = {};
+      ctx.state.noteY = 112;
+      ctx.state.phases = PH.map(function (p) {
+        var r = ctx.el('rect', { x: mx(p[0]) + 1, y: TY + 4, width: mx(p[1]) - mx(p[0]) - 2, height: 20, rx: 4, class: 'fill-soft' });
+        ctx.el('text', { x: (mx(p[0]) + mx(p[1])) / 2, y: TY + 18, 'text-anchor': 'middle', class: 'mono small', text: p[2] });
+        ctx.el('text', { x: mx(p[0]), y: TY + 38, 'text-anchor': 'middle', class: 'mono small muted', text: p[0] });
+        return r;
+      });
+      ctx.el('text', { x: X1, y: TY + 38, 'text-anchor': 'middle', class: 'mono small muted', text: '45' });
+      var cl = ctx.group();
+      ctx.el('path', { d: 'M -7 -10 L 7 -10 L 0 0 Z', class: 'fill-signal' }, cl);
+      ctx.el('line', { x1: 0, y1: 0, x2: 0, y2: 30, class: 'wire', style: 'stroke: var(--signal)' }, cl);
+      ctx.state.clockLabel = ctx.el('text', { x: 0, y: -13, 'text-anchor': 'middle', class: 'mono small', text: 'min 0' }, cl);
+      ctx.place(cl, mx(0), TY);
+      ctx.state.clock = cl;
+      ctx.el('rect', { x: 12, y: 92, width: 226, height: 390, rx: 8, class: 'box' });
+      ctx.el('text', { x: 20, y: 108, class: 'title', text: 'Board: ' + pr.name });
+      ctx.state.noteY = 126;
+      ctx.el('text', { x: 252, y: 108, class: 'title', text: 'Diagram' });
+    },
+    steps: [
+      {
+        title: '0–5 min: requirements and scope',
+        say: 'Ask, do not assume. Write 3 functional requirements, the non-functional ones, and say out loud what is out of scope.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          ctx.log('Q: top actions? scale? read-heavy? consistency?', 'info');
+          return Promise.all([fillPhase(ctx, 0), clockTo(ctx, 5)]).then(function () {
+            head(ctx, 'functional');
+            return seq(pr.fr.map(function (f) { return function () { return note(ctx, '• ' + f, /^out/.test(f) ? 'muted' : ''); }; }));
+          }).then(function () {
+            head(ctx, 'non-functional');
+            return seq(pr.nfr.map(function (f) { return function () { return note(ctx, '• ' + f); }; }));
+          }).then(function () { ctx.log('Scope fixed: ' + pr.fr.slice(0, 2).join(', '), 'ok'); });
+        },
+      },
+      {
+        title: '5–10 min: estimate, then decide',
+        say: 'Only the numbers that change the design. Each one ends with a decision, written with an arrow.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          return Promise.all([fillPhase(ctx, 1), clockTo(ctx, 10)]).then(function () {
+            head(ctx, 'estimate');
+            return seq(pr.est.map(function (f) { return function () { return note(ctx, f, f.charAt(0) === '→' ? 'fill-ok' : ''); }; }));
+          }).then(function () { ctx.log('Decision: ' + pr.est[pr.est.length - 1].replace('→ ', ''), 'ok'); });
+        },
+      },
+      {
+        title: '10–15 min: APIs and the lookup key',
+        say: 'Real request and response shapes. Name the key each entity is read by; it decides the database.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          return Promise.all([fillPhase(ctx, 2), clockTo(ctx, 15)]).then(function () {
+            head(ctx, 'API');
+            return seq(pr.api.map(function (f) { return function () { return note(ctx, f); }; }));
+          }).then(function () { ctx.log('Entity key: ' + pr.dbSub, 'info'); });
+        },
+      },
+      {
+        title: '15–20 min: one end-to-end diagram',
+        say: 'Start simple: client, load balancer, a stateless API tier, a cache, a database. Scale only what the numbers asked for.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          var parts = [['client', 'client', '', ''], ['lb', 'LB', '', ''], ['api', 'API × N', 'stateless', 'accent'], ['cache', pr.cache, '', ''], ['db', pr.db, pr.dbSub, '']];
+          return Promise.all([fillPhase(ctx, 3), clockTo(ctx, 20)]).then(function () {
+            return seq(parts.map(function (p, i) {
+              return function () {
+                var g = node(ctx, p[0], p[1], p[2], p[3]);
+                var w = i === 0 ? Promise.resolve() : wire(ctx, i < 3 ? parts[i - 1][0] : 'api', p[0]);
+                return Promise.all([ctx.fade(g, 1, 260), w]);
+              };
+            }));
+          }).then(function () { ctx.log('Diagram up at minute 20', 'ok'); });
+        },
+      },
+      {
+        title: 'Walk one write through it',
+        say: 'Trace the write path out loud: client → LB → API → database. It proves the design works and shows where the write lands.',
+        run: function (ctx) {
+          return clockTo(ctx, 22).then(function () {
+            return ctx.packet([c('client'), c('lb'), c('api'), c('db')], { ms: 1200, label: 'write' });
+          }).then(function () {
+            ctx.flash(ctx.state.nodes.db);
+            return ctx.packet([c('db'), c('api'), c('client')], { ms: 800, cls: 'ok', label: '201' });
+          }).then(function () { ctx.log('Write: client → LB → API → ' + PROBS[P].db, 'info'); });
+        },
+      },
+      {
+        title: 'Walk one read: cache hit and miss',
+        say: 'Read path: the API checks the cache first. A miss goes to the database and fills the cache. Say the TTL and the hit rate you expect.',
+        run: function (ctx) {
+          return clockTo(ctx, 25).then(function () {
+            return ctx.packet([c('client'), c('lb'), c('api'), c('cache')], { ms: 1000, label: 'read' });
+          }).then(function () {
+            return ctx.packet([c('cache'), c('api'), c('db')], { ms: 700, cls: 'warn', label: 'miss' });
+          }).then(function () {
+            return ctx.packet([c('db'), c('api'), c('cache')], { ms: 600, cls: 'ok', label: 'fill' });
+          }).then(function () {
+            return ctx.packet([c('api'), c('lb'), c('client')], { ms: 600, cls: 'ok', label: '200' });
+          }).then(function () { ctx.log('Read: cache first, miss → DB → fill', 'info'); });
+        },
+      },
+      {
+        title: 'Check in before going deep',
+        say: 'Offer the two parts unique to this problem and let the interviewer choose. This steers you to what they score.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          var g = ctx.group({ opacity: 0 });
+          ctx.el('rect', { x: 252, y: 400, width: 490, height: 30, rx: 15, class: 'box signal' }, g);
+          ctx.el('text', { x: 497, y: 420, 'text-anchor': 'middle', class: 'mono small', text: 'You: "Deeper on ' + pr.ask + '"' }, g);
+          return ctx.fade(g, 1, 300).then(function () { ctx.log('Interviewer: "Start with the first one."', 'info'); });
+        },
+      },
+      {
+        title: '25–40 min: two deep dives',
+        say: 'Go deep on the parts unique to this problem. Each deep dive ends with a choice and its cost, and its box on the diagram is updated.',
+        run: function (ctx) {
+          var pr = PROBS[P];
+          return Promise.all([fillPhase(ctx, 4), clockTo(ctx, 40)]).then(function () {
+            head(ctx, 'deep dives');
+            return seq(pr.deep.map(function (d) {
+              return function () {
+                var n = ctx.state.nodes[d[1]];
+                n._r.setAttribute('class', 'box ok');
+                ctx.flash(n);
+                ctx.log('Deep dive: ' + d[0], 'ok');
+                return note(ctx, '✓ ' + d[0], 'fill-ok');
+              };
+            }));
+          });
+        },
+      },
+      {
+        title: '40–45 min: wrap-up on failures',
+        say: 'Name the single point of failure and the fix (here a standby replica with automatic failover), what breaks first at 10×, and the alerts you would add.',
+        run: function (ctx) {
+          var db = ctx.state.nodes.db;
+          db._r.setAttribute('class', 'box bad');
+          ctx.flash(db);
+          ctx.log('SPOF: single ' + PROBS[P].db + ' primary', 'bad');
+          return Promise.all([fillPhase(ctx, 5), clockTo(ctx, 45)]).then(function () {
+            var rep = ctx.group({ opacity: 0 });
+            ctx.el('rect', { x: 0, y: 0, width: W, height: H, rx: 7, class: 'box ok' }, rep);
+            ctx.el('text', { x: W / 2, y: 24, 'text-anchor': 'middle', class: 'mono small', text: 'replica' }, rep);
+            ctx.place(rep, 610, 322);
+            ctx.el('line', { x1: 658, y1: 302, x2: 658, y2: 322, class: 'wire dashed' });
+            return ctx.fade(rep, 1, 300);
+          }).then(function () {
+            db._r.setAttribute('class', 'box ok');
+            head(ctx, 'wrap-up');
+            return seq([
+              function () { return note(ctx, 'SPOF → standby + failover', 'fill-ok'); },
+              function () { return note(ctx, '10×: DB first → shard / queue'); },
+              function () { return note(ctx, 'alerts: p99, 5xx, lag, hit rate'); },
+            ]);
+          }).then(function () { ctx.log('Round finished on time', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  function syncTry() {
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-p]'), function (b) { b.classList.toggle('sel', b.dataset.p === P); });
+  }
+  document.getElementById('try').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || !b.dataset.p) return;
+    P = b.dataset.p;
+    syncTry();
+    lab.reset();
+  });
+  syncTry();
+})();
+</script>
+</body>
+</html>

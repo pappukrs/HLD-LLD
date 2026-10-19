@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L30 Machine-coding round</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try .btn.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L30 · Machine coding</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>The machine-coding round, minute by minute</h1>
+    <p class="lede">Watch a 90-minute round play out: scope, model, skeleton, build one feature at a time, edge cases, demo. The clock decides what you do next, and each phase turns on a scoring criterion.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Timeline of a machine-coding round with file tree, driver and scorecard"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Round length</span>
+        <button class="btn" type="button" data-len="90">90 min</button>
+        <button class="btn" type="button" data-len="120">120 min</button>
+        <span>· Pace at minute 45</span>
+        <button class="btn" type="button" data-pace="ok">On track</button>
+        <button class="btn" type="button" data-pace="behind">Behind</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Phase / file</span>
+        <span><i style="background: var(--ok)"></i>Working / scored</span>
+        <span><i style="background: var(--bad)"></i>Error or cut</span>
+        <span><i style="background: var(--signal)"></i>Call in flight</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Key lines (highlighted with the step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface PricingStrategy { fee(type, ms): number }</span><span class="ln" data-l="2">interface TicketRepo { save(t): void; find(id) }</span><span class="ln" data-l="3">class ParkingService {</span><span class="ln" data-l="4">  constructor(private d: Deps) {}</span><span class="ln" data-l="5">  park(plate, type) { spot.occupy(plate); repo.save(t) }</span><span class="ln" data-l="6">  unpark(id) { if (!t) throw new NotFoundError(id) }</span><span class="ln" data-l="7">}</span><span class="ln" data-l="8">// main.ts: composition root + demo</span><span class="ln" data-l="9">const lot = new ParkingService({ pricing, repo, clock })</span><span class="ln" data-l="10">lot.park('KA01-CAR', 'CAR'); now += 2 * HOUR</span><span class="ln" data-l="11">class WeekendFlat implements PricingStrategy { }</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Let me confirm scope first. I'll finish these four must-haves, keep storage in memory behind a repository interface, and inject the clock and pricing strategy. I'll run after each feature, and at minute 75 I stop adding features and write the demo."</p>
+      <p class="say">"I'm behind, so I'll cut the waitlist and keep it as an extension. It plugs in as a listener on unpark."</p>
+    </div>
+    <div class="note wide">
+      <h3>Machine coding vs design discussion</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Machine-coding round</th><th>Design-discussion round</th></tr></thead>
+          <tbody>
+            <tr><td>Who runs it</td><td>Flipkart, PhonePe, Razorpay, Swiggy, CRED, Uber India</td><td>Amazon, Microsoft, many SDE-2 loops</td></tr>
+            <tr><td>Time</td><td>90–120 min</td><td>45–60 min</td></tr>
+            <tr><td>Output</td><td>Running code + demo</td><td>Class diagram, signatures, 1–2 key methods</td></tr>
+            <tr><td>Time split</td><td>8 read · 10 model · 7 skeleton · 40 build · 10 edge · 10 demo · 5 polish</td><td>5 req · 10 diagram · 10 APIs · 10 code · 10 extensions</td></tr>
+            <tr><td>Biggest risk</td><td>Nothing runs at the end</td><td>Vague classes, no trade-offs</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why write the driver before the logic?</summary><div>It fixes the public API, gives you something to run after every feature, and is the demo at the end.</div></details>
+      <details class="qa"><summary>Minute 45, only one of four must-haves runs. What now?</summary><div>Say it out loud and cut scope: finish the simplest version of each remaining must-have, drop good-to-haves, keep the demo slot.</div></details>
+      <details class="qa"><summary>What do you inject in almost every problem?</summary><div>Clock, id generator, repository and the varying strategy. Sometimes a notifier or gateway.</div></details>
+      <details class="qa"><summary>What does the interviewer check first in the demo?</summary><div>That every must-have runs end to end, then how a new requirement would plug in without editing the core.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../problems/01-parking-lot/README.md">01 Parking lot</a> with a 90-minute timer</li>
+        <li><a href="../../problems/06-vending-machine/README.md">06 Vending machine</a></li>
+        <li><a href="../../problems/13-bookmyshow/README.md">13 BookMyShow</a> (adds the concurrency follow-up)</li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var LEN = 90, PACE = 'ok';
+  var X0 = 40, X1 = 720, TY = 46;
+  function phases() {
+    return LEN === 90
+      ? [[0, 8, 'Read'], [8, 18, 'Model'], [18, 25, 'Skel'], [25, 65, 'Build'], [65, 75, 'Edge'], [75, 85, 'Demo'], [85, 90, 'Pol']]
+      : [[0, 8, 'Read'], [8, 18, 'Model'], [18, 25, 'Skel'], [25, 90, 'Build'], [90, 102, 'Edge'], [102, 114, 'Demo'], [114, 120, 'Pol']];
+  }
+  function mx(min) { return X0 + (X1 - X0) * (min / LEN); }
+  function ph(name) { return phases().filter(function (p) { return p[2] === name; })[0]; }
+
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+
+  function box(ctx, x, y, w, h, label, cls, parent) {
+    var g = ctx.group({ opacity: 0 }, parent);
+    var r = ctx.el('rect', { x: 0, y: 0, width: w, height: h, rx: 6, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: 8, y: h / 2 + 4, class: 'mono', text: label }, g);
+    ctx.place(g, x, y);
+    g._r = r; g._t = t;
+    return g;
+  }
+
+  var FILES = [
+    ['models/', 'Ticket, Spot'],
+    ['strategies/', 'Pricing'],
+    ['repositories/', 'TicketRepo'],
+    ['services/', 'ParkingService'],
+    ['errors.ts', 'typed errors'],
+    ['main.ts', 'wiring + demo'],
+  ];
+  var DRIVER = ['park(car)', 'unpark(t) → fee', 'available(size)', 'unknown ticket → error', 'good-to-have: waitlist'];
+  var SCORE = ['Working code', 'Modularity', 'Extensibility', 'Readability', 'Edge cases', 'Demo / tests', 'Concurrency answer'];
+
+  function fileY(i) { return 136 + i * 44; }
+  function fileCenter(i) { return [150, fileY(i) + 17]; }
+
+  function score(ctx, name, cls) {
+    var s = ctx.state.score[name];
+    s.dot.setAttribute('class', 'dot ' + cls);
+    ctx.flash(s.dot);
+  }
+  function driverLine(ctx, i, cls, mark) {
+    var d = ctx.state.driver[i];
+    d.mark.textContent = mark;
+    d.mark.setAttribute('class', 'mono ' + cls);
+    d.g.setAttribute('opacity', 1);
+    ctx.flash(d.g);
+  }
+  function clockTo(ctx, min, ms) {
+    ctx.state.clockLabel.textContent = 'minute ' + Math.round(min);
+    return ctx.move(ctx.state.clock, mx(min), TY, ms === undefined ? 700 : ms);
+  }
+  function fillPhase(ctx, name) {
+    var r = ctx.state.phaseRects[name];
+    r.setAttribute('class', 'fill-accent');
+    return ctx.fade(r, 0.85, 300);
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: { title: 'One timed round', say: 'Problem: a parking lot with park, unpark with a fee, availability, and errors. Good-to-have: a waitlist. Press Play to watch the clock drive every decision.' },
+    setup: function (ctx) {
+      hl([]);
+      ctx.state.phaseRects = {};
+      ctx.el('text', { x: X0, y: 24, class: 'title', text: LEN + '-minute timeline' });
+      phases().forEach(function (p) {
+        var r = ctx.el('rect', { x: mx(p[0]) + 1, y: TY + 4, width: mx(p[1]) - mx(p[0]) - 2, height: 20, rx: 4, class: 'fill-soft' });
+        ctx.state.phaseRects[p[2]] = r;
+        ctx.el('text', { x: (mx(p[0]) + mx(p[1])) / 2, y: TY + 18, 'text-anchor': 'middle', class: 'mono small', text: p[2] });
+        ctx.el('text', { x: mx(p[0]), y: TY + 40, 'text-anchor': 'middle', class: 'mono small muted', text: p[0] });
+      });
+      ctx.el('text', { x: X1, y: TY + 40, 'text-anchor': 'middle', class: 'mono small muted', text: LEN });
+      var c = ctx.group();
+      ctx.el('path', { d: 'M -7 -10 L 7 -10 L 0 0 Z', class: 'fill-signal' }, c);
+      ctx.el('line', { x1: 0, y1: 0, x2: 0, y2: 30, class: 'wire', style: 'stroke: var(--signal)' }, c);
+      ctx.state.clockLabel = ctx.el('text', { x: 0, y: -14, 'text-anchor': 'middle', class: 'mono small', text: 'minute 0' }, c);
+      ctx.place(c, mx(0), TY);
+      ctx.state.clock = c;
+
+      ctx.el('text', { x: 40, y: 124, class: 'title', text: 'Files' });
+      ctx.el('text', { x: 292, y: 124, class: 'title', text: 'Driver (main.ts)' });
+      ctx.el('text', { x: 530, y: 124, class: 'title', text: 'Scorecard' });
+
+      ctx.state.files = FILES.map(function (f, i) {
+        var g = box(ctx, 40, fileY(i), 220, 34, f[0], 'accent');
+        ctx.el('text', { x: 212, y: 21, 'text-anchor': 'end', class: 'mono small muted', text: f[1] }, g);
+        return g;
+      });
+      ctx.state.driver = DRIVER.map(function (d, i) {
+        var g = ctx.group({ opacity: 0.35 });
+        ctx.el('rect', { x: 0, y: 0, width: 214, height: 28, rx: 5, class: 'box' }, g);
+        var t = ctx.el('text', { x: 26, y: 18, class: 'mono small', text: d }, g);
+        var mark = ctx.el('text', { x: 9, y: 18, class: 'mono muted', text: '·' }, g);
+        ctx.place(g, 292, 136 + i * 38);
+        return { g: g, t: t, mark: mark };
+      });
+      ctx.state.score = {};
+      SCORE.forEach(function (s, i) {
+        var y = 146 + i * 34;
+        var dot = ctx.el('circle', { cx: 538, cy: y, r: 7, class: 'dot muted' });
+        ctx.el('text', { x: 554, y: y + 4, text: s });
+        ctx.state.score[s] = { dot: dot };
+      });
+      ctx.state.newFile = null;
+    },
+    steps: [
+      {
+        title: 'Minutes 0–8: read twice, ask, pick must-haves',
+        say: 'Ask 3–5 questions ("one floor or many?", "pay on exit?"). Write assumptions at the top. Commit to four must-haves out loud.',
+        run: function (ctx) {
+          hl([]);
+          ctx.log('Q: multiple floors? A: yes, same rules per floor', 'info');
+          ctx.log('Must-haves: park, unpark+fee, availability, errors');
+          return Promise.all([fillPhase(ctx, 'Read'), clockTo(ctx, 8)]).then(function () {
+            return Promise.all(ctx.state.driver.map(function (d, i) { return ctx.fade(d.g, i < 4 ? 0.7 : 0.45, 300); }));
+          });
+        },
+      },
+      {
+        title: 'Minutes 8–18: nouns → entities, "can vary" → interface',
+        say: 'Ticket and Spot are entities. Pricing "can change later", so it is an interface. Storage goes behind a repository interface.',
+        run: function (ctx) {
+          hl([1, 2]);
+          ctx.log('Entities: Ticket, Spot · Union: VehicleType');
+          ctx.log('Interfaces: PricingStrategy, TicketRepo', 'info');
+          return Promise.all([fillPhase(ctx, 'Model'), clockTo(ctx, 18)]).then(function () {
+            return Promise.all([ctx.fade(ctx.state.files[0], 1, 300), ctx.fade(ctx.state.files[1], 1, 300)]);
+          });
+        },
+      },
+      {
+        title: 'Minutes 18–25: empty skeleton + driver calls first',
+        say: 'Create every file with empty classes, then write the driver lines that the demo will run. It compiles before any logic exists.',
+        run: function (ctx) {
+          hl([3, 4, 8, 9]);
+          ctx.log('Skeleton compiles: 6 files, 0 logic');
+          var chain = Promise.all([fillPhase(ctx, 'Skel'), clockTo(ctx, 25)]);
+          ctx.state.files.slice(2).forEach(function (f) { chain = chain.then(function () { return ctx.fade(f, 1, 220); }); });
+          return chain;
+        },
+      },
+      {
+        title: 'Build feature 1: park()',
+        say: 'main.ts calls the service, the service asks Spot to occupy itself and saves a Ticket in the repo. Run it. One line of the driver goes green.',
+        run: function (ctx) {
+          hl([5, 10]);
+          var b = ph('Build');
+          var m = fileCenter(5), s = fileCenter(3), mo = fileCenter(0), r = fileCenter(2);
+          return Promise.all([fillPhase(ctx, 'Build'), clockTo(ctx, b[0] + (b[1] - b[0]) * 0.35)])
+            .then(function () { return ctx.packet([m, [272, m[1]], [272, s[1]], s], { ms: 600 }); })
+            .then(function () { return ctx.packet([s, [272, s[1]], [272, mo[1]], mo], { ms: 600 }); })
+            .then(function () { return ctx.packet([mo, [272, mo[1]], [272, r[1]], r], { ms: 500 }); })
+            .then(function () {
+              driverLine(ctx, 0, 'fill-ok', '✓');
+              score(ctx, 'Working code', 'warn');
+              ctx.log('park(car) → ticket T1 at M1', 'ok');
+            });
+        },
+      },
+      {
+        title: 'Build feature 2: unpark() with the pricing strategy',
+        say: 'The fee comes from the injected PricingStrategy. The injected clock moves 2 hours without waiting. Then availability is a one-line filter.',
+        run: function (ctx) {
+          hl([1, 4, 6]);
+          var s = fileCenter(3), p = fileCenter(1);
+          return clockTo(ctx, ph('Build')[0] + (ph('Build')[1] - ph('Build')[0]) * 0.55)
+            .then(function () { return ctx.packet([s, [272, s[1]], [272, p[1]], p], { ms: 600, cls: 'accent' }); })
+            .then(function () { return ctx.packet([p, [272, p[1]], [272, s[1]], s], { ms: 500, cls: 'ok', label: '₹40' }); })
+            .then(function () {
+              driverLine(ctx, 1, 'fill-ok', '✓');
+              driverLine(ctx, 2, 'fill-ok', '✓');
+              score(ctx, 'Modularity', 'ok');
+              ctx.log('unpark(T1) after 2h → fee 40', 'ok');
+              ctx.log('available(MEDIUM) → 2', 'ok');
+            });
+        },
+      },
+      {
+        title: 'Minute 45 check: on track or cut scope?',
+        say: 'If fewer than half the must-haves run, say it and cut. A working subset beats a broken full set. Use the Try it buttons to see both paths.',
+        run: function (ctx) {
+          hl([]);
+          return clockTo(ctx, LEN === 90 ? 45 : 60).then(function () {
+            var w = ctx.state.driver[4];
+            if (PACE === 'behind') {
+              driverLine(ctx, 4, 'fill-bad', '✗');
+              w.t.setAttribute('text-decoration', 'line-through');
+              ctx.log('Behind: waitlist cut, kept as an extension', 'warn');
+            } else {
+              driverLine(ctx, 4, 'fill-warn', '?');
+              ctx.log('On track: waitlist only if time is left after the demo', 'info');
+            }
+            return ctx.wait(400);
+          });
+        },
+      },
+      {
+        title: 'Edge cases: typed errors, never null',
+        say: 'Unknown ticket, bad plate, full lot. Each throws a named error from errors.ts. The demo shows the failure cleanly instead of crashing.',
+        run: function (ctx) {
+          hl([6]);
+          var m = fileCenter(5), s = fileCenter(3), e = fileCenter(4);
+          return Promise.all([fillPhase(ctx, 'Edge'), clockTo(ctx, ph('Edge')[1])])
+            .then(function () { return ctx.packet([m, [272, m[1]], [272, s[1]], s], { ms: 500 }); })
+            .then(function () { return ctx.packet([s, [272, s[1]], [272, e[1]], e], { ms: 400, cls: 'bad' }); })
+            .then(function () { return ctx.packet([e, [272, e[1]], [272, m[1]], m], { ms: 500, cls: 'bad', label: 'NotFoundError' }); })
+            .then(function () {
+              driverLine(ctx, 3, 'fill-ok', '✓');
+              score(ctx, 'Edge cases', 'ok');
+              score(ctx, 'Working code', 'ok');
+              ctx.log('unpark(T999) → NotFoundError', 'bad');
+              ctx.log('park("??") → ValidationError', 'bad');
+            });
+        },
+      },
+      {
+        title: 'Demo, then polish',
+        say: 'Run main.ts top to bottom: every must-have shows. Rename vague names, delete dead code, list what comes next.',
+        run: function (ctx) {
+          hl([8, 9, 10]);
+          return Promise.all([fillPhase(ctx, 'Demo'), clockTo(ctx, ph('Demo')[1])]).then(function () {
+            score(ctx, 'Demo / tests', 'ok');
+            return Promise.all([fillPhase(ctx, 'Pol'), clockTo(ctx, LEN)]);
+          }).then(function () {
+            score(ctx, 'Readability', 'ok');
+            ctx.log('Demo: 4/4 must-haves green', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Extension: "add weekend flat pricing"',
+        say: 'A new class appears in strategies/. ParkingService does not change; main.ts passes the new strategy. That is OCP in front of the interviewer.',
+        run: function (ctx) {
+          hl([11]);
+          var g = box(ctx, 40, 400, 220, 30, '+ WeekendFlat', 'ok');
+          ctx.state.newFile = g;
+          var p = fileCenter(1);
+          return ctx.fade(g, 1, 400).then(function () {
+            return ctx.packet([[150, 400], [272, 400], [272, p[1]], p], { ms: 600, cls: 'ok' });
+          }).then(function () {
+            ctx.flash(ctx.state.files[3]);
+            score(ctx, 'Extensibility', 'ok');
+            ctx.log('New PricingStrategy class; service untouched', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Follow-up: "what if two servers run this?"',
+        say: 'One Node process: check and occupy happen in one synchronous block, so it is safe. Two servers: move spots to the DB and claim with a conditional update.',
+        run: function (ctx) {
+          hl([5]);
+          score(ctx, 'Concurrency answer', 'ok');
+          ctx.log('UPDATE spots SET plate=$1 WHERE id=$2 AND plate IS NULL', 'info');
+          ctx.log('Scorecard complete', 'ok');
+          return ctx.wait(400);
+        },
+      },
+    ],
+  });
+
+  function syncTry() {
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-len]'), function (b) { b.classList.toggle('sel', +b.dataset.len === LEN); });
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-pace]'), function (b) { b.classList.toggle('sel', b.dataset.pace === PACE); });
+  }
+  document.getElementById('try').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.len) LEN = +b.dataset.len;
+    if (b.dataset.pace) PACE = b.dataset.pace;
+    syncTry();
+    lab.reset();
+  });
+  syncTry();
+})();
+</script>
+</body>
+</html>

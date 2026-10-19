@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L28 Mediator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .shaft { fill: none; stroke: var(--line); stroke-width: 1.5; }
+  .stage .floorline { stroke: var(--grid); stroke-width: 1; }
+  .stage .car { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
+  .stage .car.picked { stroke: var(--accent); fill: var(--accent-soft); stroke-width: 3; }
+  .stage .car.maint { stroke: var(--bad); stroke-dasharray: 4 3; }
+  .stage .stop { fill: var(--signal); }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L28 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Mediator: the elevator dispatcher</h1>
+    <p class="lede">Buttons, cars and the display never call each other. Each one only knows the dispatcher. The dispatcher holds the rule for who does what, so N objects need N links instead of N x (N-1) / 2.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Floor buttons, a dispatcher, a display and three elevator shafts"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Mediator link / picked car</span>
+        <span><i style="background: var(--signal)"></i>Message in flight</span>
+        <span><i style="background: var(--bad)"></i>Mesh link / maintenance</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Try the dispatcher">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 440" role="img" aria-label="Interactive dispatcher"></svg>
+      </div>
+      <div class="controls">
+        <label>Floor <select id="try-floor"></select></label>
+        <button class="btn primary" type="button" id="try-call">press(button)</button>
+        <button class="btn" type="button" id="try-tick">tick (move 1 floor)</button>
+        <button class="btn" type="button" id="try-maint">toggle C maintenance</button>
+        <label>Strategy <select id="try-strat"><option value="nearest">nearestIdleFirst</option><option value="round">roundRobin</option></select></label>
+        <button class="btn" type="button" id="try-reset">New building</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Be the building</h2>
+        <p>Press buttons on different floors, then tick to move cars. Put car C into maintenance or swap the strategy. Only the dispatcher's rule changes; buttons and cars stay the same.</p>
+      </section>
+      <section class="log">
+        <h3>Dispatcher log</h3>
+        <ol id="try-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Floor buttons and cars don't talk to each other. They report to an <code>ElevatorDispatcher</code>, a mediator. It picks a car with a pluggable strategy and updates displays when a car arrives. Car movement stays in <code>ElevatorCar</code>, the rule stays in the strategy, and the dispatcher only routes, so it does not become a god class."</p>
+    </div>
+    <div class="note">
+      <h3>The code (highlights follow the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">class ElevatorDispatcher implements Dispatcher {</span><span class="ln" data-l="2">  constructor(private display: Display, private pick: PickStrategy) {}</span><span class="ln" data-l="3">  requestPickup(floor: number, dir: Direction) {</span><span class="ln" data-l="4">    const car = this.pick(this.cars, floor);</span><span class="ln" data-l="5">    car.addStop(floor);</span><span class="ln" data-l="6">  }</span><span class="ln" data-l="7">  carArrived(car: ElevatorCar, floor: number) {</span><span class="ln" data-l="8">    this.display.show(car.id, floor);</span><span class="ln" data-l="9">  }</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">class FloorButton {</span><span class="ln" data-l="12">  press(dir) { this.dispatcher.requestPickup(this.floor, dir); }</span><span class="ln" data-l="13">}</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Mediator vs Observer vs Facade</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Mediator</th><th>Observer</th><th>Facade</th></tr></thead>
+          <tbody>
+            <tr><td>Direction</td><td>Two-way: colleagues call it, it calls them</td><td>One-way: subject to listeners</td><td>One-way: client to subsystem</td></tr>
+            <tr><td>Knows the others</td><td>Yes, by role</td><td>No, just callbacks</td><td>Yes, they don't know it</td></tr>
+            <tr><td>Holds logic</td><td>Interaction rules (who, when, unless)</td><td>None</td><td>A common flow</td></tr>
+            <tr><td>Example</td><td>Dispatcher, chat room, ride matcher</td><td><code>order.on('paid')</code></td><td><code>checkout()</code> over 5 services</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Chat room: A blocks B. Where does that rule live?</summary><div>In the room (the mediator). It checks A's block list before delivering B's message. Users have no references to each other.</div></details>
+      <details class="qa"><summary>10 components: links with and without a mediator?</summary><div>Mesh: up to 45. Mediator: 10.</div></details>
+      <details class="qa"><summary>How do you keep the mediator from becoming a god class?</summary><div>State and behaviour stay in colleagues, decisions go into a strategy, and the mediator only routes. Split it per workflow if it grows.</div></details>
+      <details class="qa"><summary>How do you test ElevatorCar alone?</summary><div>Give it a fake <code>Dispatcher</code> that records calls. The car depends only on the interface.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/10-elevator/README.md">10 Elevator</a></li>
+        <li>Same idea: <a href="../../problems/21-meeting-room-scheduler/README.md">21 Meeting Room Scheduler</a>, <a href="../../problems/17-ride-sharing/README.md">17 Ride Sharing</a></li>
+        <li>At scale: <a href="../../../hld/case-studies/06-chat-system/README.md">Chat system</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var FLOOR_H = 36, BASE_Y = 404;             // floor 0 car top at BASE_Y - FLOOR_H
+  var SHAFT_X = { A: 500, B: 590, C: 680 };
+  function carY(floor) { return BASE_Y - (floor + 1) * FLOOR_H + 3; }
+  var BTN = [[30, 70], [30, 190], [30, 310]];
+  var DISP = { x: 220, y: 170, w: 190, h: 74 };
+  var DISPLAY = { x: 220, y: 340, w: 190, h: 56 };
+
+  function newModel() {
+    return {
+      cars: [
+        { id: 'A', floor: 0, stops: [], maint: false },
+        { id: 'B', floor: 8, stops: [], maint: false },
+        { id: 'C', floor: 5, stops: [], maint: true },
+      ],
+      strategy: 'nearest', rr: 0, shown: '—',
+    };
+  }
+  function pick(m, floor) {
+    var ok = m.cars.filter(function (c) { return !c.maint; });
+    if (!ok.length) return null;
+    if (m.strategy === 'round') { var c = ok[m.rr % ok.length]; m.rr++; return c; }
+    return ok.slice().sort(function (a, b) {
+      var ia = a.stops.length === 0 ? 1 : 0, ib = b.stops.length === 0 ? 1 : 0;
+      return (ib - ia) || (Math.abs(a.floor - floor) - Math.abs(b.floor - floor));
+    })[0];
+  }
+
+  // Draws the building. mk(tag, attrs, parent) creates SVG nodes.
+  function build(mk, root) {
+    var v = { cars: {}, carG: {}, btn: [], btnText: [], stops: {} };
+    // shafts
+    Object.keys(SHAFT_X).forEach(function (id) {
+      var x = SHAFT_X[id];
+      mk('rect', { x: x, y: BASE_Y - 10 * FLOOR_H, width: 60, height: 10 * FLOOR_H, class: 'shaft' }, root);
+      mk('text', { x: x + 30, y: BASE_Y + 20, 'text-anchor': 'middle', class: 'mono small muted', text: 'shaft ' + id }, root);
+      v.stops[id] = mk('g', {}, root);
+    });
+    for (var f = 0; f < 10; f++) {
+      mk('line', { x1: 480, x2: 750, y1: BASE_Y - f * FLOOR_H, y2: BASE_Y - f * FLOOR_H, class: 'floorline' }, root);
+      mk('text', { x: 470, y: BASE_Y - f * FLOOR_H - 12, 'text-anchor': 'end', class: 'mono small muted', text: String(f) }, root);
+    }
+    v.wires = mk('g', {}, root);
+    v.mesh = mk('g', { opacity: 0 }, root);
+    // buttons
+    BTN.forEach(function (p, i) {
+      v.btn[i] = mk('rect', { x: p[0], y: p[1], width: 130, height: 46, rx: 8, class: 'box' }, root);
+      v.btnText[i] = mk('text', { x: p[0] + 65, y: p[1] + 28, 'text-anchor': 'middle', class: 'b', text: 'FloorButton' }, root);
+    });
+    // dispatcher
+    v.disp = mk('rect', { x: DISP.x, y: DISP.y, width: DISP.w, height: DISP.h, rx: 10, class: 'box accent' }, root);
+    mk('text', { x: DISP.x + DISP.w / 2, y: DISP.y + 28, 'text-anchor': 'middle', class: 'title', text: 'Dispatcher' }, root);
+    v.strat = mk('text', { x: DISP.x + DISP.w / 2, y: DISP.y + 52, 'text-anchor': 'middle', class: 'mono small', text: '' }, root);
+    // display
+    v.display = mk('rect', { x: DISPLAY.x, y: DISPLAY.y, width: DISPLAY.w, height: DISPLAY.h, rx: 8, class: 'box' }, root);
+    mk('text', { x: DISPLAY.x + 12, y: DISPLAY.y + 22, class: 'mono small muted', text: 'Display' }, root);
+    v.shown = mk('text', { x: DISPLAY.x + 12, y: DISPLAY.y + 44, class: 'mono', text: '' }, root);
+    // cars
+    ['A', 'B', 'C'].forEach(function (id) {
+      var g = mk('g', {}, root);
+      v.cars[id] = mk('rect', { x: 0, y: 0, width: 50, height: 30, rx: 4, class: 'car' }, g);
+      mk('text', { x: 25, y: 20, 'text-anchor': 'middle', class: 'b', text: id }, g);
+      v.carG[id] = g;
+    });
+    return v;
+  }
+  function placeCar(v, id, floor) {
+    var g = v.carG[id];
+    g._x = SHAFT_X[id] + 5; g._y = carY(floor);
+    g.setAttribute('transform', 'translate(' + g._x + ',' + g._y + ')');
+  }
+  function render(v, m, mk, picked) {
+    v.strat.textContent = 'pick: ' + (m.strategy === 'round' ? 'roundRobin' : 'nearestIdleFirst');
+    v.shown.textContent = m.shown;
+    m.cars.forEach(function (c) {
+      v.cars[c.id].setAttribute('class', 'car' + (c.maint ? ' maint' : '') + (picked === c.id ? ' picked' : ''));
+      var s = v.stops[c.id];
+      while (s.firstChild) s.removeChild(s.firstChild);
+      c.stops.forEach(function (f) {
+        mk('circle', { cx: SHAFT_X[c.id] + 30, cy: BASE_Y - f * FLOOR_H - 18, r: 5, class: 'stop' }, s);
+      });
+    });
+  }
+  // centre points for wires / packets
+  function btnPt(i) { return [BTN[i][0] + 130, BTN[i][1] + 23]; }
+  function dispL() { return [DISP.x, DISP.y + DISP.h / 2]; }
+  function dispR() { return [DISP.x + DISP.w, DISP.y + DISP.h / 2]; }
+  function dispB() { return [DISP.x + DISP.w / 2, DISP.y + DISP.h]; }
+  function dispT() { return [DISPLAY.x + DISPLAY.w / 2, DISPLAY.y]; }
+  function carPt(m, id) { var c = m.cars.filter(function (x) { return x.id === id; })[0]; return [SHAFT_X[id] + 5, carY(c.floor) + 15]; }
+  function car(m, id) { return m.cars.filter(function (x) { return x.id === id; })[0]; }
+
+  function code(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(Number(n.getAttribute('data-l'))) >= 0);
+    });
+  }
+
+  function starWires(ctx) {
+    var v = ctx.state.v, m = ctx.state.m;
+    var paths = [];
+    [0, 1, 2].forEach(function (i) { var a = btnPt(i), b = dispL(); paths.push('M' + a + ' L' + b); });
+    ['A', 'B', 'C'].forEach(function (id) { var a = dispR(), x = SHAFT_X[id] + 30, top = BASE_Y - 10 * FLOOR_H; paths.push('M' + a + ' L' + x + ',' + (top - 14) + ' L' + x + ',' + top); });
+    paths.push('M' + dispB() + ' L' + dispT());
+    paths.forEach(function (d) { ctx.el('path', { d: d, class: 'wire accent' }, v.wires); });
+  }
+
+  function pickup(ctx, btnIdx, floor, dir) {
+    var m = ctx.state.m, v = ctx.state.v;
+    v.btnText[btnIdx].textContent = 'Floor ' + floor + ' ' + (dir === 'UP' ? '▲' : '▼');
+    ctx.flash(v.btn[btnIdx]);
+    ctx.log('FloorButton(' + floor + ').press(' + dir + ')', 'info');
+    return ctx.packet([btnPt(btnIdx), dispL()], { ms: 700, label: 'requestPickup(' + floor + ')' }).then(function () {
+      ctx.flash(v.disp);
+      var c = pick(m, floor);
+      m.cars.forEach(function (x) { if (x.maint) ctx.log('  skip ' + x.id + ': maintenance', 'bad'); });
+      c.stops.push(floor);
+      ctx.log('  pick → car ' + c.id + ' (at ' + c.floor + ')', 'ok');
+      return ctx.packet([dispR(), carPt(m, c.id)], { ms: 700, cls: 'accent', label: 'addStop(' + floor + ')' }).then(function () {
+        render(v, m, ctx.el, c.id);
+        ctx.flash(v.cars[c.id]);
+      });
+    });
+  }
+
+  function arrive(ctx, id) {
+    var m = ctx.state.m, v = ctx.state.v, c = car(m, id), target = c.stops[0];
+    ctx.log('car ' + id + ' moves ' + c.floor + ' → ' + target, 'info');
+    return ctx.move(v.carG[id], SHAFT_X[id] + 5, carY(target), 900).then(function () {
+      c.floor = target; c.stops.shift();
+      render(v, m, ctx.el, null);
+      return ctx.packet([carPt(m, id), dispR()], { ms: 700, label: 'carArrived(' + id + ',' + target + ')' });
+    }).then(function () {
+      return ctx.packet([dispB(), dispT()], { ms: 500, cls: 'accent' });
+    }).then(function () {
+      m.shown = 'car ' + id + ' @ floor ' + target;
+      render(v, m, ctx.el, null);
+      ctx.flash(v.display);
+      ctx.log('  display.show(' + id + ', ' + target + ')', 'ok');
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Seven objects that must cooperate', say: 'Three floor buttons, three cars (C is in maintenance) and one display. First we see how they look wired directly, then through a mediator.' },
+    setup: function (ctx) {
+      ctx.state.m = newModel();
+      ctx.state.v = build(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg);
+      ['A', 'B', 'C'].forEach(function (id) { placeCar(ctx.state.v, id, car(ctx.state.m, id).floor); });
+      render(ctx.state.v, ctx.state.m, ctx.el, null);
+      code([]);
+    },
+    steps: [
+      {
+        title: 'Before: everyone knows everyone',
+        say: 'Without a mediator each button holds every car, and each car holds the display and the other cars. The dispatch rule is copied into every button.',
+        run: function (ctx) {
+          var v = ctx.state.v, m = ctx.state.m;
+          var pts = [btnPt(0), btnPt(1), btnPt(2), carPt(m, 'A'), carPt(m, 'B'), carPt(m, 'C'), dispT()];
+          for (var i = 0; i < pts.length; i++) for (var j = i + 1; j < pts.length; j++) {
+            ctx.el('path', { d: 'M' + pts[i] + ' L' + pts[j], class: 'wire bad' }, v.mesh);
+          }
+          ctx.log('mesh: 7 x 6 / 2 = 21 possible links', 'bad');
+          return ctx.fade(v.mesh, 1, 700);
+        },
+      },
+      {
+        title: 'After: a star around the dispatcher',
+        say: 'Each colleague keeps one reference: the <code>Dispatcher</code> interface. The dispatcher knows them all. 7 links instead of 21.',
+        run: function (ctx) {
+          var v = ctx.state.v;
+          return ctx.fade(v.mesh, 0, 500).then(function () {
+            starWires(ctx);
+            v.wires.setAttribute('opacity', 0);
+            ctx.log('star: 7 links, all to the mediator', 'ok');
+            code([1, 2]);
+            return ctx.fade(v.wires, 1, 600);
+          });
+        },
+      },
+      {
+        title: 'Floor 7 presses DOWN',
+        say: 'The button does not choose a car. It only tells the mediator: <code>requestPickup(7, DOWN)</code>. The dispatcher runs the strategy, skips C, and picks B, the nearest idle car.',
+        run: function (ctx) { code([3, 4, 5, 12]); return pickup(ctx, 0, 7, 'DOWN'); },
+      },
+      {
+        title: 'Floor 2 presses UP',
+        say: 'Same path, different answer. B is now busy, so <code>nearestIdleFirst</code> picks A at floor 0.',
+        run: function (ctx) { code([3, 4, 5, 12]); return pickup(ctx, 1, 2, 'UP'); },
+      },
+      {
+        title: 'Car B arrives at floor 7',
+        say: 'B does not know the display exists. It reports <code>carArrived(B, 7)</code> to the dispatcher, and the dispatcher updates the display.',
+        run: function (ctx) { code([7, 8]); return arrive(ctx, 'B'); },
+      },
+      {
+        title: 'Car A arrives at floor 2',
+        say: 'Two-way traffic is normal for a mediator: colleagues call it, it calls colleagues. That is the difference from Observer, which only broadcasts.',
+        run: function (ctx) { code([7, 8]); return arrive(ctx, 'A'); },
+      },
+      {
+        title: 'Swap the rule in one place',
+        say: 'Product wants round robin. We change the strategy inside the dispatcher. No button, car or display class changes.',
+        run: function (ctx) {
+          var m = ctx.state.m, v = ctx.state.v;
+          m.strategy = 'round';
+          render(v, m, ctx.el, null);
+          ctx.flash(v.disp);
+          code([2]);
+          ctx.log('dispatcher.setStrategy(roundRobin)', 'warn');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'Floor 6 presses UP with the new rule',
+        say: 'Round robin hands the call to A even though B is also free. The button code is unchanged. Now try it yourself below.',
+        run: function (ctx) { code([3, 4, 5, 12]); return pickup(ctx, 2, 6, 'UP'); },
+      },
+    ],
+  });
+
+  // ---------- try-it panel (separate scene, instant updates) ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('try-log');
+  var floorSel = document.getElementById('try-floor');
+  for (var f = 0; f < 10; f++) { var o = document.createElement('option'); o.value = f; o.textContent = f; floorSel.appendChild(o); }
+  floorSel.value = '4';
+  var tm, tv;
+  function mk(t, a, p) { return Kit.el(t, a, p || svg); }
+  function tlog(msg, kind) {
+    var li = document.createElement('li'); li.className = kind || ''; li.textContent = msg;
+    logList.appendChild(li); logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  function redraw(picked) {
+    ['A', 'B', 'C'].forEach(function (id) { placeCar(tv, id, car(tm, id).floor); });
+    render(tv, tm, mk, picked);
+  }
+  function fresh() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    tm = newModel();
+    tm.strategy = document.getElementById('try-strat').value;
+    tv = build(mk, svg);
+    tv.btnText[1].textContent = 'any floor';
+    [0, 1, 2].forEach(function (i) { var a = btnPt(i), b = dispL(); mk('path', { d: 'M' + a + ' L' + b, class: 'wire accent' }, tv.wires); });
+    mk('path', { d: 'M' + dispB() + ' L' + dispT(), class: 'wire accent' }, tv.wires);
+    redraw(null);
+    logList.innerHTML = '';
+    tlog('New building: A@0, B@8, C@5 (maintenance)', 'info');
+  }
+  document.getElementById('try-call').addEventListener('click', function () {
+    var floor = Number(floorSel.value);
+    var c = pick(tm, floor);
+    if (!c) { tlog('requestPickup(' + floor + ') → no car available', 'bad'); return; }
+    if (c.stops.indexOf(floor) < 0) c.stops.push(floor);
+    tlog('requestPickup(' + floor + ') → car ' + c.id + ' (at ' + c.floor + ')', 'ok');
+    redraw(c.id);
+  });
+  document.getElementById('try-tick').addEventListener('click', function () {
+    tm.cars.forEach(function (c) {
+      var t = c.stops[0];
+      if (t === undefined) return;
+      c.floor += Math.sign(t - c.floor);
+      if (c.floor === t) { c.stops.shift(); tm.shown = 'car ' + c.id + ' @ floor ' + t; tlog('carArrived(' + c.id + ', ' + t + ') → display', 'ok'); }
+    });
+    redraw(null);
+  });
+  document.getElementById('try-maint').addEventListener('click', function () {
+    var c = car(tm, 'C'); c.maint = !c.maint;
+    tlog('car C maintenance = ' + c.maint, 'warn');
+    redraw(null);
+  });
+  document.getElementById('try-strat').addEventListener('change', function (e) {
+    tm.strategy = e.target.value;
+    tlog('setStrategy(' + (tm.strategy === 'round' ? 'roundRobin' : 'nearestIdleFirst') + ')', 'warn');
+    redraw(null);
+  });
+  document.getElementById('try-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

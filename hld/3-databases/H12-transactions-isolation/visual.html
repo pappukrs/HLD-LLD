@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H12 Transactions and Isolation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H12 · Databases</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Transactions, Isolation and Locking</h1>
+    <p class="lede">Two transactions run at the same time. Each isolation level decides which bad interleavings are possible. Higher levels stop more anomalies but cost more locking, aborts and retries. Locks (<code>FOR UPDATE</code>) and version columns fix the hot spots without raising the level for everyone.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Two transactions on a timeline, and a table of isolation levels and anomalies"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Read</span>
+        <span><i style="background: var(--signal)"></i>Write</span>
+        <span><i style="background: var(--bad)"></i>Wrong result</span>
+        <span><i style="background: var(--ok)"></i>Database protects you</span>
+        <span>* = not committed yet</span>
+      </div>
+      <div class="note">
+        <h3>SQL for this step</h3>
+        <pre class="code" id="sql">-- press Next</pre>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Postgres defaults to Read Committed, which still allows lost updates and write skew. For a balance or stock counter I'll use an atomic <code>UPDATE ... SET x = x - 1 WHERE x &gt; 0</code>, or <code>SELECT ... FOR UPDATE</code>, or a version column. For invariants across rows, like 'at least one doctor on call', I'll use SERIALIZABLE and retry on serialization errors."</p>
+    </div>
+    <div class="note">
+      <h3>How the database does it</h3>
+      <ul>
+        <li><b>Read Committed</b>: each statement reads a fresh snapshot of committed data.</li>
+        <li><b>Repeatable Read</b>: the whole transaction reads one snapshot taken at its first statement (MVCC in Postgres and MySQL).</li>
+        <li><b>Serializable</b>: the result equals some one-at-a-time order. Done with locks (2PL, MySQL, SQL Server) or by tracking read/write conflicts and aborting (SSI, Postgres).</li>
+        <li>Postgres asks for <code>READ UNCOMMITTED</code> but gives Read Committed. Dirty reads never happen in Postgres.</li>
+        <li>Default level: Postgres, Oracle and SQL Server use Read Committed; MySQL InnoDB uses Repeatable Read.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Anomalies at a glance</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Anomaly</th><th>What happens</th><th>Lowest standard level that stops it</th><th>Postgres</th><th>Practical fix</th></tr></thead>
+          <tbody>
+            <tr><td>Dirty read</td><td>Read data another transaction has not committed</td><td>Read Committed</td><td>Never happens</td><td>Any level above Read Uncommitted</td></tr>
+            <tr><td>Non-repeatable read</td><td>Same row, read twice, different values</td><td>Repeatable Read</td><td>Repeatable Read</td><td>Repeatable Read, or read once</td></tr>
+            <tr><td>Phantom</td><td>Same query, read twice, new rows appear</td><td>Serializable</td><td>Repeatable Read (snapshot)</td><td>Snapshot, or range / predicate locks</td></tr>
+            <tr><td>Lost update</td><td>Two read-modify-write cycles, one write wins silently</td><td>Not named in the standard; Serializable is safe</td><td>Repeatable Read (second writer gets error 40001)</td><td>Atomic <code>SET x = x + 1</code>, <code>FOR UPDATE</code>, version column</td></tr>
+            <tr><td>Write skew</td><td>Both check a rule, then update different rows; rule breaks</td><td>Serializable</td><td>Serializable only (SSI)</td><td>SERIALIZABLE + retry, <code>FOR UPDATE</code> on the checked rows, a constraint</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Two users buy the last item at Read Committed. What can go wrong?</summary><div>Both read stock = 1, both write stock = 0 and both get an order: a lost update and an oversell. Use <code>UPDATE items SET stock = stock - 1 WHERE id = ? AND stock &gt; 0</code> and check that one row changed.</div></details>
+      <details class="qa"><summary>Why doesn't Repeatable Read stop write skew?</summary><div>Each transaction writes a different row, so there is no write-write conflict to detect. Each one checked the rule on its own snapshot, which was correct when taken. Only Serializable looks at the read-write dependencies between them.</div></details>
+      <details class="qa"><summary>What must the application do at SERIALIZABLE?</summary><div>Catch serialization failures (SQLSTATE 40001) and retry the whole transaction. Keep transactions short so retries are cheap.</div></details>
+      <details class="qa"><summary>Is SELECT ... FOR UPDATE enough for write skew?</summary><div>Only if every transaction locks the same rows it checks. If the rule is about rows that may not exist yet (phantoms, e.g. "no overlapping booking"), you need Serializable, a unique or exclusion constraint, or a lock on a parent row.</div></details>
+    </div>
+    <div class="note">
+      <h3>Which tool for which bug</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Problem</th><th>Tool</th></tr></thead>
+          <tbody>
+            <tr><td>Counter / balance on one row</td><td><code>SET x = x - 1 WHERE x &gt;= 1</code>, check rows = 1</td></tr>
+            <tr><td>Read, decide in code, then write (high contention)</td><td><code>SELECT ... FOR UPDATE</code></td></tr>
+            <tr><td>User edits a form (low contention)</td><td>Version column, retry on 0 rows</td></tr>
+            <tr><td>Workers taking jobs</td><td><code>FOR UPDATE SKIP LOCKED</code></td></tr>
+            <tr><td>Rule across many rows</td><td>SERIALIZABLE + retry, or a constraint</td></tr>
+            <tr><td>Two-row transfer</td><td>Lock rows in id order (no deadlock)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Read more</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (<code>npx tsx hld/3-databases/H12-transactions-isolation/demo.ts</code>)</li>
+        <li>Case studies: <a href="../../case-studies/09-ticket-booking/README.md">Ticket booking</a>, <a href="../../case-studies/28-digital-wallet/README.md">Digital wallet</a></li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var X0 = 116, STEP = 105, BW = 96, BH = 40;
+  var LANE = { 1: 92, db: 170, 2: 248 };
+  var COLS = ['dirty', 'nonrep', 'phantom', 'lost', 'skew'];
+  var COL_NAMES = ['Dirty read', 'Non-repeatable', 'Phantom', 'Lost update', 'Write skew'];
+  var LEVELS = ['RU', 'RC', 'RR', 'S'];
+  var LEVEL_NAMES = { RU: 'Read Uncommitted', RC: 'Read Committed', RR: 'Repeatable Read', S: 'Serializable' };
+  // 1 = prevented, 0 = possible, 2 = depends on the engine
+  var TABLE = {
+    std: { RU: [0, 0, 0, 0, 0], RC: [1, 0, 0, 0, 0], RR: [1, 1, 0, 2, 0], S: [1, 1, 1, 1, 1] },
+    pg: { RU: [1, 0, 0, 0, 0], RC: [1, 0, 0, 0, 0], RR: [1, 1, 1, 1, 0], S: [1, 1, 1, 1, 1] },
+  };
+  var ui = { level: 'RC', engine: 'std' };
+  var cur = null;   // the live ctx (setup runs again on every reset)
+
+  // Each scene: ops in time order. k = r (read), w (write), bad, fix, or '' (plain).
+  var SCENES = {
+    dirty: {
+      sql: "-- T1\nBEGIN; UPDATE acct SET bal = 50 WHERE id = 1;\n-- T2 at READ UNCOMMITTED\nSELECT bal FROM acct WHERE id = 1;  -- 50 (dirty!)\n-- T1\nROLLBACK;",
+      title: 'Dirty read', anomaly: 'dirty', db0: 'bal=100',
+      ops: [
+        { l: 1, c: 0, a: 'BEGIN' }, { l: 2, c: 0, a: 'BEGIN' },
+        { l: 1, c: 1, a: 'SET bal=50', k: 'w', db: 'bal=50*' },
+        { l: 2, c: 2, a: 'SELECT bal', b: '→ 50', k: 'r', bad: true },
+        { l: 1, c: 3, a: 'ROLLBACK', db: 'bal=100' },
+        { l: 2, c: 4, a: 'uses 50', b: 'never existed', k: 'bad' },
+        { l: 2, c: 5, a: 'COMMIT' },
+      ],
+      wrong: 'T2 read 50, but T1 rolled back. T2 acted on a value that never existed.',
+      fix: 'Read Committed: T2 sees only committed data, so it reads 100.',
+    },
+    nonrep: {
+      sql: "-- T1 at READ COMMITTED\nBEGIN;\nSELECT bal FROM acct WHERE id = 1;  -- 100\n-- T2: UPDATE acct SET bal = 50 ...; COMMIT;\nSELECT bal FROM acct WHERE id = 1;  -- 50 (changed!)\n-- fix: SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;",
+      title: 'Non-repeatable read', anomaly: 'nonrep', db0: 'bal=100',
+      ops: [
+        { l: 1, c: 0, a: 'BEGIN' },
+        { l: 1, c: 1, a: 'SELECT bal', b: '→ 100', k: 'r' }, { l: 2, c: 1, a: 'BEGIN' },
+        { l: 2, c: 2, a: 'SET bal=50', k: 'w', db: 'bal=50*' },
+        { l: 2, c: 3, a: 'COMMIT', db: 'bal=50' },
+        { l: 1, c: 4, a: 'SELECT bal', b: '→ 50', k: 'r', bad: true },
+        { l: 1, c: 5, a: 'COMMIT' },
+      ],
+      wrong: 'T1 read the same row twice and got 100, then 50. A report or check inside T1 is now inconsistent.',
+      fix: 'Repeatable Read: T1 reads from one snapshot for the whole transaction, so it sees 100 both times.',
+    },
+    phantom: {
+      sql: "-- T1\nSELECT count(*) FROM emp WHERE dept = 'eng';  -- 3\n-- T2: INSERT INTO emp (dept) VALUES ('eng'); COMMIT;\nSELECT count(*) FROM emp WHERE dept = 'eng';  -- 4 (phantom)",
+      title: 'Phantom read', anomaly: 'phantom', db0: '3 eng rows',
+      ops: [
+        { l: 1, c: 0, a: 'BEGIN' },
+        { l: 1, c: 1, a: 'COUNT eng', b: '→ 3', k: 'r' }, { l: 2, c: 1, a: 'BEGIN' },
+        { l: 2, c: 2, a: 'INSERT eng', k: 'w', db: '3 + 1 new*' },
+        { l: 2, c: 3, a: 'COMMIT', db: '4 eng rows' },
+        { l: 1, c: 4, a: 'COUNT eng', b: '→ 4', k: 'r', bad: true },
+        { l: 1, c: 5, a: 'COMMIT' },
+      ],
+      wrong: 'No row changed, but the same query returned a new row: a phantom. Row locks cannot stop it.',
+      fix: 'Serializable (range / predicate locks), or a snapshot as in Postgres Repeatable Read.',
+    },
+    lost: {
+      sql: "-- app code, both T1 and T2 (READ COMMITTED):\nconst { likes } = await db.one('SELECT likes FROM posts WHERE id = 7');\nawait db.none('UPDATE posts SET likes = $1 WHERE id = 7', [likes + 1]);\n-- both read 10, both write 11",
+      title: 'Lost update', anomaly: 'lost', db0: 'likes=10',
+      ops: [
+        { l: 1, c: 0, a: 'SELECT likes', b: '→ 10', k: 'r' },
+        { l: 2, c: 1, a: 'SELECT likes', b: '→ 10', k: 'r' },
+        { l: 1, c: 2, a: 'SET likes=11', k: 'w', db: 'likes=11*' },
+        { l: 1, c: 3, a: 'COMMIT', db: 'likes=11' },
+        { l: 2, c: 4, a: 'SET likes=11', k: 'w', db: 'likes=11', bad: true },
+        { l: 2, c: 5, a: 'COMMIT', b: 'one like lost', k: 'bad' },
+      ],
+      wrong: 'Two people liked the post, but the count went from 10 to 11. T2 overwrote T1\'s write.',
+      fix: 'Atomic UPDATE SET likes = likes + 1, or SELECT ... FOR UPDATE, or a version column.',
+    },
+    skew: {
+      sql: "-- each doctor's transaction:\nSELECT count(*) FROM doctors WHERE on_call;   -- 2, ok\nUPDATE doctors SET on_call = false WHERE name = $me;\nCOMMIT;\n-- different rows written: no write conflict",
+      title: 'Write skew (rule: at least 1 doctor on call)', anomaly: 'skew', db0: 'A, B on call',
+      ops: [
+        { l: 1, c: 0, a: 'COUNT on call', b: '→ 2, ok', k: 'r' },
+        { l: 2, c: 1, a: 'COUNT on call', b: '→ 2, ok', k: 'r' },
+        { l: 1, c: 2, a: 'SET A off', k: 'w', db: 'row A off*' },
+        { l: 2, c: 3, a: 'SET B off', k: 'w', db: 'row B off*' },
+        { l: 1, c: 4, a: 'COMMIT', db: 'B on call' },
+        { l: 2, c: 5, a: 'COMMIT', db: 'nobody!', bad: true },
+      ],
+      wrong: 'Each check was true on its snapshot. They wrote different rows, so nothing conflicted. The rule broke.',
+      fix: 'SERIALIZABLE + retry, or SELECT ... FOR UPDATE on both doctor rows before the check.',
+    },
+    forupd: {
+      title: 'SELECT ... FOR UPDATE: T2 waits, no update lost', anomaly: null, db0: 'likes=10',
+      sql: "BEGIN;\nSELECT likes FROM posts WHERE id = 7 FOR UPDATE; -- row lock\nUPDATE posts SET likes = 11 WHERE id = 7;\nCOMMIT;            -- lock released, T2 wakes up\n\n-- or simply, in one statement:\nUPDATE posts SET likes = likes + 1 WHERE id = 7;",
+      ops: [
+        { l: 1, c: 0, a: 'FOR UPDATE', b: '→ 10, locked', k: 'r', db: 'locked by T1' },
+        { l: 2, c: 1, a: 'FOR UPDATE', b: 'waits...', k: '' },
+        { l: 1, c: 2, a: 'SET likes=11', k: 'w', db: 'likes=11*' },
+        { l: 1, c: 3, a: 'COMMIT', db: 'likes=11' },
+        { l: 2, c: 4, a: 'wakes up', b: '→ 11', k: 'fix', db: 'locked by T2' },
+        { l: 2, c: 5, a: 'SET 12, COMMIT', k: 'fix', db: 'likes=12' },
+      ],
+      wrong: 'T2 blocked on the row lock until T1 committed, then read the new value 11.',
+      fix: 'Both likes counted (12). Cost: T2 waited. Keep the locked section short.', happened: true,
+    },
+    deadlock: {
+      title: 'Deadlock: transfer A→B and B→A together', anomaly: null, db0: 'A, B free',
+      sql: "-- T1: A -> B      T2: B -> A\n-- T1: SELECT ... WHERE id='A' FOR UPDATE;\n-- T2: SELECT ... WHERE id='B' FOR UPDATE;\n-- each now wants the other row: cycle\n-- ERROR 40P01 deadlock detected\n-- (checked after deadlock_timeout = 1s)\n\n-- Fix: lock in a fixed order\nSELECT * FROM acct WHERE id IN ('A','B')\nORDER BY id FOR UPDATE;",
+      ops: [
+        { l: 1, c: 0, a: 'lock A', k: 'w', db: 'A:T1' },
+        { l: 2, c: 1, a: 'lock B', k: 'w', db: 'A:T1 B:T2' },
+        { l: 1, c: 2, a: 'lock B', b: 'waits for T2', k: '' },
+        { l: 2, c: 3, a: 'lock A', b: 'waits for T1', k: 'bad', db: 'cycle!', bad: true },
+        { l: 2, c: 4, a: 'ERROR 40P01', b: 'aborted', k: 'fix', db: 'A:T1 B:T1' },
+        { l: 1, c: 5, a: 'COMMIT', b: 'T2 retries', k: 'fix', db: 'A, B free' },
+      ],
+      wrong: 'Each holds one lock and waits for the other. The DB finds the cycle in its wait-for graph.',
+      fix: 'Postgres kills one (40P01). Prevent it: lock rows in id order, keep transactions short.', happened: true,
+    },
+    pgrr: {
+      sql: "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSELECT likes FROM posts WHERE id = 7;      -- 10\nUPDATE posts SET likes = 11 WHERE id = 7;\n-- ERROR: could not serialize access due to concurrent update\n-- SQLSTATE 40001 -> retry the whole transaction",
+      title: 'Postgres Repeatable Read stops the lost update', anomaly: 'lost', db0: 'likes=10',
+      ops: [
+        { l: 1, c: 0, a: 'SELECT likes', b: '→ 10', k: 'r' },
+        { l: 2, c: 1, a: 'SELECT likes', b: '→ 10', k: 'r' },
+        { l: 1, c: 2, a: 'SET likes=11', k: 'w', db: 'likes=11*' },
+        { l: 2, c: 3, a: 'SET likes=11', b: 'waits for T1', k: 'w', nodb: true },
+        { l: 1, c: 4, a: 'COMMIT', db: 'likes=11' },
+        { l: 2, c: 5, a: 'ERROR 40001', b: 'retry → 12', k: 'fix' },
+      ],
+      wrong: 'T2 tried to update a row that changed after its snapshot was taken.',
+      fix: 'Postgres aborts T2 ("could not serialize access"). The app retries, reads 11 and writes 12.',
+    },
+    pgser: {
+      sql: "BEGIN ISOLATION LEVEL SERIALIZABLE;\nSELECT count(*) FROM doctors WHERE on_call;\nUPDATE doctors SET on_call = false WHERE name = $me;\nCOMMIT;  -- second one: ERROR 40001, retry\n\n// Node: for (;;) { try { await tx(); break } catch (e) { if (e.code !== '40001') throw e } }",
+      title: 'Postgres Serializable (SSI) stops write skew', anomaly: 'skew', db0: 'A, B on call',
+      ops: [
+        { l: 1, c: 0, a: 'COUNT on call', b: '→ 2, ok', k: 'r' },
+        { l: 2, c: 1, a: 'COUNT on call', b: '→ 2, ok', k: 'r' },
+        { l: 1, c: 2, a: 'SET A off', k: 'w', db: 'row A off*' },
+        { l: 2, c: 3, a: 'SET B off', k: 'w', db: 'row B off*' },
+        { l: 1, c: 4, a: 'COMMIT', db: 'B on call' },
+        { l: 2, c: 5, a: 'COMMIT', b: 'ERROR 40001', k: 'fix', db: 'B on call' },
+      ],
+      wrong: 'SSI saw a cycle: T1 read what T2 wrote, and T2 read what T1 wrote.',
+      fix: 'T2 aborts. On retry it counts 1 doctor on call and refuses to leave. The rule holds.',
+    },
+  };
+
+  function colX(c) { return X0 + c * STEP; }
+
+  function drawMatrix(ctx) {
+    var g = ctx.group();
+    var y0 = 372;
+    ctx.state.engineT = ctx.el('text', { x: 16, y: y0, class: 'mono small muted', text: '' }, g);
+    ctx.state.colHl = ctx.el('rect', { x: 0, y: y0 - 14, width: 112, height: 108, rx: 6, class: 'fill-soft', opacity: 0 }, g);
+    ctx.state.rowHl = ctx.el('rect', { x: 10, y: 0, width: 740, height: 20, rx: 5, class: 'box accent', opacity: 0 }, g);
+    COL_NAMES.forEach(function (n, i) {
+      ctx.el('text', { x: 230 + i * 112, y: y0, 'text-anchor': 'middle', class: 'mono small muted', text: n }, g);
+    });
+    ctx.state.cells = {};
+    LEVELS.forEach(function (lv, r) {
+      var y = y0 + 22 + r * 20;
+      ctx.el('text', { x: 16, y: y, class: 'small', text: LEVEL_NAMES[lv] }, g);
+      ctx.state.cells[lv] = COLS.map(function (c, i) {
+        return ctx.el('text', { x: 230 + i * 112, y: y, 'text-anchor': 'middle', class: 'mono small', text: '' }, g);
+      });
+    });
+  }
+
+  function update(ctx) {
+    if (!ctx || !ctx.state.cells) return;
+    var t = TABLE[ui.engine];
+    var y0 = 372;
+    ctx.state.engineT.textContent = ui.engine === 'pg' ? 'PostgreSQL' : 'SQL standard';
+    LEVELS.forEach(function (lv) {
+      t[lv].forEach(function (v, i) {
+        var cell = ctx.state.cells[lv][i];
+        cell.textContent = v === 1 ? 'prevented' : v === 0 ? 'possible' : 'varies*';
+        cell.setAttribute('class', 'mono small ' + (v === 1 ? 'fill-ok' : v === 0 ? 'fill-bad' : ''));
+        cell.setAttribute('style', v === 2 ? 'fill: var(--warn)' : '');
+      });
+    });
+    var r = LEVELS.indexOf(ui.level);
+    ctx.state.rowHl.setAttribute('y', y0 + 22 + r * 20 - 14);
+    ctx.state.rowHl.setAttribute('opacity', 1);
+    var a = ctx.state.anomaly;
+    var ci = COLS.indexOf(a);
+    ctx.state.colHl.setAttribute('opacity', ci >= 0 ? 1 : 0);
+    if (ci >= 0) ctx.state.colHl.setAttribute('x', 230 + ci * 112 - 56);
+    var v = ctx.state.verdict;
+    if (ci < 0) {
+      v.textContent = 'Change Level and Engine below to compare. * MySQL RR allows lost updates on plain SELECT.';
+      v.setAttribute('class', 'small muted');
+    } else {
+      var val = t[ui.level][ci];
+      v.textContent = 'At ' + LEVEL_NAMES[ui.level] + ' (' + (ui.engine === 'pg' ? 'Postgres' : 'standard') + '): ' + COL_NAMES[ci].toLowerCase() + ' is ' +
+        (val === 1 ? 'PREVENTED' : val === 0 ? 'POSSIBLE' : 'engine-dependent (MySQL: possible, locking RR: prevented)');
+      v.setAttribute('class', 'small ' + (val === 1 ? 'fill-ok' : val === 0 ? 'fill-bad' : ''));
+      v.setAttribute('style', val === 2 ? 'fill: var(--warn); font-weight: 600' : 'font-weight: 600');
+    }
+  }
+
+  function drawFrame(ctx, title) {
+    if (ctx.state.scene) ctx.state.scene.remove();
+    var g = ctx.group();
+    ctx.state.scene = g;
+    ctx.state.wrongT.textContent = '';
+    ctx.state.fixT.textContent = '';
+    ctx.el('text', { x: 16, y: 26, class: 'title', text: title }, g);
+    ctx.el('line', { x1: X0, y1: 44, x2: 742, y2: 44, class: 'wire' }, g);
+    ctx.el('text', { x: 742, y: 38, 'text-anchor': 'end', class: 'mono small muted', text: 'time →' }, g);
+    for (var c = 0; c < 6; c++) ctx.el('text', { x: colX(c) + BW / 2, y: 58, 'text-anchor': 'middle', class: 'mono small muted', text: 't' + c }, g);
+    ctx.el('text', { x: 16, y: LANE[1] + 5, class: 'title', text: 'T1' }, g);
+    ctx.el('text', { x: 16, y: LANE.db + 5, class: 'title', text: 'Row' }, g);
+    ctx.el('text', { x: 16, y: LANE[2] + 5, class: 'title', text: 'T2' }, g);
+    ctx.el('line', { x1: 60, y1: LANE[1], x2: 742, y2: LANE[1], class: 'wire dashed' }, g);
+    ctx.el('line', { x1: 60, y1: LANE[2], x2: 742, y2: LANE[2], class: 'wire dashed' }, g);
+    ctx.el('rect', { x: 60, y: LANE.db - 20, width: 682, height: 40, rx: 8, class: 'box' }, g);
+    return g;
+  }
+
+  function dbText(ctx, g, c, text, bad) {
+    return ctx.el('text', { x: colX(c) + BW / 2, y: LANE.db + 5, 'text-anchor': 'middle', class: 'mono' + (bad ? ' fill-bad' : ''), text: text, style: 'font-weight: 600' }, g);
+  }
+
+  function playScene(ctx, key) {
+    var s = SCENES[key];
+    var g = drawFrame(ctx, s.title);
+    setSql(s.sql);
+    ctx.state.anomaly = null;
+    update(ctx);
+    var db0 = dbText(ctx, g, 0, s.db0);
+    db0.setAttribute('class', 'mono muted');
+    var chain = Promise.resolve();
+    s.ops.forEach(function (op) {
+      chain = chain.then(function () {
+        var ly = LANE[op.l];
+        var kind = op.k === 'fix' ? 'box ok' : op.bad || op.k === 'bad' ? 'box bad' : op.k === 'r' ? 'box accent' : op.k === 'w' ? 'box signal' : 'box';
+        var og = ctx.group({ opacity: 0 }, g);
+        var x = colX(op.c);
+        ctx.el('rect', { x: x, y: ly - BH / 2, width: BW, height: BH, rx: 6, class: kind, style: op.bad || op.k === 'bad' || op.k === 'fix' ? 'stroke-width: 2.5' : '' }, og);
+        var textCls = 'mono small' + (op.k === 'fix' ? ' fill-ok' : op.k === 'bad' ? ' fill-bad' : '');
+        if (op.b) {
+          ctx.el('text', { x: x + BW / 2, y: ly - 3, 'text-anchor': 'middle', class: textCls, text: op.a }, og);
+          ctx.el('text', { x: x + BW / 2, y: ly + 12, 'text-anchor': 'middle', class: 'mono small' + (op.bad || op.k === 'bad' ? ' fill-bad' : op.k === 'fix' ? ' fill-ok' : ' muted'), text: op.b, style: 'font-weight: 600' }, og);
+        } else {
+          ctx.el('text', { x: x + BW / 2, y: ly + 4, 'text-anchor': 'middle', class: textCls, text: op.a }, og);
+        }
+        var cx = x + BW / 2;
+        var dir = op.l === 1 ? 1 : -1;
+        var edgeLane = ly + dir * (BH / 2), edgeDb = LANE.db - dir * 20;
+        return ctx.fade(og, 1, 250).then(function () {
+          if (op.k === 'r') return ctx.packet([[cx, edgeDb], [cx, edgeLane]], { cls: op.bad ? 'bad' : 'accent', ms: 450, r: 6 });
+          if (op.k === 'w' && !op.nodb) return ctx.packet([[cx, edgeLane], [cx, edgeDb]], { cls: op.bad ? 'bad' : '', ms: 450, r: 6 });
+        }).then(function () {
+          if (op.db && op.c === 0) db0.remove();
+          if (op.db) dbText(ctx, g, op.c, op.db, op.bad);
+          var msg = 'T' + op.l + ' ' + op.a + (op.b ? ' ' + op.b : '');
+          ctx.log(msg, op.k === 'fix' ? 'ok' : op.bad || op.k === 'bad' ? 'bad' : op.k === 'w' ? 'warn' : 'info');
+          return ctx.wait(150);
+        });
+      });
+    });
+    return chain.then(function () {
+      ctx.state.wrongT.textContent = (key.indexOf('pg') === 0 || s.happened ? 'What happened: ' : 'What went wrong: ') + s.wrong;
+      ctx.state.fixT.textContent = 'Fix: ' + s.fix;
+      ctx.state.anomaly = s.anomaly;
+      update(ctx);
+    });
+  }
+
+  function setSql(t) { var n = document.getElementById('sql'); if (n) n.textContent = t || '-- press Next'; }
+
+  function scene(key) { return function (ctx) { return playScene(ctx, key); }; }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Two transactions, one database',
+      say: 'Each step runs two transactions, T1 and T2, on a timeline. The middle lane shows the row in the database. The table at the bottom shows which level prevents each anomaly. Use the <b>Level</b> and <b>Engine</b> menus at any time.',
+    },
+    setup: function (ctx) {
+      cur = ctx;
+      setSql('');
+      ctx.state.anomaly = null;
+      ctx.state.scene = null;
+      ctx.state.wrongT = ctx.el('text', { x: 16, y: 298, class: 'small', text: '' });
+      ctx.state.fixT = ctx.el('text', { x: 16, y: 318, class: 'small', text: '' });
+      ctx.state.verdict = ctx.el('text', { x: 16, y: 342, class: 'small', text: '' });
+      drawFrame(ctx, 'Pick Next to start');
+      drawMatrix(ctx);
+      update(ctx);
+    },
+    steps: [
+      {
+        title: 'Dirty read',
+        say: 'T1 changes the balance to 50 but has not committed. T2 reads 50. Then T1 rolls back. T2 made a decision on data that never existed. Only Read Uncommitted allows this.',
+        run: scene('dirty'),
+      },
+      {
+        title: 'Non-repeatable read',
+        say: 'T1 reads the balance (100). T2 changes it to 50 and commits. T1 reads again and gets 50. Read Committed allows this, because every statement sees the latest committed data.',
+        run: scene('nonrep'),
+      },
+      {
+        title: 'Phantom read',
+        say: 'T1 counts engineers (3). T2 inserts a new engineer and commits. T1 counts again and gets 4. No existing row changed, so locking rows does not help; you need range locks or a snapshot.',
+        run: scene('phantom'),
+      },
+      {
+        title: 'Lost update',
+        say: 'Both transactions read likes = 10 and both write 11. One increment is gone. This is the classic read-modify-write bug in app code, and it happens at Read Committed, the Postgres default.',
+        run: scene('lost'),
+      },
+      {
+        title: 'Fix the lost update: SELECT ... FOR UPDATE',
+        say: 'Same two likes, but each transaction reads with <code>SELECT ... FOR UPDATE</code>. T2 must wait for T1 to commit, then reads 11 and writes 12. This is pessimistic locking: safe, but writers queue up.',
+        run: scene('forupd'),
+      },
+      {
+        title: 'Postgres Repeatable Read: second writer aborts',
+        say: 'Same lost update, now at Postgres Repeatable Read. T2 waits for T1\'s row lock. When T1 commits, T2 gets error 40001 instead of silently overwriting. The app must retry.',
+        run: scene('pgrr'),
+      },
+      {
+        title: 'Write skew',
+        say: 'Rule: at least one doctor stays on call. Both check "2 on call", then each takes a different doctor off. They write different rows, so even a snapshot sees no conflict. Only Serializable stops this.',
+        run: scene('skew'),
+      },
+      {
+        title: 'Postgres Serializable: SSI breaks the cycle',
+        say: 'Same write skew, now at SERIALIZABLE. Postgres tracks who read what. It sees each transaction depends on the other and aborts one at commit. After a retry the rule holds.',
+        run: scene('pgser'),
+      },
+      {
+        title: 'Locks can deadlock',
+        say: 'T1 locks account A, T2 locks B. Now each wants the other row. Nobody can move. Postgres checks for cycles after 1 s and aborts one. The fix is to always lock rows in the same order.',
+        run: scene('deadlock'),
+      },
+      {
+        title: 'Pick the lowest safe level',
+        say: 'Higher levels cost more waiting and more aborts. Most apps run Read Committed and fix the hot spots: atomic updates or <code>FOR UPDATE</code> for counters, SERIALIZABLE with retries for rules across rows. Switch <b>Engine</b> to compare the standard with Postgres.',
+        run: function (ctx) {
+          var g = drawFrame(ctx, 'Summary: what each level adds');
+          setSql("-- Postgres\nSET default_transaction_isolation = 'read committed';\nBEGIN ISOLATION LEVEL SERIALIZABLE;  -- only where needed\n-- always: retry on 40001 / 40P01, keep transactions short,\n-- never call an external API inside a transaction");
+          ctx.state.anomaly = null;
+          var lines = [
+            ['Read Uncommitted', 'no protection; Postgres treats it as Read Committed'],
+            ['Read Committed', 'each statement sees committed data → no dirty reads'],
+            ['Repeatable Read', 'one snapshot per transaction → stable reads'],
+            ['Serializable', 'same result as running one at a time → no anomalies'],
+          ];
+          // hide lanes of the frame for this summary
+          Array.prototype.slice.call(g.childNodes, 1).forEach(function (n) { n.setAttribute('opacity', 0); });
+          lines.forEach(function (l, i) {
+            ctx.el('text', { x: 16, y: 80 + i * 44, class: 'title', text: l[0] }, g);
+            ctx.el('text', { x: 190, y: 80 + i * 44, class: '', text: l[1] }, g);
+          });
+          ctx.state.wrongT.textContent = 'Defaults: Postgres, Oracle, SQL Server = Read Committed. MySQL InnoDB = Repeatable Read.';
+          ctx.state.fixT.textContent = 'At SERIALIZABLE, always retry on SQLSTATE 40001.';
+          update(ctx);
+          ctx.log('Summary: choose per use case, retry on 40001', 'info');
+          return ctx.wait(300);
+        },
+      },
+    ],
+  });
+
+  // Extra controls: work at any step and after Reset, because update() reads the live ctx.
+  var controls = document.getElementById('controls');
+  var grow = controls.querySelector('.grow');
+  function addSelect(label, id, options, value, onChange) {
+    var lab = document.createElement('label');
+    lab.setAttribute('for', id);
+    lab.textContent = label;
+    var sel = document.createElement('select');
+    sel.id = id;
+    options.forEach(function (o) {
+      var opt = document.createElement('option');
+      opt.value = o[0]; opt.textContent = o[1];
+      if (o[0] === value) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function () { onChange(sel.value); update(cur); });
+    lab.appendChild(sel);
+    controls.insertBefore(lab, grow);
+  }
+  addSelect('Level', 'iso-level', LEVELS.map(function (l) { return [l, LEVEL_NAMES[l]]; }), ui.level, function (v) { ui.level = v; });
+  addSelect('Engine', 'iso-engine', [['std', 'SQL standard'], ['pg', 'PostgreSQL']], ui.engine, function (v) { ui.engine = v; });
+})();
+</script>
+</body>
+</html>

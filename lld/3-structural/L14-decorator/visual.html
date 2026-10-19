@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L14 Decorator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .ring1 { fill: var(--surface); stroke: var(--signal); stroke-width: 1.5; }
+  .stage .ring2 { fill: var(--surface-2); stroke: var(--accent); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .walker { fill: var(--signal); stroke: var(--surface); stroke-width: 2; }
+  .stage .walker.ok { fill: var(--ok); }
+  .stage .walker.bad { fill: var(--bad); }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; max-width: 100%; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L14 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Decorator</h1>
+    <p class="lede">Wrap an object in another object with the <b>same interface</b> that adds behaviour before or after the call. Stack wrappers like layers of an onion. The order of the layers is a design decision, and you can watch it change the result.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Decorator layers wrapping an email notifier"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <label for="t-order">order (outer → inner)</label>
+        <select id="t-order">
+          <option value="rate,log,retry">RateLimit → Logging → Retry → Email</option>
+          <option value="rate,retry,log">RateLimit → Retry → Logging → Email</option>
+          <option value="retry,rate,log">Retry → RateLimit → Logging → Email</option>
+          <option value="log,retry,rate">Logging → Retry → RateLimit → Email</option>
+        </select>
+        <label><input type="checkbox" id="t-fail" checked> SMTP fails once</label>
+        <button class="btn" type="button" id="t-go">send()</button>
+        <span id="try-out">Run to step 4 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call going in</span>
+        <span><i style="background: var(--ok)"></i>Success coming out</span>
+        <span><i style="background: var(--bad)"></i>Error / stopped</span>
+        <span><i style="background: var(--accent)"></i>Same interface at every layer</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface Notifier { send(msg: Message): Promise&lt;void&gt; }</span><span class="ln" data-l="2">class RetryNotifier implements Notifier {</span><span class="ln" data-l="3">  constructor(private inner: Notifier, private tries = 3) {}</span><span class="ln" data-l="4">  async send(msg: Message) {</span><span class="ln" data-l="5">    for (let i = 1; ; i++) {</span><span class="ln" data-l="6">      try { return await this.inner.send(msg); }</span><span class="ln" data-l="7">      catch (e) { if (i &gt;= this.tries) throw e; await sleep(100 * 2 ** i); }</span><span class="ln" data-l="8">    }</span><span class="ln" data-l="9">  }</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">class RateLimitNotifier implements Notifier {</span><span class="ln" data-l="12">  constructor(private inner: Notifier, private bucket: TokenBucket) {}</span><span class="ln" data-l="13">  send(msg: Message) {</span><span class="ln" data-l="14">    if (!this.bucket.take()) throw new RateLimitedError();</span><span class="ln" data-l="15">    return this.inner.send(msg);</span><span class="ln" data-l="16">  }</span><span class="ln" data-l="17">}</span><span class="ln" data-l="18">const notifier: Notifier = new RateLimitNotifier(</span><span class="ln" data-l="19">  new LoggingNotifier(new RetryNotifier(new EmailNotifier(smtp))), bucket);</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I keep <code>EmailNotifier</code> simple and add retry, logging and rate limiting as decorators that implement the same <code>Notifier</code> interface. I compose them once in the composition root, and the service doesn't know they exist. The order is deliberate: rate limit outermost so one user call costs one token, logging outside retry so we log the total time the user waited. Retry is only safe because the send carries an idempotency key."</p>
+    </div>
+    <div class="note wide">
+      <h3>Decorator vs its look-alikes</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Decorator</th><th>Proxy (L16)</th><th>Adapter (L13)</th><th>Chain of Responsibility (L25)</th></tr></thead>
+          <tbody>
+            <tr><td>Interface</td><td>Same as the inner object</td><td>Same</td><td>Different (translates)</td><td>Same handler interface</td></tr>
+            <tr><td>Calls the inner one?</td><td>Always (adds before/after)</td><td>Usually, after a check</td><td>Always (translated)</td><td>Only if it does not handle it</td></tr>
+            <tr><td>How many</td><td>Many, stacked</td><td>Usually one</td><td>One per adaptee</td><td>An ordered list</td></tr>
+            <tr><td>Intent</td><td>Add behaviour</td><td>Control access (lazy, cache, auth)</td><td>Make it fit</td><td>Find who handles it, or stop early</td></tr>
+            <tr><td>Node example</td><td><code>withRetry(fn)</code>, <code>zlib</code> stream in a pipeline</td><td>Lazy Prisma client, cache-aside wrapper</td><td><code>util.promisify</code></td><td>Express middleware</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Retry inside or outside the rate limiter?</summary><div>Rate limit outside retry: one token per user call, retries are free. Retry outside the rate limiter: every attempt costs a token, which protects the provider better. Choose on purpose and say why.</div></details>
+      <details class="qa"><summary><code>new Retry(new Logging(gw))</code>; the gateway fails twice then succeeds. How many "start" log lines?</summary><div>Three, one per attempt, because logging is inside the retry. With <code>new Logging(new Retry(gw))</code> you get one.</div></details>
+      <details class="qa"><summary>Why not <code>RetryingLoggingEmailNotifier</code> via inheritance?</summary><div>Every combination needs its own subclass (class explosion), and the combination is fixed at compile time. Decorators combine at runtime, and each one is tested alone.</div></details>
+      <details class="qa"><summary>Is NestJS's <code>@Injectable()</code> the Decorator pattern?</summary><div>No. It is a TypeScript language decorator that attaches metadata for DI. A method decorator like <code>@Retry(3)</code> that wraps the method can implement the pattern, but the GoF pattern is about wrapping objects at runtime.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var NAMES = { rate: 'RateLimitNotifier', log: 'LoggingNotifier', retry: 'RetryNotifier' };
+  var MID = 152;
+  var TX = 512, TY = 40, TW = 238, TH = 300;
+
+  function ring(d) { return { x: 20 + 20 * d, y: 44 + 28 * d, w: 470 - 40 * d, h: 180 - 56 * d }; }
+  function inX(d) { return d >= 3 ? 255 : 20 + 20 * d + 8; }
+  function outX(d) { return d >= 3 ? 255 : 490 - 20 * d - 8; }
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+  function range(a, b) { var r = []; for (var i = a; i <= b; i++) r.push(i); return r; }
+  function clearG(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  // ---- pure simulation: returns the events of one send() through the stack ----
+  function simulate(order, o) {
+    var ev = [], tokens = o.tokens, smtp = 0, logs = 0, used = 0;
+    function call(d) {
+      if (d >= order.length) {
+        smtp++;
+        if (o.failFirst && smtp === 1) { ev.push({ x: inX(3), t: 'email: SMTP timeout', c: 'bad' }); return false; }
+        ev.push({ x: inX(3), t: 'email: 250 OK', c: 'ok' }); return true;
+      }
+      var k = order[d];
+      if (k === 'rate') {
+        if (tokens <= 0) { ev.push({ x: inX(d), t: 'rateLimit: 0 tokens → throw', c: 'bad' }); return false; }
+        tokens--; used++;
+        ev.push({ x: inX(d), t: 'rateLimit: token ok (' + tokens + ' left)', c: '' });
+        var r = call(d + 1);
+        ev.push({ x: outX(d), t: 'rateLimit: pass ' + (r ? 'result' : 'error') + ' out', c: r ? 'ok' : 'bad' });
+        return r;
+      }
+      if (k === 'log') {
+        logs++;
+        ev.push({ x: inX(d), t: 'log: send start', c: '' });
+        var r2 = call(d + 1);
+        logs++;
+        ev.push({ x: outX(d), t: r2 ? 'log: ok' : 'log: failed', c: r2 ? 'ok' : 'bad' });
+        return r2;
+      }
+      // retry
+      for (var i = 1; i <= 3; i++) {
+        ev.push({ x: inX(d), t: 'retry: attempt ' + i, c: i > 1 ? 'warn' : '' });
+        if (call(d + 1)) { ev.push({ x: outX(d), t: 'retry: success', c: 'ok' }); return true; }
+        if (ev.length && /0 tokens/.test(ev[ev.length - 1].t)) { /* rate limited inside: retrying won't help */ }
+        if (i < 3) ev.push({ x: inX(d), t: 'retry: wait ' + (100 * Math.pow(2, i)) + ' ms', c: 'warn' });
+      }
+      ev.push({ x: outX(d), t: 'retry: gave up', c: 'bad' });
+      return false;
+    }
+    var ok = call(0);
+    return { ev: ev, ok: ok, tokensUsed: used, logLines: logs, smtp: smtp, tokensLeft: tokens };
+  }
+
+  function trace(ctx, t, c) {
+    var s = ctx.state, n = s.traceN++;
+    if (n > 15) return;
+    ctx.el('text', { x: TX + 12, y: TY + 40 + n * 16, class: 'mono small ' + (c ? 'fill-' + c : ''), text: n === 15 ? '…' : t }, s.traceG);
+  }
+  function clearTrace(ctx) { clearG(ctx.state.traceG); ctx.state.traceN = 0; }
+
+  function labelRings(ctx, order) {
+    var s = ctx.state;
+    order.forEach(function (k, d) { s.rings[d].name.textContent = NAMES[k]; });
+    s.order = order;
+  }
+
+  function play(ctx, order, o) {
+    var s = ctx.state, res = simulate(order, o);
+    clearTrace(ctx);
+    s.walker.setAttribute('class', 'walker');
+    s.walker.setAttribute('opacity', 1);
+    ctx.place(s.walker, 4, MID);
+    ctx.log('notifier.send(msg)', 'info');
+    var chain = Promise.resolve();
+    res.ev.forEach(function (e) {
+      chain = chain.then(function () {
+        return ctx.move(s.walker, e.x, MID, 260);
+      }).then(function () {
+        if (e.c === 'ok' || e.c === 'bad') s.walker.setAttribute('class', 'walker ' + e.c);
+        trace(ctx, e.t, e.c);
+        if (e.x === 255) ctx.flash(s.coreRect);
+      });
+    });
+    return chain.then(function () { return ctx.move(s.walker, res.ok ? 500 : 4, MID, 300); }).then(function () {
+      s.tokens = res.tokensLeft;
+      s.counters.textContent = 'tokens used: ' + res.tokensUsed + '   log lines: ' + res.logLines + '   SMTP calls: ' + res.smtp + '   bucket: ' + res.tokensLeft;
+      ctx.log((res.ok ? 'send() resolved' : 'send() rejected') + ' · tokens ' + res.tokensUsed + ', log lines ' + res.logLines + ', SMTP calls ' + res.smtp, res.ok ? 'ok' : 'bad');
+      return res;
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Retry, logging and rate limiting around an email sender',
+      say: 'We need all three behaviours around <code>EmailNotifier</code>, and maybe around SMS and push too. First, see why inheritance does not scale.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      s.tokens = 5;
+      s.rings = [0, 1, 2].map(function (d) {
+        var r = ring(d), g = ctx.group({ opacity: 0 });
+        ctx.el('rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: 10, class: d === 1 ? 'ring2' : 'ring1' }, g);
+        g.name = ctx.el('text', { x: r.x + 12, y: r.y + 18, class: 'b', text: '' }, g);
+        ctx.el('text', { x: r.x + r.w - 12, y: r.y + 18, 'text-anchor': 'end', class: 'mono small muted', text: 'implements Notifier' }, g);
+        return g;
+      });
+      var core = ctx.group({ opacity: 0 });
+      s.coreRect = ctx.el('rect', { x: 80, y: 128, width: 350, height: 48, rx: 8, class: 'box accent' }, core);
+      ctx.el('text', { x: 255, y: 157, 'text-anchor': 'middle', class: 'b', text: 'EmailNotifier.send(msg)' }, core);
+      s.core = core;
+      s.walker = ctx.el('circle', { r: 7, class: 'walker', opacity: 0 });
+      ctx.place(s.walker, 4, MID);
+      ctx.el('rect', { x: TX, y: TY, width: TW, height: TH, rx: 8, class: 'box' });
+      ctx.el('text', { x: TX + 12, y: TY + 20, class: 'mono small muted', text: 'trace (one send call)' });
+      s.traceG = ctx.group();
+      s.traceN = 0;
+      s.counters = ctx.el('text', { x: 20, y: 252, class: 'mono small', text: '' });
+      ctx.el('line', { x1: 10, y1: 352, x2: 750, y2: 352, class: 'divider' });
+      s.panel = ctx.group();
+    },
+    steps: [
+      {
+        title: 'Before: a subclass for every combination',
+        say: 'Retry, logging and rate limiting, each optional, around email, SMS and push. With inheritance that is up to 7 combinations per notifier, 21 classes, all fixed at compile time.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          clearG(p);
+          ctx.el('text', { x: 20, y: 376, class: 'title', text: 'Inheritance: class explosion' }, p);
+          var names = ['RetryEmail', 'LoggingEmail', 'RateLimitedEmail', 'RetryLoggingEmail', 'RetryRateLimitedEmail', 'LoggingRateLimitedEmail', 'RetryLoggingRateLimitedEmail', '…same × SMS', '…same × Push'];
+          var chain = Promise.resolve();
+          names.forEach(function (n, i) {
+            chain = chain.then(function () {
+              var g = ctx.group({ opacity: 0 }, p);
+              var x = 20 + (i % 3) * 245, y = 390 + Math.floor(i / 3) * 24;
+              ctx.el('rect', { x: x, y: y, width: 235, height: 20, rx: 4, class: 'box bad' }, g);
+              ctx.el('text', { x: x + 8, y: y + 14, class: 'mono small', text: n }, g);
+              return ctx.fade(g, 1, 90);
+            });
+          });
+          return chain.then(function () { ctx.log('3 behaviours × 3 channels → 21 subclasses', 'bad'); });
+        },
+      },
+      {
+        title: 'One small interface, one plain core',
+        say: '<code>EmailNotifier</code> implements <code>send(msg)</code> and only talks to SMTP. No retry, no logs, no limits. Small and easy to test.',
+        run: function (ctx) {
+          hl([1]);
+          clearG(ctx.state.panel);
+          ctx.log('new EmailNotifier(smtp)', 'info');
+          return ctx.fade(ctx.state.core, 1, 400);
+        },
+      },
+      {
+        title: 'Wrap it: RetryNotifier',
+        say: '<code>RetryNotifier</code> also implements <code>Notifier</code> and holds an <code>inner: Notifier</code>. Callers cannot tell the difference: it is still just <code>send(msg)</code>.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl(range(2, 10));
+          labelRings(ctx, ['rate', 'log', 'retry']);
+          ctx.log('new RetryNotifier(email)', 'info');
+          return ctx.fade(s.rings[2], 1, 400);
+        },
+      },
+      {
+        title: 'Stack logging and rate limiting',
+        say: 'Add <code>LoggingNotifier</code>, then <code>RateLimitNotifier</code> outside. Each layer does one job. The full stack is built once, in the composition root.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([11, 12, 13, 14, 15, 16, 17, 18, 19]);
+          ctx.log('new LoggingNotifier(retry)', 'info');
+          ctx.log('new RateLimitNotifier(logging, bucket)', 'info');
+          s.ready = true;
+          return ctx.fade(s.rings[1], 1, 400).then(function () { return ctx.fade(s.rings[0], 1, 400); });
+        },
+      },
+      {
+        title: 'A call goes in through every layer',
+        say: 'Each layer does its part and calls <code>inner.send()</code>. SMTP times out once; Retry catches it, waits and tries again. The result goes back out through the same layers, so Logging sees the final outcome.',
+        run: function (ctx) {
+          hl([5, 6, 7, 14, 15]);
+          return play(ctx, ['rate', 'log', 'retry'], { failFirst: true, tokens: ctx.state.tokens });
+        },
+      },
+      {
+        title: 'The outer layer can stop the call',
+        say: 'The bucket is empty. <code>RateLimitNotifier</code> throws before calling <code>inner.send()</code>. Logging, Retry and SMTP never run. Cheap checks belong on the outside.',
+        run: function (ctx) {
+          hl([14]);
+          return play(ctx, ['rate', 'log', 'retry'], { failFirst: false, tokens: 0 }).then(function () { ctx.state.tokens = 5; });
+        },
+      },
+      {
+        title: 'Order matters: Logging inside Retry',
+        say: 'Swap two layers: <code>RateLimit(Retry(Logging(Email)))</code>. Now every attempt is logged, so one failed attempt gives 4 log lines instead of 2. Neither is wrong; choose on purpose.',
+        run: function (ctx) {
+          labelRings(ctx, ['rate', 'retry', 'log']);
+          ctx.state.rings.forEach(function (r) { ctx.flash(r); });
+          ctx.log('order: RateLimit → Retry → Logging → Email', 'warn');
+          return play(ctx, ['rate', 'retry', 'log'], { failFirst: true, tokens: 5 });
+        },
+      },
+      {
+        title: 'Order matters: Retry outside the rate limiter',
+        say: '<code>Retry(RateLimit(Logging(Email)))</code>: each attempt now takes a token. One user call used 2 tokens. That protects the email provider better, but users hit the limit sooner.',
+        run: function (ctx) {
+          labelRings(ctx, ['retry', 'rate', 'log']);
+          ctx.state.rings.forEach(function (r) { ctx.flash(r); });
+          ctx.log('order: Retry → RateLimit → Logging → Email', 'warn');
+          return play(ctx, ['retry', 'rate', 'log'], { failFirst: true, tokens: 5 });
+        },
+      },
+      {
+        title: 'Same idea as plain functions',
+        say: 'In TypeScript a decorator is often just a higher-order function: it takes a function and returns one with the same signature. <code>p-retry</code>, Express <code>asyncHandler</code> and NestJS interceptors all work this way.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          clearG(p);
+          labelRings(ctx, ['rate', 'log', 'retry']);
+          ctx.el('text', { x: 20, y: 376, class: 'title', text: 'Function form' }, p);
+          var lines = [
+            'type Send = (m: Message) => Promise<void>;',
+            'const withRetry = (f: Send, n = 3): Send => async (m) => { /* loop */ };',
+            'const withLog = (f: Send): Send => async (m) => { log(); await f(m); };',
+            'const send = withRateLimit(withLog(withRetry(email.send)), bucket);',
+          ];
+          var chain = Promise.resolve();
+          lines.forEach(function (l, i) {
+            chain = chain.then(function () {
+              var t = ctx.el('text', { x: 20, y: 400 + i * 18, class: 'mono small', text: l, opacity: 0 }, p);
+              return ctx.fade(t, 1, 200);
+            });
+          });
+          return chain.then(function () { ctx.log('same pattern, no classes: functions wrapping functions', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  var out = document.getElementById('try-out');
+  document.getElementById('t-go').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.ready) { out.textContent = 'Run to step 4 first (all layers must exist).'; return; }
+    var order = document.getElementById('t-order').value.split(',');
+    labelRings(ctx, order);
+    play(ctx, order, { failFirst: document.getElementById('t-fail').checked, tokens: 5 }).then(function (r) {
+      out.textContent = (r.ok ? 'Delivered. ' : 'Failed. ') + 'Tokens: ' + r.tokensUsed + ', log lines: ' + r.logLines + ', SMTP calls: ' + r.smtp + '.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

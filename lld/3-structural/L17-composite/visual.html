@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L17 Composite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .edge { stroke: var(--line); stroke-width: 1.6; fill: none; }
+  .stage .edge.on { stroke: var(--accent); stroke-width: 2.4; }
+  .stage .edge.bad { stroke: var(--bad); stroke-width: 2.4; stroke-dasharray: 6 4; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .try select, .try input { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .try input[type="number"] { width: 70px; }
+  .try input[type="text"] { width: 110px; }
+  pre.tree { font: 12.5px/1.55 var(--font-mono); margin: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
+  .msg { font: 12.5px var(--font-mono); min-height: 1.4em; margin: 4px 0; }
+  .msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L17 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Composite: treat one and many the same</h1>
+    <p class="lede">Files and folders share one interface. The client calls <code>root.size()</code>. Each folder asks its children and adds up the answers, so calls flow down and sums flow up. Nobody checks "is this a file or a folder?".</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="A file tree where size() calls flow down and sums flow up"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call going down</span>
+        <span><i style="background: var(--ok)"></i>Result coming up</span>
+        <span><i style="background: var(--accent)"></i>Folder (composite)</span>
+        <span><i style="background: var(--bad)"></i>Rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code (lines light up with the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface FsNode { name: string; size(): number }</span><span class="ln" data-l="2"></span><span class="ln" data-l="3">class File implements FsNode {           // leaf</span><span class="ln" data-l="4">  size() { return this.kb; }</span><span class="ln" data-l="5">}</span><span class="ln" data-l="6">class Folder implements FsNode {         // composite</span><span class="ln" data-l="7">  private children = new Map&lt;string, FsNode&gt;();</span><span class="ln" data-l="8">  size() {</span><span class="ln" data-l="9">    let s = 0;</span><span class="ln" data-l="10">    for (const c of this.children.values()) s += c.size();</span><span class="ln" data-l="11">    return s;</span><span class="ln" data-l="12">  }</span><span class="ln" data-l="13">  add(n: FsNode) {</span><span class="ln" data-l="14">    if (n instanceof Folder &amp;&amp; this.isInside(n)) throw 'EINVAL';</span><span class="ln" data-l="15">    this.children.set(n.name, n); n.parent = this;</span><span class="ln" data-l="16">  }</span><span class="ln" data-l="17">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: grow the tree</h3>
+      <div class="try">
+        <label>Into <select id="t-dir"></select></label>
+        <label>Name <input id="t-name" type="text" value="notes.md"></label>
+        <label>KB <input id="t-kb" type="number" min="1" max="999" value="5"></label>
+        <label><input id="t-isdir" type="checkbox"> folder</label>
+        <button class="btn primary" id="t-add" type="button">add()</button>
+      </div>
+      <div class="try">
+        <label>Move <select id="t-mv"></select> into <select id="t-mvto"></select></label>
+        <button class="btn" id="t-move" type="button">move</button>
+      </div>
+      <div class="msg" id="t-msg"></div>
+      <pre class="tree" id="t-tree"></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A directory holds files and other directories, so I use Composite. File and Directory both implement FsNode. A directory keeps its children as FsNode, and its size() is the sum of its children's size(). The caller calls root.size() and never checks types. add() lives only on Directory, and a parent pointer gives me path() and the guard against moving a folder into its own child."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why are a folder's children typed as FsNode and not File?</summary><div>So folders can nest and any future node type (symlink, zip archive) fits without changing Folder.</div></details>
+      <details class="qa"><summary>Should add() be on the interface?</summary><div>If it is, File.add() must throw at runtime, which breaks LSP. In TypeScript, keep add() on Folder so misuse is a compile error.</div></details>
+      <details class="qa"><summary>size() is called very often on a big tree. Fix?</summary><div>Cache the size in each folder; on every change walk up the parent pointers and adjust ancestors. Reads O(1), writes O(depth).</div></details>
+      <details class="qa"><summary>Composite vs Decorator?</summary><div>Both share the component's interface. A decorator wraps one object to add behaviour; a composite holds many children and combines their results.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Composite shows up everywhere</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Domain</th><th>Leaf</th><th>Composite</th><th>The one method</th></tr></thead>
+          <tbody>
+            <tr><td>File system</td><td>File</td><td>Folder</td><td><code>size()</code>, <code>find()</code></td></tr>
+            <tr><td>Cart</td><td>Product</td><td>Combo / bundle (with its own discount)</td><td><code>price()</code></td></tr>
+            <tr><td>Coupon rules</td><td>MinAmount, NewUser</td><td>AllOf (AND), AnyOf (OR)</td><td><code>matches(cart)</code></td></tr>
+            <tr><td>Editor</td><td>InsertText</td><td>MacroCommand</td><td><code>execute()</code> / <code>undo()</code></td></tr>
+            <tr><td>IoT fleet</td><td>Device</td><td>Site / building / floor</td><td><code>onlineCount()</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var W = 104, Hn = 38;
+  var N = {
+    root:   { x: 380, y: 70,  dir: true,  label: 'root/' },
+    src:    { x: 190, y: 160, dir: true,  label: 'src/', p: 'root' },
+    docs:   { x: 440, y: 160, dir: true,  label: 'docs/', p: 'root' },
+    readme: { x: 640, y: 160, kb: 2, label: 'README.md', p: 'root' },
+    index:  { x: 70,  y: 260, kb: 3, label: 'index.ts', p: 'src' },
+    app:    { x: 190, y: 260, kb: 5, label: 'app.ts', p: 'src' },
+    lib:    { x: 310, y: 260, dir: true, label: 'lib/', p: 'src' },
+    guide:  { x: 440, y: 260, kb: 8, label: 'guide.md', p: 'docs' },
+    util:   { x: 250, y: 360, kb: 4, label: 'util.ts', p: 'lib' },
+    db:     { x: 370, y: 360, kb: 6, label: 'db.ts', p: 'lib' },
+  };
+  var ORDER = ['root', 'src', 'docs', 'readme', 'index', 'app', 'lib', 'guide', 'util', 'db'];
+  function kids(id) { return ORDER.filter(function (k) { return N[k].p === id; }); }
+  function top(id) { return [N[id].x, N[id].y]; }
+  function bot(id) { return [N[id].x, N[id].y + Hn]; }
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+  function node(ctx, id, parent) {
+    var n = N[id], g = ctx.group({ opacity: 0 }, parent);
+    if (n.dir) ctx.el('rect', { x: n.x - W / 2, y: n.y, width: W, height: Hn, rx: 7, class: 'box' }, g);
+    g.r = ctx.el('rect', { x: n.x - W / 2, y: n.y, width: W, height: Hn, rx: 7, class: 'box ' + (n.dir ? 'accent' : '') }, g);
+    ctx.el('text', { x: n.x, y: n.y + 16, 'text-anchor': 'middle', class: 'b', text: n.label }, g);
+    ctx.el('text', { x: n.x, y: n.y + 31, 'text-anchor': 'middle', class: 'mono small muted', text: n.dir ? 'Folder' : 'File · ' + n.kb + ' KB' }, g);
+    g.v = ctx.el('text', { x: n.x, y: n.y + Hn + 13, 'text-anchor': 'middle', class: 'mono small', text: '' }, g);
+    return g;
+  }
+  function val(ctx, id, t, c) { var v = ctx.state.g[id].v; v.textContent = t; v.setAttribute('class', 'mono small ' + (c || 'fill-ok')); }
+  function down(ctx, from, to, label) { ctx.state.e[to].setAttribute('class', 'edge on'); return ctx.packet([bot(from), top(to)], { ms: 420, label: label }); }
+  function up(ctx, from, to) { return ctx.packet([top(from), bot(to)], { ms: 420, cls: 'ok' }); }
+  // recursive size() animation: returns promise of the value
+  function size(ctx, id) {
+    var n = N[id];
+    if (!n.dir) { val(ctx, id, '= ' + n.kb, 'fill-ok'); ctx.log(n.label + '.size() -> ' + n.kb + ' (leaf)', 'ok'); return Promise.resolve(n.kb); }
+    val(ctx, id, 'asking ' + kids(id).length + '...', 'fill-warn');
+    return Promise.all(kids(id).map(function (k) {
+      return down(ctx, id, k).then(function () { return size(ctx, k); }).then(function (v) { return up(ctx, k, id).then(function () { return v; }); });
+    })).then(function (vs) {
+      var s = vs.reduce(function (a, b) { return a + b; }, 0);
+      ctx.state.sizes[id] = s;
+      val(ctx, id, '= ' + s + ' KB', 'fill-ok');
+      ctx.flash(ctx.state.g[id].r);
+      ctx.log(n.label + '.size() = ' + vs.join(' + ') + ' = ' + s, 'info');
+      return s;
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'A tree of files and folders', say: 'The client wants the total size. With Composite it makes one call on the root and never asks what kind of node it is talking to.' },
+    setup: function (ctx) {
+      hl([]);
+      ctx.state.g = {}; ctx.state.e = {}; ctx.state.sizes = {};
+      var edges = ctx.group();
+      ORDER.forEach(function (id) {
+        if (N[id].p) ctx.state.e[id] = ctx.el('line', { x1: bot(N[id].p)[0], y1: bot(N[id].p)[1], x2: top(id)[0], y2: top(id)[1], class: 'edge', opacity: 0 }, edges);
+      });
+      ctx.state.edges = edges;
+      ORDER.forEach(function (id) { ctx.state.g[id] = node(ctx, id); });
+      ctx.state.client = ctx.group();
+      ctx.el('rect', { x: 20, y: 18, width: 120, height: 36, rx: 7, class: 'box signal' }, ctx.state.client);
+      ctx.el('text', { x: 80, y: 41, 'text-anchor': 'middle', class: 'b', text: 'Client' }, ctx.state.client);
+      ctx.state.cv = ctx.el('text', { x: 150, y: 41, class: 'mono small', text: '' });
+      ctx.state.note = ctx.el('text', { x: 20, y: 432, class: 'mono small muted', text: '' });
+    },
+    steps: [
+      {
+        title: 'Build the tree: two kinds of node, one interface',
+        say: 'Folders (blue) are composites: they hold children typed as <code>FsNode</code>. Files are leaves. Both implement <code>size()</code>. A folder can hold files or other folders.',
+        run: function (ctx) {
+          hl([1, 3, 6, 7]);
+          var chain = Promise.resolve();
+          [['root'], ['src', 'docs', 'readme'], ['index', 'app', 'lib', 'guide'], ['util', 'db']].forEach(function (lvl) {
+            chain = chain.then(function () {
+              return Promise.all(lvl.map(function (id) {
+                var ps = [ctx.fade(ctx.state.g[id], 1, 300)];
+                if (ctx.state.e[id]) ps.push(ctx.fade(ctx.state.e[id], 1, 300));
+                return Promise.all(ps);
+              }));
+            });
+          });
+          return chain.then(function () { ctx.log('4 folders, 6 files, all are FsNode', 'info'); });
+        },
+      },
+      {
+        title: 'The client calls root.size(), nothing more',
+        say: 'No <code>if (node.kind === "folder")</code> in the client. It holds an <code>FsNode</code> and calls <code>size()</code>. What happens next is the root\'s job.',
+        run: function (ctx) {
+          hl([8]);
+          ctx.log('client: root.size()', 'info');
+          return ctx.packet([[140, 36], [N.root.x - W / 2 - 10, 36], [N.root.x - W / 2 - 10, N.root.y + 19], [N.root.x - W / 2, N.root.y + 19]], { ms: 600, label: 'size()' })
+            .then(function () { val(ctx, 'root', 'asking 3...', 'fill-warn'); });
+        },
+      },
+      {
+        title: 'Leaf answers at once',
+        say: 'The root loops over its children. README.md is a file, so its <code>size()</code> just returns its own 2 KB. Leaves do the real work.',
+        run: function (ctx) {
+          hl([4, 10]);
+          return down(ctx, 'root', 'readme').then(function () { return size(ctx, 'readme'); }).then(function () { return up(ctx, 'readme', 'root'); });
+        },
+      },
+      {
+        title: 'A folder child recurses: src/ asks its own children',
+        say: 'src/ is a folder, so <code>src.size()</code> does the same loop. Its child lib/ is a folder too, and asks util.ts and db.ts. The recursion comes for free from the shared interface.',
+        run: function (ctx) {
+          hl([8, 9, 10, 11]);
+          return down(ctx, 'root', 'src').then(function () { return size(ctx, 'src'); }).then(function () { return up(ctx, 'src', 'root'); });
+        },
+      },
+      {
+        title: 'docs/ sums its one child',
+        say: 'docs/ holds only guide.md, so it returns 8. Same code path as src/: every folder runs the identical loop no matter how deep it sits.',
+        run: function (ctx) {
+          return down(ctx, 'root', 'docs').then(function () { return size(ctx, 'docs'); }).then(function () { return up(ctx, 'docs', 'root'); });
+        },
+      },
+      {
+        title: 'Root adds it up and answers the client',
+        say: 'Calls went down, results came up. root = 18 + 8 + 2 = 28 KB. Ten nodes visited: O(n). The client wrote one line.',
+        run: function (ctx) {
+          hl([11]);
+          ctx.state.sizes.root = 28;
+          val(ctx, 'root', '= 28 KB', 'fill-ok');
+          ctx.flash(ctx.state.g.root.r);
+          ctx.log('root.size() = 18 + 8 + 2 = 28', 'ok');
+          return ctx.packet([[N.root.x - W / 2, N.root.y + 19], [N.root.x - W / 2 - 10, N.root.y + 19], [N.root.x - W / 2 - 10, 36], [140, 36]], { ms: 600, cls: 'ok' })
+            .then(function () { ctx.state.cv.textContent = 'got 28 KB'; ctx.state.cv.setAttribute('class', 'mono small fill-ok'); ctx.state.note.textContent = 'one call · 10 nodes visited · O(n)'; });
+        },
+      },
+      {
+        title: 'Add a file: only its ancestors change',
+        say: 'Add api.md (7 KB) to docs/. With cached sizes, walk up the parent pointers: docs/ becomes 15, root becomes 35. src/ and lib/ are untouched. Reads stay O(1), the write costs O(depth).',
+        run: function (ctx) {
+          hl([13, 15]);
+          N.api = { x: 560, y: 260, kb: 7, label: 'api.md', p: 'docs' };
+          ctx.state.e.api = ctx.el('line', { x1: bot('docs')[0], y1: bot('docs')[1], x2: 560, y2: 260, class: 'edge on', opacity: 0 }, ctx.state.edges);
+          ctx.state.g.api = node(ctx, 'api');
+          ctx.log("docs.add(new File('api.md', 7))", 'info');
+          return Promise.all([ctx.fade(ctx.state.e.api, 1, 300), ctx.fade(ctx.state.g.api, 1, 300)]).then(function () {
+            val(ctx, 'api', '+7', 'fill-warn');
+            return up(ctx, 'api', 'docs');
+          }).then(function () {
+            val(ctx, 'docs', '= 15 KB', 'fill-warn'); ctx.flash(ctx.state.g.docs.r);
+            ctx.log('docs/ 8 -> 15', 'warn');
+            return up(ctx, 'docs', 'root');
+          }).then(function () {
+            val(ctx, 'root', '= 35 KB', 'fill-warn'); ctx.flash(ctx.state.g.root.r);
+            ctx.log('root 28 -> 35 (2 ancestors updated)', 'warn');
+            ctx.state.note.textContent = 'write: walk up parents, O(depth) · src/ untouched';
+          });
+        },
+      },
+      {
+        title: 'A second operation, same shape: find(*.ts)',
+        say: 'Any operation that works on one node works on the tree. <code>find()</code> walks down the same way; leaves that match report their path, folders concatenate the lists.',
+        run: function (ctx) {
+          hl([]);
+          ORDER.concat(['api']).forEach(function (id) { val(ctx, id, ''); ctx.state.g[id].r.classList.remove('ok'); });
+          var hits = ['index', 'app', 'util', 'db'];
+          ctx.log("root.find(name ends with '.ts')", 'info');
+          return Promise.all(hits.map(function (id, i) {
+            var path = [], cur = id;
+            while (cur) { path.unshift(cur); cur = N[cur].p; }
+            var pts = path.map(function (p) { return [N[p].x, N[p].y + Hn / 2]; });
+            return ctx.wait(i * 150).then(function () { return ctx.packet(pts, { ms: 700 }); }).then(function () {
+              ctx.state.g[id].r.setAttribute('class', 'box ok');
+              val(ctx, id, 'match', 'fill-ok');
+            });
+          })).then(function () {
+            ctx.log('-> src/index.ts, src/app.ts, src/lib/util.ts, src/lib/db.ts', 'ok');
+            ctx.state.note.textContent = 'find(): 4 matches, still no type checks in the client';
+          });
+        },
+      },
+      {
+        title: 'Cycle guard: mv src/ into src/lib/',
+        say: 'Before adding a folder, <code>lib.add(src)</code> walks up from lib: lib → src. It meets the folder being moved, so the move would create a loop and <code>size()</code> would never end. Rejected with EINVAL.',
+        run: function (ctx) {
+          hl([14]);
+          ctx.log('lib.add(src)  // mv src -> src/lib', 'info');
+          var bad = ctx.el('path', { d: 'M' + (N.lib.x + W / 2) + ',' + (N.lib.y + 19) + ' C 470,240 330,120 ' + (N.src.x + W / 2) + ',' + (N.src.y + 10), class: 'edge bad', opacity: 0 });
+          return ctx.fade(bad, 1, 300).then(function () {
+            return ctx.packet([top('lib'), bot('src')], { ms: 500, cls: 'bad', label: 'parent?' });
+          }).then(function () {
+            ctx.state.g.src.r.setAttribute('class', 'box bad');
+            ctx.flash(ctx.state.g.src.r);
+            val(ctx, 'src', 'is the node being moved!', 'fill-bad');
+            ctx.log('walk up: lib -> src == moved node -> EINVAL', 'bad');
+            ctx.state.note.textContent = 'guard needs parent pointers: O(depth) check before every move';
+            return ctx.fade(bad, 0.35, 400);
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: a real composite in plain JS ----
+  function F(name, kb) { this.name = name; this.kb = kb; }
+  F.prototype.size = function () { return this.kb; };
+  F.prototype.lines = function (ind) { return [ind + this.name + '  ' + this.kb + ' KB']; };
+  function D(name) { this.name = name; this.children = []; this.parent = null; }
+  D.prototype.size = function () { return this.children.reduce(function (s, c) { return s + c.size(); }, 0); };
+  D.prototype.lines = function (ind) { var out = [ind + this.name + '/  ' + this.size() + ' KB']; this.children.forEach(function (c) { out = out.concat(c.lines(ind + '  ')); }); return out; };
+  D.prototype.isInside = function (n) { for (var p = this; p; p = p.parent) if (p === n) return true; return false; };
+  D.prototype.add = function (n) {
+    if (this.children.some(function (c) { return c.name === n.name; })) throw new Error('EEXIST ' + n.name);
+    if (n instanceof D && this.isInside(n)) throw new Error('EINVAL: ' + n.name + '/ cannot go inside itself');
+    if (n.parent) n.parent.children = n.parent.children.filter(function (c) { return c !== n; });
+    n.parent = this; this.children.push(n); return this;
+  };
+  var troot = new D('root'), tsrc = new D('src'), tlib = new D('lib'), tdocs = new D('docs');
+  troot.add(tsrc).add(tdocs).add(new F('README.md', 2));
+  tsrc.add(new F('index.ts', 3)).add(new F('app.ts', 5)).add(tlib);
+  tlib.add(new F('util.ts', 4)).add(new F('db.ts', 6));
+  tdocs.add(new F('guide.md', 8));
+  var dirs = [];
+  function collect(d, path) { dirs.push({ d: d, path: path }); d.children.forEach(function (c) { if (c instanceof D) collect(c, path + c.name + '/'); }); }
+  function fill(sel, list, skipRoot) {
+    var v = sel.value; sel.innerHTML = '';
+    list.forEach(function (x, i) { if (skipRoot && i === 0) return; var o = document.createElement('option'); o.value = i; o.textContent = x.path; sel.appendChild(o); });
+    if (v && sel.querySelector('option[value="' + v + '"]')) sel.value = v;
+  }
+  function render() {
+    dirs = []; collect(troot, '/');
+    fill(document.getElementById('t-dir'), dirs);
+    fill(document.getElementById('t-mvto'), dirs);
+    fill(document.getElementById('t-mv'), dirs, true);
+    document.getElementById('t-tree').textContent = troot.lines('').join('\n');
+  }
+  var msg = document.getElementById('t-msg');
+  function say(t, c) { msg.textContent = t; msg.className = 'msg ' + (c || ''); }
+  document.getElementById('t-add').addEventListener('click', function () {
+    var d = dirs[+document.getElementById('t-dir').value].d;
+    var name = (document.getElementById('t-name').value || 'new').trim();
+    var isDir = document.getElementById('t-isdir').checked;
+    try {
+      d.add(isDir ? new D(name) : new F(name, Math.max(1, +document.getElementById('t-kb').value || 1)));
+      say(d.name + '.add(' + name + ') ok: root.size() = ' + troot.size() + ' KB', 'ok');
+    } catch (e) { say(e.message, 'bad'); }
+    render();
+  });
+  document.getElementById('t-move').addEventListener('click', function () {
+    var n = dirs[+document.getElementById('t-mv').value].d, to = dirs[+document.getElementById('t-mvto').value].d;
+    try { to.add(n); say('moved ' + n.name + '/ into ' + to.name + '/: root still ' + troot.size() + ' KB', 'ok'); } catch (e) { say(e.message, 'bad'); }
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -120,6 +120,6 @@ Flow: `notify` → validate → dedupe → rate limit → render → enqueue. Wo
 
 ## Concepts used
 
-- [Strategy](../../concepts/patterns/p10-strategy.md) · [Template Method](../../concepts/patterns/p15-template-method.md) · [Observer](../../concepts/patterns/p11-observer.md) · [Concurrency in Node](../../concepts/06-concurrency-in-node.md)
-- HLD links: [Notification System](../../../hld/problems/05-notification-system/) · [Message queues](../../../hld/concepts/17-message-queues.md) · [Idempotency and delivery semantics](../../../hld/concepts/19-idempotency-delivery-semantics.md) · [Resilience patterns](../../../hld/concepts/24-resilience-patterns.md)
-- Visuals: [Observer and pub-sub](../../../visuals/v24-observer-pubsub.html) · [Delivery semantics](../../../visuals/v11-delivery-semantics.html) · [Circuit breaker and retries](../../../visuals/v13-circuit-breaker.html)
+- [Strategy](../../4-behavioral/L20-strategy/README.md) · [Template Method](../../4-behavioral/L26-template-method/README.md) · [Observer](../../4-behavioral/L21-observer/README.md) · [Concurrency in Node](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- HLD links: [Notification System](../../../hld/case-studies/05-notification-system) · [Message queues](../../../hld/4-async/H20-message-queues/README.md) · [Idempotency and delivery semantics](../../../hld/4-async/H22-delivery-semantics/README.md) · [Resilience patterns](../../../hld/5-reliability/H27-resilience/README.md)
+- Visuals: [Observer and pub-sub](../../4-behavioral/L21-observer/visual.html) · [Delivery semantics](../../../hld/4-async/H22-delivery-semantics/visual.html) · [Circuit breaker and retries](../../../hld/5-reliability/H27-resilience/visual.html)

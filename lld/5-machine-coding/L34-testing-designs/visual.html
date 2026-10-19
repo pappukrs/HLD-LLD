@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L34 Testing designs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try .btn.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L34 · Machine coding</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Testing your design with Vitest</h1>
+    <p class="lede">Inject the clock and the side effects, and tests stop sleeping and stop guessing. Watch a test suite run against a rate limiter and a seat service: boundaries by moving a fake clock, a spy counting notifications, a concurrency race, and a refactor that tests survive.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Test list, system under test with injected clock and spy, and a time-cost bar"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Tests are written against</span>
+        <button class="btn" type="button" data-style="public">the public API</button>
+        <button class="btn" type="button" data-style="private">private fields</button>
+        <span>(see step 8)</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Injected dependency</span>
+        <span><i style="background: var(--signal)"></i>Call in flight</span>
+        <span><i style="background: var(--ok)"></i>Test passed</span>
+        <span><i style="background: var(--bad)"></i>Failed / typed error</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The test, line by line (highlighted with the step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">const now = Date.now()            // before: real clock</span><span class="ln" data-l="2">let now = 0; const rl = new RateLimiter({ limit: 2, windowMs: 1000, clock: () =&gt; now })</span><span class="ln" data-l="3">rl.check('u1'); rl.check('u1')</span><span class="ln" data-l="4">expect(() =&gt; rl.check('u1')).toThrow(RateLimitedError)</span><span class="ln" data-l="5">it.each([[999, false], [1000, true]])('t=%i', (t, ok) =&gt; { now = t; … })</span><span class="ln" data-l="6">const notify = vi.fn(); … expect(notify).toHaveBeenCalledTimes(1)</span><span class="ln" data-l="7">const r = await Promise.allSettled([hold('A1','alice'), hold('A1','bob')])</span><span class="ln" data-l="8">expect(r.map(x =&gt; x.status)).toEqual(['fulfilled', 'rejected'])</span><span class="ln" data-l="9">expect(rl['hits'].get('u1').length).toBe(2) // private: brittle</span><span class="ln" data-l="10">contract('InMemory', makeMem); contract('Postgres', makePg)</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Because the clock, ids and repositories are injected, I test the service in milliseconds with fakes. I test only the public API, one behaviour per test, and assert on typed errors. For time rules I move the fake clock across the boundary; for concurrency I fire two calls with Promise.allSettled and assert exactly one wins. A contract suite runs against both the in-memory and the Postgres repository."</p>
+    </div>
+    <div class="note wide">
+      <h3>Test doubles</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Double</th><th>What it is</th><th>Example</th><th>Use for</th><th>Risk</th></tr></thead>
+          <tbody>
+            <tr><td>Stub</td><td>Returns canned answers</td><td><code>{ charge: async () =&gt; 'txn_1' }</code></td><td>Inputs the code reads (gateway replies)</td><td>Low</td></tr>
+            <tr><td>Fake</td><td>Working light implementation</td><td><code>InMemoryWalletRepo</code></td><td>Storage, queues, caches</td><td>Drifts from the real thing without a contract test</td></tr>
+            <tr><td>Spy</td><td>Records calls</td><td><code>vi.fn()</code></td><td>Outbound effects: SMS, events</td><td>Low</td></tr>
+            <tr><td>Module mock</td><td>Replaces an import</td><td><code>vi.mock('./db')</code></td><td>Legacy code you cannot inject into</td><td>Tests pass while real wiring is broken</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>A test needs <code>sleep(60_000)</code>. What is the real problem?</summary><div>The code reads the real clock. Inject <code>clock: () =&gt; number</code> and set <code>now = 60_000</code> in the test.</div></details>
+      <details class="qa"><summary>Fake, stub or spy for the SMS sender?</summary><div>A spy: you want to assert it was called once with the right arguments.</div></details>
+      <details class="qa"><summary>Why did the private-field tests break on refactor?</summary><div>They tested how the class stores data, not what it does. Public-API tests only care about behaviour, so internals can change.</div></details>
+      <details class="qa"><summary>How do you trust an in-memory fake?</summary><div>Run the same contract suite against the fake and the real repository in CI.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Read <a href="../../problems/13-bookmyshow/bookmyshow.test.ts">bookmyshow.test.ts</a> (TTL, concurrency)</li>
+        <li>Read <a href="../../problems/05-notification-service/notification-service.test.ts">notification-service.test.ts</a> (spies)</li>
+        <li>Run <code>npx vitest run lld/problems/04-rate-limiter</code></li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var STYLE = 'public';
+  var TESTS = [
+    'allows 2, then RateLimitedError',
+    't=999 → still rejected',
+    't=1000 → allowed again',
+    'confirm notifies once (spy)',
+    'confirm at TTL → HoldExpired',
+    'two holds → exactly one wins',
+    'contract: InMemory + Postgres',
+  ];
+  var SUT = { x: 330, y: 150, w: 210, h: 110 };
+
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+  function box(ctx, x, y, w, h, label, cls, sub) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: 0, y: 0, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: w / 2, y: sub !== undefined ? h / 2 - 3 : h / 2 + 4, 'text-anchor': 'middle', class: 'mono', text: label }, g);
+    var s = sub !== undefined ? ctx.el('text', { x: w / 2, y: h / 2 + 13, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g) : null;
+    ctx.place(g, x, y);
+    g._r = r; g._t = t; g._s = s;
+    return g;
+  }
+  function row(ctx, i, cls, mark) {
+    var r = ctx.state.rows[i];
+    r.dot.setAttribute('class', 'dot ' + cls);
+    r.mark.textContent = mark;
+    ctx.flash(r.g);
+  }
+  function setClock(ctx, label) { ctx.state.clockText.textContent = label; ctx.flash(ctx.state.clock); }
+  function rowY(i) { return 64 + i * 40; }
+  var IN = [SUT.x, SUT.y + 55], OUT = [SUT.x + SUT.w, SUT.y + 55];
+  function call(ctx, i, label, cls, retLabel) {
+    var y = rowY(i) + 10;
+    return ctx.packet([[280, y], [305, y], [305, IN[1]], IN], { ms: 500, label: label })
+      .then(function () { return ctx.packet([IN, [305, IN[1]], [305, y], [280, y]], { ms: 450, cls: cls, label: retLabel }); });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: { title: 'A suite of 7 tests', say: 'Left: the tests. Middle: the system under test. Top: its clock. Right: a spy for notifications. Bottom: how long the suite takes. Press Play.' },
+    setup: function (ctx) {
+      hl([]);
+      ctx.el('text', { x: 20, y: 34, class: 'title', text: 'Tests' });
+      ctx.state.rows = TESTS.map(function (t, i) {
+        var g = ctx.group();
+        ctx.el('rect', { x: 0, y: 0, width: 260, height: 30, rx: 5, class: 'box' }, g);
+        var dot = ctx.el('circle', { cx: 14, cy: 15, r: 6, class: 'dot muted' }, g);
+        ctx.el('text', { x: 28, y: 19, class: 'mono small', text: t }, g);
+        var mark = ctx.el('text', { x: 246, y: 19, 'text-anchor': 'middle', class: 'mono', text: '' }, g);
+        ctx.place(g, 20, rowY(i) - 5);
+        return { g: g, dot: dot, mark: mark };
+      });
+      ctx.state.privRow = null;
+
+      var sut = box(ctx, SUT.x, SUT.y, SUT.w, SUT.h, '', '');
+      sut._t.remove();
+      ctx.state.sutTitle = ctx.el('text', { x: SUT.w / 2, y: 22, 'text-anchor': 'middle', class: 'title', text: 'RateLimiter' }, sut);
+      ctx.state.inner = box(ctx, SUT.x + 12, SUT.y + 44, 186, 34, 'hits: Map<user, t[]>', '');
+      ctx.state.sut = sut;
+
+      ctx.state.clock = box(ctx, SUT.x + 5, 40, 200, 56, 'Date.now()', 'bad', 'hidden real clock');
+      ctx.state.clockText = ctx.state.clock._t;
+      ctx.el('line', { x1: SUT.x + 105, y1: 96, x2: SUT.x + 105, y2: SUT.y, class: 'wire' });
+
+      ctx.state.spy = box(ctx, 590, 160, 150, 56, 'notify spy', 'accent', 'calls: 0');
+      ctx.state.spy.setAttribute('opacity', 0.35);
+      ctx.el('line', { x1: OUT[0], y1: OUT[1], x2: 590, y2: 188, class: 'wire dashed' });
+
+      ctx.el('text', { x: 330, y: 330, class: 'title', text: 'Suite run time' });
+      ctx.el('text', { x: 330, y: 360, class: 'mono small muted', text: 'real clock' });
+      ctx.el('text', { x: 330, y: 396, class: 'mono small muted', text: 'fake clock' });
+      ctx.state.barReal = ctx.el('rect', { x: 410, y: 348, width: 0, height: 16, rx: 3, class: 'fill-bad' });
+      ctx.state.barFake = ctx.el('rect', { x: 410, y: 384, width: 0, height: 16, rx: 3, class: 'fill-ok' });
+      ctx.state.realLabel = ctx.el('text', { x: 618, y: 361, class: 'mono small', text: '' });
+      ctx.state.fakeLabel = ctx.el('text', { x: 426, y: 397, class: 'mono small', text: '' });
+    },
+    steps: [
+      {
+        title: 'Before: the class reads the real clock',
+        say: 'To test "the window resets after 60 s", the test would have to sleep 60 s, and the result depends on timing. The design is the problem, not the test.',
+        run: function (ctx) {
+          hl([1]);
+          ctx.log('RateLimiter calls Date.now() inside check()', 'bad');
+          ctx.state.realLabel.textContent = '60 s per test, flaky';
+          return ctx.animate(ctx.state.barReal, { width: 200 }, 900).then(function () {
+            ctx.state.realLabel.setAttribute('x', 618);
+          });
+        },
+      },
+      {
+        title: 'Inject the clock',
+        say: 'The constructor takes <code>clock: () =&gt; now</code>. The test owns <code>now</code>. Moving time is an assignment, not a sleep.',
+        run: function (ctx) {
+          hl([2]);
+          var c = ctx.state.clock;
+          c._r.setAttribute('class', 'box accent');
+          c._t.textContent = 'now = 0';
+          c._s.textContent = 'clock: () => now (injected)';
+          ctx.flash(c);
+          ctx.state.fakeLabel.textContent = '~0 ms';
+          ctx.log('new RateLimiter({ limit: 2, windowMs: 1000, clock: () => now })', 'ok');
+          return ctx.animate(ctx.state.barFake, { width: 4 }, 400);
+        },
+      },
+      {
+        title: 'Test 1: allow up to the limit, then a typed error',
+        say: 'Arrange a fresh limiter, act three times, assert the third throws <code>RateLimitedError</code>. Assert the error class, not the message.',
+        run: function (ctx) {
+          hl([3, 4]);
+          row(ctx, 0, 'signal', '…');
+          return call(ctx, 0, 'check #1', 'ok', 'ok')
+            .then(function () { return call(ctx, 0, 'check #2', 'ok', 'ok'); })
+            .then(function () { return call(ctx, 0, 'check #3', 'bad', 'RateLimitedError'); })
+            .then(function () { row(ctx, 0, 'ok', '✓'); ctx.log('✓ allows 2, then RateLimitedError', 'ok'); });
+        },
+      },
+      {
+        title: 'Tests 2–3: the boundary, by moving the clock',
+        say: 'Set <code>now = 999</code>: still inside the window, rejected. Set <code>now = 1000</code>: the window has passed, allowed. Two tests, zero waiting.',
+        run: function (ctx) {
+          hl([5]);
+          setClock(ctx, 'now = 999');
+          row(ctx, 1, 'signal', '…');
+          return call(ctx, 1, 'check', 'bad', 'rejected').then(function () {
+            row(ctx, 1, 'ok', '✓');
+            ctx.log('✓ t=999 → rejected', 'ok');
+            setClock(ctx, 'now = 1000');
+            row(ctx, 2, 'signal', '…');
+            return call(ctx, 2, 'check', 'ok', 'allowed');
+          }).then(function () { row(ctx, 2, 'ok', '✓'); ctx.log('✓ t=1000 → allowed', 'ok'); });
+        },
+      },
+      {
+        title: 'Test 4: a spy counts the notification',
+        say: 'Switch to SeatService. Its notifier is injected, so the test passes a spy. Hold, confirm, then assert the spy was called once with the right arguments.',
+        run: function (ctx) {
+          hl([6]);
+          ctx.state.sutTitle.textContent = 'SeatService';
+          ctx.state.inner._t.textContent = 'holds: Map<seat, hold>';
+          setClock(ctx, 'now = 0 (ttl 10 min)');
+          row(ctx, 3, 'signal', '…');
+          return ctx.fade(ctx.state.spy, 1, 300)
+            .then(function () { return call(ctx, 3, 'hold A1', 'ok', 'held'); })
+            .then(function () { setClock(ctx, 'now = 9:59.999'); return ctx.packet([[280, rowY(3) + 10], [305, rowY(3) + 10], [305, IN[1]], IN], { ms: 450, label: 'confirm' }); })
+            .then(function () { return ctx.packet([OUT, [590, 188]], { ms: 450, cls: 'accent', label: 'notify' }); })
+            .then(function () {
+              ctx.state.spy._s.textContent = 'calls: 1';
+              ctx.flash(ctx.state.spy);
+              row(ctx, 3, 'ok', '✓');
+              ctx.log('✓ expect(notify).toHaveBeenCalledTimes(1)', 'ok');
+            });
+        },
+      },
+      {
+        title: 'Test 5: confirm exactly at the TTL fails',
+        say: 'Hold at t = 0, move the clock to exactly 10 minutes, confirm. The rule says the hold is gone, so <code>HoldExpiredError</code>. The spy stays at one call.',
+        run: function (ctx) {
+          hl([5]);
+          setClock(ctx, 'now = 10:00.000');
+          row(ctx, 4, 'signal', '…');
+          return call(ctx, 4, 'confirm', 'bad', 'HoldExpiredError').then(function () {
+            row(ctx, 4, 'ok', '✓');
+            ctx.log('✓ confirm at t = TTL → HoldExpiredError; spy still 1 call', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Test 6: two concurrent holds, exactly one wins',
+        say: '<code>Promise.allSettled</code> fires both holds before either finishes. Assert one fulfilled and one rejected. This is the proof behind "my hold is race-safe".',
+        run: function (ctx) {
+          hl([7, 8]);
+          setClock(ctx, 'now = 0');
+          row(ctx, 5, 'signal', '…');
+          var y = rowY(5) + 10;
+          return Promise.all([
+            ctx.packet([[280, y - 6], [305, y - 6], [305, IN[1] - 8], [IN[0], IN[1] - 8]], { ms: 500, label: 'alice' }),
+            ctx.packet([[280, y + 6], [312, y + 6], [312, IN[1] + 8], [IN[0], IN[1] + 8]], { ms: 500, cls: 'warn', label: 'bob' }),
+          ]).then(function () {
+            return Promise.all([
+              ctx.packet([[IN[0], IN[1] - 8], [305, IN[1] - 8], [305, y - 6], [280, y - 6]], { ms: 450, cls: 'ok', label: 'fulfilled' }),
+              ctx.packet([[IN[0], IN[1] + 8], [312, IN[1] + 8], [312, y + 6], [280, y + 6]], { ms: 450, cls: 'bad', label: 'SeatTaken' }),
+            ]);
+          }).then(function () { row(ctx, 5, 'ok', '✓'); ctx.log("✓ statuses = ['fulfilled', 'rejected']", 'ok'); });
+        },
+      },
+      {
+        title: 'Refactor the internals',
+        say: 'Replace the Map with an array of holds. Public-API tests do not notice: behaviour is the same. Tests that read private fields all break. Flip Try it to compare.',
+        run: function (ctx) {
+          hl(STYLE === 'public' ? [3, 4] : [9]);
+          var inner = ctx.state.inner;
+          return ctx.fade(inner, 0, 300).then(function () {
+            inner._t.textContent = 'holds: Hold[] (refactored)';
+            inner._r.setAttribute('class', 'box signal');
+            return ctx.fade(inner, 1, 300);
+          }).then(function () {
+            if (STYLE === 'public') {
+              ctx.state.rows.slice(0, 6).forEach(function (r) { ctx.flash(r.g); });
+              ctx.log('re-run: 6/6 still green after refactor', 'ok');
+            } else {
+              ctx.state.rows.slice(0, 6).forEach(function (r, i) { row(ctx, i, 'bad', '✗'); });
+              ctx.log("re-run: 6/6 red: rl['hits'] no longer exists", 'bad');
+            }
+            return ctx.wait(400);
+          });
+        },
+      },
+      {
+        title: 'Test 7: one contract suite, two implementations',
+        say: 'The same repository tests run against the in-memory fake and the Postgres repo (in CI). If both pass, unit tests that use the fake can be trusted.',
+        run: function (ctx) {
+          hl([10]);
+          row(ctx, 6, 'signal', '…');
+          var mem = box(ctx, 590, 250, 150, 34, 'InMemoryRepo', 'ok');
+          var pg = box(ctx, 590, 292, 150, 34, 'PgRepo (CI)', 'ok');
+          mem.setAttribute('opacity', 0); pg.setAttribute('opacity', 0);
+          var y = rowY(6) + 10;
+          return Promise.all([ctx.fade(mem, 1, 300), ctx.fade(pg, 1, 300)])
+            .then(function () {
+              return Promise.all([
+                ctx.packet([[280, y], [565, y], [565, 267], [590, 267]], { ms: 600, label: 'suite' }),
+                ctx.packet([[280, y], [575, y], [575, 309], [590, 309]], { ms: 700, label: 'suite' }),
+              ]);
+            })
+            .then(function () {
+              row(ctx, 6, 'ok', '✓');
+              ctx.state.fakeLabel.textContent = '7 tests in ~7 ms';
+              ctx.log('✓ contract passes for both implementations', 'ok');
+              return ctx.animate(ctx.state.barFake, { width: 8 }, 300);
+            });
+        },
+      },
+    ],
+  });
+
+  function syncTry() {
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-style]'), function (b) { b.classList.toggle('sel', b.dataset.style === STYLE); });
+  }
+  document.getElementById('try').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || !b.dataset.style) return;
+    STYLE = b.dataset.style;
+    syncTry();
+    lab.goTo(8);
+  });
+  syncTry();
+})();
+</script>
+</body>
+</html>

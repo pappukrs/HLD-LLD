@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L09 Factory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .rowhl { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L09 · Creational</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Simple Factory and Factory Method</h1>
+    <p class="lede">Put the "which class do I create?" decision in one place. Top half: a simple factory turns <code>'UPI'</code> into a gateway object. Bottom half: the GoF Factory Method, where a subclass decides which product the base algorithm uses.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="A factory creating payment gateways and a factory method in subclasses"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <label for="try-m">method</label>
+        <select id="try-m"><option>UPI</option><option>CARD</option><option>NETBANKING</option><option>CRYPTO</option></select>
+        <button class="btn" type="button" id="try-go">factory.create()</button>
+        <span id="try-out">Run to step 3 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call / request</span>
+        <span><i style="background: var(--accent)"></i>Object handed back as the interface</span>
+        <span><i style="background: var(--ok)"></i>Created / success</span>
+        <span><i style="background: var(--bad)"></i>Duplicated logic / rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface PaymentGateway { charge(paise: number): Promise&lt;string&gt; }</span><span class="ln" data-l="2">const creators: Record&lt;string, () =&gt; PaymentGateway&gt; = {</span><span class="ln" data-l="3">  UPI:  () =&gt; new UpiGateway(env.UPI_KEY),</span><span class="ln" data-l="4">  CARD: () =&gt; new CardGateway(env.CARD_KEY, { retries: 3 }),</span><span class="ln" data-l="5">};</span><span class="ln" data-l="6">export function createGateway(m: string): PaymentGateway {</span><span class="ln" data-l="7">  const make = creators[m];</span><span class="ln" data-l="8">  if (!make) throw new UnsupportedMethodError(m); // → 400</span><span class="ln" data-l="9">  return make();</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">// Factory Method (GoF): the subclass picks the product</span><span class="ln" data-l="12">abstract class NotificationSender {</span><span class="ln" data-l="13">  protected abstract createChannel(): Channel;</span><span class="ln" data-l="14">  send(to: string, msg: string) {</span><span class="ln" data-l="15">    return this.createChannel().deliver(to, msg.trim());</span><span class="ln" data-l="16">  }</span><span class="ln" data-l="17">}</span><span class="ln" data-l="18">class SmsSender extends NotificationSender {</span><span class="ln" data-l="19">  protected createChannel() { return new SmsChannel(); }</span><span class="ln" data-l="20">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Callers only see the <code>PaymentGateway</code> interface. One factory maps the method string to a constructor in a lookup table, and throws on unknown values so the API returns 400 at the boundary. Adding net banking is one new class and one line in the table; checkout, refund and reconcile don't change. If a base class has a fixed algorithm and only the product differs, I'd use the GoF Factory Method: subclasses override <code>createChannel()</code>."</p>
+    </div>
+    <div class="note wide">
+      <h3>Three kinds of "factory"</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Simple factory (registry)</th><th>Factory Method (GoF)</th><th>Abstract Factory (L10)</th></tr></thead>
+          <tbody>
+            <tr><td>Shape</td><td>A function or class with a lookup table</td><td>Abstract <code>createX()</code> in a base class, overridden by subclasses</td><td>An interface with several <code>createX()</code> methods, one impl per family</td></tr>
+            <tr><td>Picks the class by</td><td>Input (string, enum, config)</td><td>Which subclass you instantiated</td><td>Which kit you were given</td></tr>
+            <tr><td>Creates</td><td>One product</td><td>One product, used inside a base algorithm</td><td>A family of matching products</td></tr>
+            <tr><td>Node examples</td><td><code>crypto.createHash('sha256')</code>, <code>axios.create()</code></td><td>Nest/Express base classes with a hook for the client</td><td>Provider SDK kits, test vs live mode</td></tr>
+            <tr><td>How common in machine coding</td><td>Very common</td><td>Sometimes</td><td>Rare</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Doesn't the factory still have a switch? Isn't that an OCP violation?</summary><div>Yes, but it is in one place, and every caller is closed to change. With self-registration (<code>factory.register('UPI', () =&gt; new UpiGateway())</code> in the UPI module) even the factory file stops changing.</div></details>
+      <details class="qa"><summary>Factory vs Strategy?</summary><div>Factory decides <b>which object to create</b>. Strategy <b>is</b> the object that does the varying work. They usually appear together: the factory creates the right pricing strategy, and the service calls <code>strategy.price()</code>.</div></details>
+      <details class="qa"><summary>When should the factory return the same object every time?</summary><div>When the products are stateless (no per-request fields). Cache one instance per key. If the product holds per-request state, create a new one per call.</div></details>
+      <details class="qa"><summary>Where should the unknown-method check live?</summary><div>In the factory or in request validation, at the edge. Fail fast with a 400, so the rest of the code can trust it always has a real gateway.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CALLERS = [
+    { id: 'checkout', name: 'checkout()', y: 36 },
+    { id: 'refund', name: 'refund()', y: 112 },
+    { id: 'reconcile', name: 'reconcile()', y: 188 },
+  ];
+  var KX = 20, KW = 170, KH = 64;
+  var FX = 250, FW = 240, FY = 36, FH = 172;
+  var PX = 545, PW = 195;
+  var PRODUCTS = {
+    UPI: { y: 36, name: 'UpiGateway', sub: 'key=UPI_KEY' },
+    CARD: { y: 96, name: 'CardGateway', sub: 'key=CARD_KEY, retries=3' },
+    NETBANKING: { y: 156, name: 'NetBankingGateway', sub: 'bank list loaded' },
+  };
+  var ROWS = ['UPI', 'CARD', 'NETBANKING'];
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+  function range(a, b) { var r = []; for (var i = a; i <= b; i++) r.push(i); return r; }
+
+  function box(ctx, parent, x, y, w, h, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: x + 10, y: y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: x + 10, y: y + 37 + i * 15, class: 'mono small', text: l }, g);
+    });
+    return g;
+  }
+  function clearPanel(ctx) { var p = ctx.state.panel; while (p.firstChild) p.removeChild(p.firstChild); }
+  function cmid(i) { return CALLERS[i].y + KH / 2; }
+
+  // A caller asks the factory for a gateway, then uses it.
+  function request(ctx, ci, method) {
+    var s = ctx.state, y = cmid(ci);
+    var row = ROWS.indexOf(method);
+    ctx.log(CALLERS[ci].name + ": createGateway('" + method + "')", 'info');
+    s.result.textContent = '';
+    return ctx.packet([[KX + KW, y], [FX, y]], { ms: 450, label: method }).then(function () {
+      ctx.flash(s.fac.r);
+      if (row < 0 || !s.registered[method]) {
+        s.rowhl.setAttribute('opacity', 0);
+        ctx.log("creators['" + method + "'] is undefined → throw UnsupportedMethodError", 'bad');
+        return ctx.packet([[FX, y + 6], [KX + KW, y + 6]], { ms: 400, cls: 'bad' }).then(function () {
+          s.result.textContent = '400 Bad Request: unsupported method ' + method;
+          s.result.setAttribute('class', 'mono fill-bad');
+          return false;
+        });
+      }
+      s.rowhl.setAttribute('opacity', 1);
+      return ctx.animate(s.rowhl, { y: FY + 30 + row * 22 }, 250).then(function () {
+        var p = PRODUCTS[method], py = p.y + 23;
+        return ctx.packet([[FX + FW, FY + 41 + row * 22], [PX, py]], { ms: 450, label: 'new' }).then(function () {
+          ctx.fade(s.prod[method], 1, 250);
+          ctx.flash(s.prod[method].r);
+          ctx.log('new ' + p.name + '(' + p.sub + ')', 'ok');
+          return ctx.packet([[PX, py + 6], [FX + FW, FY + 150], [FX, FY + 150], [KX + KW, y + 6]], { ms: 700, cls: 'accent', label: 'PaymentGateway' });
+        }).then(function () {
+          ctx.log(CALLERS[ci].name + ' got a PaymentGateway, calls charge(49900)', 'info');
+          return ctx.packet([[KX + KW, y + 14], [PX, p.y + 30]], { ms: 500, label: 'charge' });
+        }).then(function () {
+          s.result.textContent = p.name + '.charge(49900) → txn_' + method.toLowerCase() + '_81';
+          s.result.setAttribute('class', 'mono fill-ok');
+          return true;
+        });
+      });
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three places create payment gateways',
+      say: 'Checkout, refund and reconcile all need a gateway for the order\'s method. Watch what happens when each of them decides which class to <code>new</code>.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      s.registered = { UPI: true, CARD: true };
+      s.callers = CALLERS.map(function (c) {
+        return box(ctx, null, KX, c.y, KW, KH, c.name, ["if m=='UPI' new Upi…", "elif 'CARD' new Card…"], 'signal');
+      });
+      var fg = ctx.group({ opacity: 0 });
+      s.facG = fg;
+      s.fac = box(ctx, fg, FX, FY, FW, FH, 'createGateway(m)', [], 'accent');
+      ctx.el('line', { x1: FX, x2: FX + FW, y1: FY + 27, y2: FY + 27, class: 'sep' }, fg);
+      s.rowhl = ctx.el('rect', { x: FX + 4, y: FY + 30, width: FW - 8, height: 20, rx: 4, class: 'rowhl', opacity: 0 }, fg);
+      s.rows = ROWS.map(function (m, i) {
+        return ctx.el('text', { x: FX + 12, y: FY + 45 + i * 22, class: 'mono', text: i < 2 ? (m + (i ? ' ' : '  ') + ' → ' + PRODUCTS[m].name) : '' }, fg);
+      });
+      ctx.el('text', { x: FX + 12, y: FY + 125, class: 'mono small muted', text: 'unknown → throw (400)' }, fg);
+      ctx.el('text', { x: FX + 12, y: FY + 162, class: 'mono small muted', text: 'returns: PaymentGateway' }, fg);
+      s.prod = {};
+      ROWS.forEach(function (m) {
+        var p = PRODUCTS[m];
+        s.prod[m] = box(ctx, null, PX, p.y, PW, 50, p.name, [p.sub], m === 'NETBANKING' ? 'ok' : '');
+        s.prod[m].setAttribute('opacity', 0);
+      });
+      s.result = ctx.el('text', { x: 20, y: 276, class: 'mono', text: '' });
+      ctx.el('line', { x1: 10, y1: 292, x2: 750, y2: 292, class: 'divider' });
+      s.panel = ctx.group();
+    },
+    steps: [
+      {
+        title: 'Before: the if/else chain is copied',
+        say: 'Each function decides which gateway class to create, with its keys and retry config. Business adds net banking: you must find and edit all three copies, and re-test all three.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.tween(600, function () {}).then(function () {
+            s.callers.forEach(function (c) { c.r.setAttribute('class', 'box bad'); ctx.flash(c.r); });
+            ctx.log('new method NETBANKING → 3 files to edit', 'bad');
+            ctx.log('callers import UpiGateway, CardGateway, … (tight coupling)', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Move the decision into one factory',
+        say: 'One function owns the lookup table: method string → how to build that gateway. Callers now write one line, <code>createGateway(m)</code>, and only know the <code>PaymentGateway</code> interface.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl(range(1, 10));
+          s.callers.forEach(function (c) {
+            c.r.setAttribute('class', 'box signal');
+            c.lines[0].textContent = 'gw = createGateway(m)';
+            c.lines[1].textContent = 'gw.charge(amount)';
+          });
+          ctx.log('callers: 0 concrete classes imported', 'ok');
+          return ctx.fade(s.facG, 1, 450);
+        },
+      },
+      {
+        title: "checkout() asks for 'UPI'",
+        say: 'The factory looks up <code>UPI</code>, builds <code>UpiGateway</code> with its key, and hands it back typed as <code>PaymentGateway</code>. Checkout calls <code>charge()</code> without knowing the class.',
+        run: function (ctx) { hl([3, 7, 9]); return request(ctx, 0, 'UPI').then(function () { ctx.state.ready = true; }); },
+      },
+      {
+        title: "refund() asks for 'CARD'",
+        say: 'Same one line in refund. The factory hides the construction details: the card key and <code>retries: 3</code> live in the factory, not in every caller.',
+        run: function (ctx) { hl([4, 7, 9]); return request(ctx, 1, 'CARD'); },
+      },
+      {
+        title: 'Add NETBANKING: one class, one line',
+        say: 'Write <code>NetBankingGateway</code> and add one entry to the table. Checkout, refund and reconcile are not touched. That is the open/closed principle in practice.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([2, 5]);
+          s.registered.NETBANKING = true;
+          s.rows[2].textContent = 'NETBANKING → NetBanking…';
+          s.rows[2].setAttribute('class', 'mono fill-ok');
+          ctx.flash(s.rows[2]);
+          ctx.log('+ class NetBankingGateway, + 1 line in creators', 'ok');
+          ctx.log('callers changed: 0', 'ok');
+          return request(ctx, 2, 'NETBANKING');
+        },
+      },
+      {
+        title: "Unknown method: fail fast",
+        say: 'A client sends <code>\'CRYPTO\'</code>. There is no entry, so the factory throws <code>UnsupportedMethodError</code> and the API maps it to 400. Code after the factory never sees an invalid method.',
+        run: function (ctx) { hl([7, 8]); return request(ctx, 0, 'CRYPTO'); },
+      },
+      {
+        title: 'Factory Method: a base algorithm with a creation hook',
+        say: 'GoF Factory Method uses inheritance. <code>NotificationSender.send()</code> is fixed: trim the message, create a channel, deliver. The one varying step, <code>createChannel()</code>, is abstract.',
+        run: function (ctx) {
+          var s = ctx.state, p = s.panel;
+          hl(range(12, 17));
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 318, class: 'title', text: 'Factory Method (GoF)' }, p);
+          s.base = box(ctx, p, 20, 330, 250, 84, '«abstract» NotificationSender', ['send(to, msg):', '  ch = this.createChannel()', '  ch.deliver(to, msg.trim())'], 'accent');
+          s.sms = box(ctx, p, 320, 318, 200, 50, 'SmsSender', ['createChannel() → SmsChannel'], '');
+          s.email = box(ctx, p, 320, 392, 200, 50, 'EmailSender', ['createChannel() → EmailChannel'], '');
+          ctx.el('path', { d: 'M320,343 H295 V372 H270', class: 'uml' }, p);
+          ctx.el('path', { d: 'M320,417 H295 V372', class: 'uml' }, p);
+          ctx.el('text', { x: 278, y: 366, class: 'mono small muted', text: '◁' }, p);
+          s.chSms = box(ctx, p, PX, 318, PW, 50, 'SmsChannel', ['deliver() via SMS gateway'], 'ok');
+          s.chEmail = box(ctx, p, PX, 392, PW, 50, 'EmailChannel', ['deliver() via SMTP'], 'ok');
+          s.chSms.setAttribute('opacity', 0); s.chEmail.setAttribute('opacity', 0);
+          ctx.log('base class owns the algorithm; subclasses own creation', 'info');
+          return ctx.fade(p, 1, 200);
+        },
+      },
+      {
+        title: 'SmsSender.send(): the subclass picks the product',
+        say: 'You call the inherited <code>send()</code> on an <code>SmsSender</code>. When the base code calls <code>this.createChannel()</code>, dispatch goes to the subclass, which returns an <code>SmsChannel</code>.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([14, 15, 18, 19]);
+          ctx.log("new SmsSender().send('+9198…', ' OTP 4821 ')", 'info');
+          return ctx.packet([[20, 450], [145, 450], [145, 414]], { ms: 450, label: 'send()' })
+            .then(function () { ctx.flash(s.base.r); return ctx.packet([[270, 372], [295, 372], [295, 343], [320, 343]], { ms: 450, label: 'createChannel()' }); })
+            .then(function () { ctx.flash(s.sms.r); return ctx.packet([[520, 343], [PX, 343]], { ms: 300, label: 'new' }); })
+            .then(function () { ctx.fade(s.chSms, 1, 250); ctx.log('SmsSender.createChannel() → new SmsChannel()', 'ok'); return ctx.packet([[PX, 350], [270, 395]], { ms: 500, cls: 'accent' }); })
+            .then(function () { ctx.log("SmsChannel.deliver('+9198…', 'OTP 4821')", 'ok'); });
+        },
+      },
+      {
+        title: 'Same algorithm, different subclass',
+        say: '<code>EmailSender</code> reuses the exact same <code>send()</code>. Only the creation step differs. Adding WhatsApp means one subclass and one channel class; the base algorithm never changes.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([13, 15]);
+          ctx.log("new EmailSender().send('a@b.in', 'Receipt')", 'info');
+          return ctx.packet([[20, 450], [145, 450], [145, 414]], { ms: 450, label: 'send()' })
+            .then(function () { ctx.flash(s.base.r); return ctx.packet([[270, 380], [295, 380], [295, 417], [320, 417]], { ms: 450, label: 'createChannel()' }); })
+            .then(function () { ctx.flash(s.email.r); return ctx.packet([[520, 417], [PX, 417]], { ms: 300, label: 'new' }); })
+            .then(function () { ctx.fade(s.chEmail, 1, 250); ctx.log('EmailSender.createChannel() → new EmailChannel()', 'ok'); ctx.log('send() code changed: 0 lines', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it ----
+  var out = document.getElementById('try-out');
+  document.getElementById('try-go').addEventListener('click', function () {
+    var ctx = lab.ctx;
+    if (!ctx.state.ready) { out.textContent = 'Run to step 3 first (the factory must exist).'; return; }
+    var m = document.getElementById('try-m').value;
+    request(ctx, 0, m).then(function (ok) {
+      out.textContent = ok ? m + ': created and charged.' : m + (m === 'NETBANKING' ? ': not registered yet (see step 5).' : ': rejected with 400.');
+    });
+  });
+})();
+</script>
+</body>
+</html>

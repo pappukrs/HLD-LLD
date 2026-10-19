@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H27 Resilience</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H27 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Timeouts, Retries, Circuit Breakers, Bulkheads</h1>
+    <p class="lede">When a dependency is down, waiting on it wastes threads and time, and retrying all at once can knock it down again. A circuit breaker stops calls to a failing service. Backoff with jitter spreads retries out so the service can recover. A bulkhead caps how many calls one slow dependency may hold, so the others keep working.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 700" role="img" aria-label="Circuit breaker state machine, retry load charts and bulkhead connection pools"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--ok)"></i>Request succeeds</span>
+        <span><i style="background: var(--bad)"></i>Request fails</span>
+        <span><i style="background: var(--accent)"></i>Current state / capacity line</span>
+        <span><i style="background: var(--signal)"></i>Slot held by a stuck call</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Every call to Payment has a timeout. I wrap it in a circuit breaker: if more than 50% of the last 20 calls fail, it opens and we fail fast with a fallback. After 30 seconds it lets one probe through. I retry only idempotent calls, at most 3 times, with exponential backoff and full jitter, so clients don't retry in sync and cause a thundering herd."</p>
+    </div>
+    <div class="note">
+      <h3>Rules that keep retries safe</h3>
+      <ul>
+        <li>Retry only idempotent operations, or send an idempotency key with the request.</li>
+        <li>Retry only errors that may pass: timeouts, 503, 429. Never retry a 400.</li>
+        <li>Cap the attempts and use a retry budget (for example, retries ≤ 10% of all requests).</li>
+        <li>Retry at one layer only. Three layers × 3 retries = 27 calls for one user request.</li>
+        <li>Respect <code>Retry-After</code> when the server sends it.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Retry strategies compared</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Fixed delay</th><th>Exponential backoff</th><th>Exponential + full jitter</th></tr></thead>
+          <tbody>
+            <tr><td>Delay before attempt n</td><td><code>d</code></td><td><code>base · 2^n</code> (capped)</td><td><code>random(0, min(cap, base · 2^n))</code></td></tr>
+            <tr><td>Clients stay in sync?</td><td>Yes</td><td>Yes: same delays, same moments</td><td>No: each client picks its own delay</td></tr>
+            <tr><td>Load on a recovering server</td><td>Repeated spikes</td><td>Fewer spikes, still spikes</td><td>Smooth, under capacity</td></tr>
+            <tr><td>Time to drain the backlog</td><td>Medium, many failures</td><td>Slow</td><td>Fast, few failures</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why is a timeout alone not enough?</summary><div>With a 2 s timeout, every call to a dead service still holds a connection or worker for 2 s. Under load the caller's pool fills up and the caller fails too. The breaker turns those 2 s waits into instant failures.</div></details>
+      <details class="qa"><summary>What does the caller return when the breaker is open?</summary><div>A fallback: cached data, a default value (for example "recommendations unavailable"), a queued request for later, or a clear 503. Pick per feature. Payments usually fail clearly; a recommendation widget can just hide.</div></details>
+      <details class="qa"><summary>Why let only one probe through in half-open?</summary><div>The service may still be weak. If all traffic came back at once it could fall over again. Some libraries allow a few probes and close only after N successes.</div></details>
+      <details class="qa"><summary>Count failures or a failure rate?</summary><div>A rate over a sliding window (for example 50% of the last 20 calls, with a minimum number of calls) works better. A plain count trips too easily at high traffic and too slowly at low traffic.</div></details>
+    </div>
+    <div class="note">
+      <h3>Bulkhead vs shared pool</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Shared pool</th><th>Bulkhead per dependency</th></tr></thead>
+          <tbody>
+            <tr><td>Bank A hangs</td><td>Its calls take every slot</td><td>Only Bank A's slots fill</td></tr>
+            <tr><td>Bank B calls</td><td>Fail: no free socket</td><td>Keep working</td></tr>
+            <tr><td>Extra Bank A calls</td><td>Queue and time out</td><td>Rejected in ~1 ms (fallback)</td></tr>
+            <tr><td>Cost</td><td>Best utilisation</td><td>Some reserved capacity sits idle</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>More checks</h3>
+      <details class="qa"><summary>Three layers each retry 3 times. One call fails at the bottom. How many calls hit the bottom service?</summary><div>3 × 3 × 3 = 27. Retry in one layer only, and keep a retry budget (about 10% of traffic).</div></details>
+      <details class="qa"><summary>How do you build a bulkhead in Node, which has no thread pools?</summary><div>A semaphore per downstream (<code>p-limit</code> or a <code>cockatiel</code> bulkhead), a separate <code>http.Agent</code> with <code>maxSockets</code> per host, and separate DB pools for slow work.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+    <a href="lab-circuit-breaker/README.md">lab-circuit-breaker</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var A = { x: 20, y: 50, w: 140, h: 64 };
+  var BR = { x: 300, y: 40, w: 170, h: 96 };
+  var B = { x: 600, y: 50, w: 140, h: 64 };
+  var WY = 82;
+  var THRESHOLD = 5;
+  var SM = { CLOSED: { x: 50 }, OPEN: { x: 315 }, HALF: { x: 580 } };
+  var SM_Y = 172, SM_W = 130, SM_H = 32;
+
+  // ---- Retry simulation (deterministic) ----
+  // 100 clients send at t=0. B is down for the first 1 s, then serves 30 requests per 100 ms.
+  // A failed request retries after a delay chosen by the strategy, up to 6 attempts.
+  var CLIENTS = 100, BUCKETS = 60, DOWN = 10, CAP = 30, MAX_ATTEMPTS = 6;
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  var STRATS = {
+    fixed: function () { return 1.0; },
+    exp: function (k) { return Math.min(4, 0.5 * Math.pow(2, k - 1)); },
+    jitter: function (k, rnd) { return rnd() * Math.min(4, 0.5 * Math.pow(2, k - 1)); },
+  };
+  function simulate(name) {
+    var rnd = mulberry32(42), delay = STRATS[name];
+    var pending = [], out = [], i;
+    for (i = 0; i < BUCKETS; i++) pending.push([]);
+    for (i = 0; i < CLIENTS; i++) pending[0].push(1);
+    var okTotal = 0, peak = 0, lastOk = 0;
+    for (var b = 0; b < BUCKETS; b++) {
+      var list = pending[b];
+      var cap = b < DOWN ? 0 : CAP;
+      var ok = Math.min(cap, list.length), fail = list.length - ok;
+      out.push({ ok: ok, fail: fail });
+      okTotal += ok; if (b > 0) peak = Math.max(peak, list.length);
+      if (ok) lastOk = b;
+      list.slice(ok).forEach(function (k) {
+        if (k >= MAX_ATTEMPTS) return;
+        var nb = b + Math.max(1, Math.round(delay(k, rnd) * 10));
+        if (nb < BUCKETS) pending[nb].push(k + 1);
+      });
+    }
+    return { bars: out, ok: okTotal, peak: peak, lastOk: (lastOk + 1) / 10 };
+  }
+
+  // Chart rows
+  var CX = 140, BW = 10, HS = 0.55;
+  var PX = 170, PS = 40;   // bulkhead slots
+
+  function fillSlot(ctx, rect, kind, label) {
+    rect.setAttribute('class', kind === 'stuck' ? 'box signal' : kind === 'ok' ? 'box ok' : 'box');
+    var x = parseFloat(rect.getAttribute('x')), y = parseFloat(rect.getAttribute('y'));
+    ctx.el('text', { x: x + (PS - 6) / 2, y: y + 21, 'text-anchor': 'middle', class: 'mono small', text: label });
+    ctx.flash(rect);
+    return ctx.wait(140);
+  }
+  function arrive(ctx, rect, cls) {
+    var x = parseFloat(rect.getAttribute('x')) + (PS - 6) / 2, y = parseFloat(rect.getAttribute('y'));
+    return ctx.packet([[x, y - 26], [x, y + 12]], { ms: 260, cls: cls || '' });
+  }
+
+  var ROWS = [
+    { key: 'fixed', name: 'Fixed 1 s', base: 360 },
+    { key: 'exp', name: 'Exp. backoff', base: 435 },
+    { key: 'jitter', name: 'Exp. + jitter', base: 510 },
+  ];
+
+  function box(ctx, b, label, sub, cls) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: b.x + 12, y: b.y + 24, class: 'title', text: label }, g);
+    var s = ctx.el('text', { x: b.x + 12, y: b.y + 44, class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, s: s };
+  }
+
+  function setState(ctx, name) {
+    var st = ctx.state;
+    st.mode = name;
+    Object.keys(SM).forEach(function (k) {
+      st.sm[k].setAttribute('class', 'box' + (k === name ? ' accent' : ''));
+    });
+    var label = name === 'HALF' ? 'HALF-OPEN' : name;
+    st.stateText.textContent = 'state: ' + label;
+    st.stateText.setAttribute('class', 'mono ' + (name === 'OPEN' ? 'fill-bad' : name === 'HALF' ? 'fill-signal' : 'fill-ok'));
+    ctx.flash(st.sm[name]);
+  }
+
+  function setFails(ctx, n) {
+    ctx.state.fails = n;
+    ctx.state.failText.textContent = 'failures ' + n + ' / ' + THRESHOLD;
+  }
+
+  function setB(ctx, healthy) {
+    ctx.state.bOk = healthy;
+    ctx.state.b.s.textContent = healthy ? 'healthy' : 'timing out';
+    ctx.state.b.r.setAttribute('class', 'box ' + (healthy ? 'ok' : 'bad'));
+  }
+
+  var toBreaker = [[A.x + A.w, WY], [BR.x, WY]];
+  var toB = [[BR.x + BR.w, WY], [B.x, WY]];
+  function rev(p) { return p.slice().reverse(); }
+
+  // A full call A → breaker → B → back.
+  function fullCall(ctx, ok, ms) {
+    ms = ms || 380;
+    return ctx.packet(toBreaker, { ms: ms, cls: 'accent' })
+      .then(function () { return ctx.packet(toB, { ms: ms, cls: 'accent' }); })
+      .then(function () { return ctx.packet(rev(toB), { ms: ok ? ms : ms * 1.8, cls: ok ? 'ok' : 'bad' }); })
+      .then(function () { return ctx.packet(rev(toBreaker), { ms: ms, cls: ok ? 'ok' : 'bad' }); });
+  }
+  function failFast(ctx) {
+    return ctx.packet(toBreaker, { ms: 300, cls: 'accent' })
+      .then(function () { return ctx.packet(rev(toBreaker), { ms: 250, cls: 'bad' }); });
+  }
+
+  function setResponse(ctx, text, kind) {
+    ctx.state.resp.textContent = 'response: ' + text;
+    ctx.state.resp.setAttribute('class', 'mono small ' + (kind ? 'fill-' + kind : 'muted'));
+  }
+
+  function drawRow(ctx, row) {
+    var res = simulate(row.key);
+    var g = ctx.group();
+    var rects = res.bars.map(function (bar, i) {
+      var x = CX + i * BW + 1;
+      return {
+        ok: ctx.el('rect', { x: x, y: row.base, width: BW - 2, height: 0, class: 'fill-ok' }, g),
+        fail: ctx.el('rect', { x: x, y: row.base, width: BW - 2, height: 0, class: 'fill-bad' }, g),
+        d: bar,
+      };
+    });
+    var s = ctx.state.stats[row.key];
+    s[0].textContent = 'retry peak ' + res.peak;
+    s[1].textContent = 'ok ' + res.ok + '/100 in 6 s';
+    s[0].setAttribute('class', 'mono small ' + (res.peak > CAP ? 'fill-bad' : 'fill-ok'));
+    return ctx.tween(900, function (t) {
+      rects.forEach(function (r) {
+        var ho = r.d.ok * HS * t, hf = r.d.fail * HS * t;
+        r.ok.setAttribute('y', row.base - ho); r.ok.setAttribute('height', ho);
+        r.fail.setAttribute('y', row.base - ho - hf); r.fail.setAttribute('height', hf);
+      });
+    }).then(function () { return res; });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Service A calls Service B',
+      say: 'A breaker sits in Service A, around every call to B. It counts failures and decides whether a call is allowed. Part 2 shows what happens when 100 clients retry at the same time.',
+    },
+    setup: function (ctx) {
+      var st = ctx.state;
+      var defs = ctx.el('defs');
+      var m = ctx.el('marker', { id: 'arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+      ctx.el('path', { d: 'M0,0 L10,5 L0,10 z', class: 'fill-muted' }, m);
+
+      ctx.el('text', { x: 20, y: 24, class: 'title', text: 'Part 1 · The breaker' });
+      ctx.el('line', { x1: A.x + A.w, y1: WY, x2: BR.x, y2: WY, class: 'wire' });
+      ctx.el('line', { x1: BR.x + BR.w, y1: WY, x2: B.x, y2: WY, class: 'wire' });
+      box(ctx, A, 'Service A', 'caller, 2 s timeout');
+      st.resp = ctx.el('text', { x: A.x, y: A.y + A.h + 20, class: 'mono small muted', text: 'response: none yet' });
+      var br = box(ctx, BR, 'Circuit breaker', '', 'accent');
+      st.brBox = br;
+      st.stateText = br.s;
+      st.failText = ctx.el('text', { x: BR.x + 12, y: BR.y + 62, class: 'mono small', text: '' }, br.g);
+      st.cool = ctx.group({ opacity: 0 }, br.g);
+      ctx.el('rect', { x: BR.x + 12, y: BR.y + 72, width: 146, height: 8, rx: 4, class: 'box' }, st.cool);
+      st.coolBar = ctx.el('rect', { x: BR.x + 12, y: BR.y + 72, width: 0, height: 8, rx: 4, class: 'fill-signal' }, st.cool);
+      ctx.el('text', { x: BR.x + 12, y: BR.y + 92, class: 'mono small muted', text: 'cooldown 30 s' }, st.cool);
+      st.b = box(ctx, B, 'Service B', 'healthy', 'ok');
+      st.bOk = true;
+
+      // State machine
+      st.sm = {};
+      Object.keys(SM).forEach(function (k) {
+        var x = SM[k].x;
+        st.sm[k] = ctx.el('rect', { x: x, y: SM_Y, width: SM_W, height: SM_H, rx: 16, class: 'box' });
+        ctx.el('text', { x: x + SM_W / 2, y: SM_Y + 21, 'text-anchor': 'middle', class: 'mono', style: 'font-weight: 600', text: k === 'HALF' ? 'HALF-OPEN' : k });
+      });
+      ctx.el('line', { x1: 180, y1: 182, x2: 313, y2: 182, class: 'wire', 'marker-end': 'url(#arr)' });
+      ctx.el('text', { x: 247, y: 176, 'text-anchor': 'middle', class: 'mono small muted', text: 'failures ≥ 5' });
+      ctx.el('line', { x1: 445, y1: 182, x2: 578, y2: 182, class: 'wire', 'marker-end': 'url(#arr)' });
+      ctx.el('text', { x: 512, y: 176, 'text-anchor': 'middle', class: 'mono small muted', text: 'after 30 s' });
+      ctx.el('line', { x1: 580, y1: 196, x2: 447, y2: 196, class: 'wire', 'marker-end': 'url(#arr)' });
+      ctx.el('text', { x: 512, y: 212, 'text-anchor': 'middle', class: 'mono small muted', text: 'probe fails' });
+      ctx.el('path', { d: 'M645,204 L645,240 L115,240 L115,206', class: 'wire', 'marker-end': 'url(#arr)' });
+      ctx.el('text', { x: 380, y: 234, 'text-anchor': 'middle', class: 'mono small muted', text: 'probe succeeds' });
+      setState(ctx, 'CLOSED');
+      setFails(ctx, 0);
+
+      ctx.el('line', { x1: 0, y1: 262, x2: 760, y2: 262, class: 'wire' });
+
+      // Retry charts
+      ctx.el('text', { x: 20, y: 288, class: 'title', text: 'Part 2 · 100 clients retry after B fails' });
+      ctx.el('rect', { x: CX, y: 296, width: DOWN * BW, height: 216, class: 'fill-soft' });
+      ctx.el('text', { x: CX + DOWN * BW / 2, y: 308, 'text-anchor': 'middle', class: 'mono small muted', text: 'B down' });
+      st.stats = {};
+      ROWS.forEach(function (row, i) {
+        ctx.el('text', { x: 20, y: row.base - 40, class: 'title', text: row.name });
+        st.stats[row.key] = [
+          ctx.el('text', { x: 20, y: row.base - 22, class: 'mono small muted', text: '' }),
+          ctx.el('text', { x: 20, y: row.base - 8, class: 'mono small muted', text: '' }),
+        ];
+        ctx.el('line', { x1: CX, y1: row.base, x2: CX + BUCKETS * BW, y2: row.base, class: 'wire' });
+        ctx.el('line', { x1: CX + DOWN * BW, y1: row.base - CAP * HS, x2: CX + BUCKETS * BW, y2: row.base - CAP * HS, class: 'wire accent dashed', style: 'stroke-width: 1.5' });
+        if (i === 0) ctx.el('text', { x: CX + BUCKETS * BW, y: row.base - CAP * HS - 5, 'text-anchor': 'end', class: 'mono small', style: 'fill: var(--accent)', text: 'B capacity' });
+      });
+      for (var s = 0; s <= 6; s++) {
+        ctx.el('text', { x: CX + s * 100, y: 528, 'text-anchor': s === 6 ? 'end' : 'middle', class: 'mono small muted', text: s + ' s' });
+      }
+
+      // Part 3: bulkheads
+      ctx.el('line', { x1: 0, y1: 542, x2: 760, y2: 542, class: 'wire' });
+      ctx.el('text', { x: 20, y: 566, class: 'title', text: 'Part 3 · Bank A hangs: shared pool vs bulkheads' });
+      st.pool = { shared: [], bulk: [] };
+      ctx.el('text', { x: 20, y: 610, class: 'title', text: 'Shared pool' });
+      ctx.el('text', { x: 20, y: 626, class: 'mono small muted', text: '10 sockets, any bank' });
+      for (var p = 0; p < 10; p++) st.pool.shared.push(ctx.el('rect', { x: PX + p * PS, y: 590, width: PS - 6, height: 32, rx: 5, class: 'box' }));
+      ctx.el('text', { x: 20, y: 670, class: 'title', text: 'Bulkheads' });
+      ctx.el('text', { x: 20, y: 686, class: 'mono small muted', text: '5 for A, 5 for B' });
+      for (var q = 0; q < 10; q++) st.pool.bulk.push(ctx.el('rect', { x: PX + q * PS + (q >= 5 ? 14 : 0), y: 650, width: PS - 6, height: 32, rx: 5, class: 'box' }));
+      ctx.el('text', { x: PX + 2 * PS + 14, y: 696, 'text-anchor': 'middle', class: 'mono small muted', text: 'bank A pool' });
+      ctx.el('text', { x: PX + 7 * PS + 28, y: 696, 'text-anchor': 'middle', class: 'mono small muted', text: 'bank B pool' });
+      st.poolRes = {
+        shared: ctx.el('text', { x: 600, y: 610, class: 'mono small muted', text: '' }),
+        bulk: ctx.el('text', { x: 600, y: 670, class: 'mono small muted', text: '' }),
+      };
+    },
+    steps: [
+      {
+        title: 'Closed: calls pass through',
+        say: 'In the <b>closed</b> state the breaker lets every call through to B and watches the result. B is healthy, so calls succeed and the failure count stays at 0.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [1, 2, 3].forEach(function (n) {
+            chain = chain.then(function () { return fullCall(ctx, true); }).then(function () {
+              setResponse(ctx, '200 OK', 'ok');
+              ctx.log('Call ' + n + ' → B → 200 OK', 'ok');
+            });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'B starts timing out',
+        say: 'B is overloaded. Each call now waits 2 s for a timeout, and that holds a connection and a worker in A. If this goes on, A runs out of resources and fails too: a <b>cascading failure</b>. The breaker counts each failure.',
+        run: function (ctx) {
+          setB(ctx, false);
+          ctx.log('B starts timing out', 'warn');
+          var chain = Promise.resolve();
+          [1, 2, 3, 4, 5].forEach(function (n) {
+            chain = chain.then(function () { return fullCall(ctx, false, 260); }).then(function () {
+              setFails(ctx, n);
+              ctx.flash(ctx.state.failText);
+              setResponse(ctx, 'timeout after 2 s', 'bad');
+              ctx.log('Call failed: timeout (' + n + ' / ' + THRESHOLD + ')', 'bad');
+            });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Trip to OPEN: fail fast',
+        say: 'The threshold is reached, so the breaker <b>opens</b>. New calls fail at once, without touching B. A returns a fallback (cached data or a clear error) in about 1 ms instead of 2 s, and B gets time to recover.',
+        run: function (ctx) {
+          var st = ctx.state;
+          setState(ctx, 'OPEN');
+          ctx.log('Breaker OPEN: 5 failures in the window', 'bad');
+          st.coolBar.setAttribute('width', 0);
+          return ctx.fade(st.cool, 1, 300)
+            .then(function () { return failFast(ctx); })
+            .then(function () { setResponse(ctx, 'fallback (cached), 1 ms', 'warn'); ctx.log('Call rejected by breaker → fallback', 'warn'); return failFast(ctx); })
+            .then(function () { ctx.log('Call rejected by breaker → fallback', 'warn'); return ctx.animate(st.coolBar, { width: 70 }, 700); });
+        },
+      },
+      {
+        title: 'Cooldown ends: HALF-OPEN sends one probe',
+        say: 'After the cooldown the breaker goes <b>half-open</b> and lets one probe call through. Other calls still get the fallback. B is still sick, so the probe fails and the breaker opens again with a new cooldown.',
+        run: function (ctx) {
+          var st = ctx.state;
+          return ctx.animate(st.coolBar, { width: 146 }, 600).then(function () {
+            setState(ctx, 'HALF');
+            ctx.log('Cooldown over → HALF-OPEN, one probe allowed', 'warn');
+            return fullCall(ctx, false, 300);
+          }).then(function () {
+            setState(ctx, 'OPEN');
+            st.coolBar.setAttribute('width', 0);
+            ctx.log('Probe failed → OPEN again, cooldown restarts', 'bad');
+            return ctx.animate(st.coolBar, { width: 146 }, 900);
+          });
+        },
+      },
+      {
+        title: 'B recovers: the probe succeeds and the breaker closes',
+        say: 'B is healthy again. The next probe succeeds, so the breaker <b>closes</b> and resets the failure count. Normal traffic flows again, with no manual action.',
+        run: function (ctx) {
+          var st = ctx.state;
+          setB(ctx, true);
+          ctx.log('B recovers', 'ok');
+          setState(ctx, 'HALF');
+          ctx.log('Cooldown over → HALF-OPEN', 'warn');
+          return fullCall(ctx, true, 320).then(function () {
+            setState(ctx, 'CLOSED');
+            setFails(ctx, 0);
+            setResponse(ctx, '200 OK', 'ok');
+            ctx.log('Probe OK → CLOSED, failures reset to 0', 'ok');
+            return ctx.fade(st.cool, 0, 300);
+          });
+        },
+      },
+      {
+        title: 'Retries with a fixed 1 s delay',
+        say: 'Now 100 clients all fail at t = 0, because B is down for 1 s. Each one retries every 1 s. All 100 come back at the same moment, far above what B can serve (the dashed line). Most fail again. This is a <b>thundering herd</b>.',
+        run: function (ctx) {
+          return drawRow(ctx, ROWS[0]).then(function (r) {
+            ctx.log('Fixed delay: ' + r.peak + ' retries land in one 100 ms slot', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Exponential backoff alone',
+        say: 'Waiting 0.5 s, 1 s, 2 s, 4 s means fewer retries in total. But every client uses the same delays, so they still arrive together in spikes. The backlog drains slowly.',
+        run: function (ctx) {
+          return drawRow(ctx, ROWS[1]).then(function (r) {
+            ctx.log('Exponential: retry peak still ' + r.peak + ', only ' + r.ok + ' done in 6 s', 'warn');
+          });
+        },
+      },
+      {
+        title: 'Add jitter: spread the retries',
+        say: 'With full jitter each client sleeps <code>random(0, min(cap, base · 2^n))</code>. The retries spread across time, stay near B\'s capacity, and almost all clients finish quickly. Always add jitter to backoff.',
+        run: function (ctx) {
+          return drawRow(ctx, ROWS[2]).then(function (r) {
+            ctx.log('Jitter: retry peak ' + r.peak + ', ' + r.ok + ' of 100 done in 6 s', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Shared pool: one slow bank takes every socket',
+        say: 'Service A keeps 10 sockets for all banks. Bank A hangs, and each call to it holds a socket for the full 2 s timeout. Ten Bank A calls take all 10. Now a <b>Bank B</b> payment arrives and finds no free socket, although Bank B is perfectly healthy.',
+        run: function (ctx) {
+          var st = ctx.state, chain = Promise.resolve();
+          st.pool.shared.forEach(function (r) {
+            chain = chain.then(function () { return arrive(ctx, r); }).then(function () { return fillSlot(ctx, r, 'stuck', 'A'); });
+          });
+          return chain.then(function () {
+            ctx.log('10 / 10 sockets held by stuck Bank A calls', 'warn');
+            return ctx.packet([[PX - 20, 560], [PX + 10 * PS + 20, 560], [PX + 10 * PS + 20, 606]], { ms: 700, cls: 'bad', label: 'B' });
+          }).then(function () {
+            st.poolRes.shared.textContent = 'Bank B: no socket ✗';
+            st.poolRes.shared.setAttribute('class', 'mono small fill-bad');
+            ctx.log('Bank B call fails: pool exhausted. One bad bank took down all banks.', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Bulkheads: each bank gets its own compartment',
+        say: 'Now Bank A may use at most 5 sockets. Its 5 slots fill with stuck calls, and further Bank A calls are rejected in about 1 ms (fallback: try another PSP). Bank B has its own 5 slots, so its payment goes through. Like watertight compartments in a ship.',
+        run: function (ctx) {
+          var st = ctx.state, chain = Promise.resolve();
+          st.pool.bulk.slice(0, 5).forEach(function (r) {
+            chain = chain.then(function () { return arrive(ctx, r); }).then(function () { return fillSlot(ctx, r, 'stuck', 'A'); });
+          });
+          return chain.then(function () {
+            ctx.log('Bank A pool full: 5 / 5 stuck', 'warn');
+            return ctx.packet([[PX - 20, 636], [PX + 2 * PS, 636], [PX + 2 * PS, 646]], { ms: 500, cls: 'bad', label: 'A' });
+          }).then(function () {
+            ctx.log('6th Bank A call rejected at once → fallback to another PSP', 'warn');
+            return arrive(ctx, st.pool.bulk[5], 'ok');
+          }).then(function () {
+            return fillSlot(ctx, st.pool.bulk[5], 'ok', 'B');
+          }).then(function () {
+            st.poolRes.bulk.textContent = 'Bank B: 200 OK ✓';
+            st.poolRes.bulk.setAttribute('class', 'mono small fill-ok');
+            ctx.log('Bank B call gets its own socket → 200 OK', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // Extra control: send one request through the breaker in its current state.
+  var controls = document.getElementById('controls');
+  var btn = Kit.html('button', { class: 'btn', type: 'button', text: 'Send a request' });
+  controls.insertBefore(btn, controls.querySelector('.grow'));
+  btn.addEventListener('click', function () {
+    var ctx = lab.ctx, st = ctx.state;
+    if (!st.sm) return;
+    if (st.mode === 'OPEN') {
+      failFast(ctx).then(function () { ctx.log('You: rejected by OPEN breaker → fallback', 'warn'); });
+    } else if (st.mode === 'HALF') {
+      failFast(ctx).then(function () { ctx.log('You: probe slot in use → fallback', 'warn'); });
+    } else {
+      var ok = st.bOk;
+      fullCall(ctx, ok, 300).then(function () {
+        ctx.log(ok ? 'You: CLOSED, B healthy → 200 OK' : 'You: CLOSED, B down → timeout, counts as a failure', ok ? 'ok' : 'bad');
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>

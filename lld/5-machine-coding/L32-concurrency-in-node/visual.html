@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L32 Concurrency in Node</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .life { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .msg { stroke-width: 1.8; fill: none; }
+  .stage .msg.a { stroke: var(--accent); }
+  .stage .msg.b { stroke: var(--signal); }
+  .stage .msg.bad { stroke: var(--bad); }
+  .stage .msg.ret { stroke-dasharray: 5 4; }
+  .stage .note { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+  .stage .note.warn { stroke: var(--warn); }
+  .stage .note.bad { stroke: var(--bad); }
+  .stage .note.ok { stroke: var(--ok); }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 0 12px 12px; font-size: 13px; color: var(--muted); }
+  .try .btn.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L32 · Machine coding</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Concurrency in Node: one seat, two users</h1>
+    <p class="lede">Node runs one callback at a time, but every <code>await</code> lets another request run. Watch "check, await, act" sell a seat twice, then fix it: no gap, a mutex, a row lock, a version check, a Redis hold, and an idempotency key.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Sequence diagram of two users booking the same seat"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <strong>Try it:</strong>
+        <span>Node instances for the mutex step</span>
+        <button class="btn" type="button" data-n="1">1 process</button>
+        <button class="btn" type="button" data-n="2">2 pods</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Alice's request [A]</span>
+        <span><i style="background: var(--signal)"></i>Bob's request [B]</span>
+        <span><i style="background: var(--bad)"></i>Wrong result</span>
+        <span><i style="background: var(--ok)"></i>Correct result</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The bug and the fixes (highlighted with the step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">const seat = await db.find(id)       // gap: others run</span><span class="ln" data-l="2">if (seat.owner) throw new SeatTaken()</span><span class="ln" data-l="3">await db.save({ ...seat, owner })    // last write wins</span><span class="ln" data-l="4">if (seat.owner) throw…; seat.owner = u // fix 0: same tick</span><span class="ln" data-l="5">await lock('seat:'+id).runExclusive(fn) // fix 1</span><span class="ln" data-l="6">SELECT … FROM seats WHERE id=$1 FOR UPDATE // fix 2</span><span class="ln" data-l="7">UPDATE seats SET owner=$1, version=version+1</span><span class="ln" data-l="8">  WHERE id=$2 AND version=$3  -- 0 rows = lost // fix 3</span><span class="ln" data-l="9">SET hold:A7 alice NX PX 600000          // fix 4</span><span class="ln" data-l="10">INSERT INTO idem(key) … -- UNIQUE(key)  // fix 5</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Check-then-act across an <code>await</code> is a race, even in single-threaded Node. In one process I remove the gap or use a per-seat mutex. With many instances I make the database decide: a conditional update with a version, or <code>SELECT … FOR UPDATE</code> for a short transaction. The 10-minute hold while paying is Redis <code>SET NX PX</code>, and a unique constraint on (show, seat) is the last safety net. Payment retries carry an idempotency key."</p>
+    </div>
+    <div class="note wide">
+      <h3>Which fix when</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Fix</th><th>Across servers?</th><th>Cost</th><th>Failure mode</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td>No gap (sync hold)</td><td>No</td><td>Free</td><td>Breaks when state moves to a DB</td><td>In-memory machine-coding solution</td></tr>
+            <tr><td>Per-key mutex</td><td>No, one process</td><td>Tiny</td><td>Second pod has its own locks</td><td>Async work inside one process</td></tr>
+            <tr><td><code>SELECT … FOR UPDATE</code></td><td>Yes</td><td>Row lock for the transaction</td><td>Lock waits, deadlocks</td><td>Short hot-row updates (wallet debit)</td></tr>
+            <tr><td>Version / conditional update</td><td>Yes</td><td>No locks; loser retries</td><td>Retry storms at high contention</td><td>The final booking write</td></tr>
+            <tr><td>Redis <code>SET NX PX</code></td><td>Yes</td><td>1 round trip</td><td>TTL ends in a long pause; failover</td><td>Temporary holds while paying</td></tr>
+            <tr><td>Unique constraint / idempotency key</td><td>Yes</td><td>Free</td><td>Insert error → map to 409 / stored result</td><td>Always, as the last net; retries</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Node is single-threaded. How can there be a race?</summary><div>Each <code>await</code> ends the current piece of work. Another request runs before yours resumes, so your earlier read can be stale.</div></details>
+      <details class="qa"><summary>Why does the mutex fail with 2 pods?</summary><div>Each process has its own <code>Map</code> of mutexes. Both pods grant the lock. Only a shared store (DB, Redis) can serialise across processes.</div></details>
+      <details class="qa"><summary>How do you release a Redis hold safely?</summary><div>Store a token as the value and delete with a Lua script only if the value still matches, so you never delete someone else's newer hold.</div></details>
+      <details class="qa"><summary>Optimistic or pessimistic for a hot concert launch?</summary><div>Optimistic causes retry storms there. Use short holds plus a queue or waiting room in front, then a conditional final write.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li><a href="../../problems/13-bookmyshow/README.md">13 BookMyShow</a> (seat holds)</li>
+        <li><a href="../../problems/19-payment-wallet/README.md">19 Payment wallet</a> (debit races)</li>
+        <li><a href="../../problems/21-meeting-room-scheduler/README.md">21 Meeting room scheduler</a></li>
+      </ul>
+    </div>
+  </section>
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var PODS = 1;
+  var X = { A: 50, B: 150, S: 360, D: 600 };
+  var TOP = 80;
+
+  function hl(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    [['a', 'var(--accent)'], ['b', 'var(--signal)'], ['bad', 'var(--bad)']].forEach(function (m) {
+      var mk = ctx.el('marker', { id: 'sl-' + m[0], viewBox: '0 0 12 12', refX: 11, refY: 6, markerWidth: 10, markerHeight: 10, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+      ctx.el('path', { d: 'M1,1 L11,6 L1,11 Z', style: 'fill: ' + m[1] }, mk);
+    });
+  }
+
+  function header(ctx, x, w, label, sub) {
+    ctx.el('rect', { x: x - w / 2, y: 10, width: w, height: 40, rx: 6, class: 'box' });
+    var t = ctx.el('text', { x: x, y: sub ? 27 : 35, 'text-anchor': 'middle', class: 'b', text: label });
+    var s = sub ? ctx.el('text', { x: x, y: 43, 'text-anchor': 'middle', class: 'mono small muted', text: sub }) : null;
+    ctx.el('line', { x1: x, y1: 50, x2: x, y2: 462, class: 'life' });
+    return { t: t, s: s };
+  }
+
+  function scene(ctx, store, server, serverSub) {
+    if (ctx.state.seq) ctx.state.seq.remove();
+    ctx.state.seq = ctx.group();
+    ctx.state.y = TOP;
+    ctx.state.store.t.textContent = store;
+    ctx.state.server.t.textContent = server || 'Node server';
+    ctx.state.server.s.textContent = serverSub || 'one process';
+    seat(ctx, 'free', '', '');
+  }
+
+  function seat(ctx, owner, sub, c) {
+    ctx.state.seatOwner.textContent = owner;
+    ctx.state.seatOwner.setAttribute('class', 'b ' + (c || ''));
+    ctx.state.seatSub.textContent = sub;
+    ctx.state.seatSub.setAttribute('class', 'mono small ' + (c || ''));
+    ctx.state.seatBox.setAttribute('class', 'box ' + (c === 'fill-bad' ? 'bad' : c === 'fill-ok' ? 'ok' : ''));
+    ctx.flash(ctx.state.seatBox);
+  }
+
+  function msg(ctx, f, t, text, who, o) {
+    o = o || {};
+    var y = ctx.state.y; ctx.state.y += 30;
+    var g = ctx.state.seq;
+    var x1 = X[f], x2 = X[t], dir = x2 > x1 ? 1 : -1;
+    var c = 'msg ' + who + (o.ret ? ' ret' : '') + (o.bad ? ' bad' : '');
+    var line = ctx.el('line', { x1: x1, y1: y, x2: x2 - dir * 2, y2: y, class: c, 'marker-end': 'url(#sl-' + (o.bad ? 'bad' : who) + ')', opacity: 0 }, g);
+    ctx.el('text', { x: (x1 + x2) / 2, y: y - 6, 'text-anchor': 'middle', class: 'mono small ' + (o.bad ? 'fill-bad' : o.good ? 'fill-ok' : ''), text: text }, g);
+    return ctx.packet([[x1, y], [x2, y]], { ms: o.ms || 450, cls: o.bad ? 'bad' : who === 'a' ? 'accent' : '' }).then(function () {
+      line.setAttribute('opacity', 1);
+      if (o.log) ctx.log(o.log, o.kind || (o.bad ? 'bad' : 'info'));
+    });
+  }
+
+  function note(ctx, at, text, c, sameRow) {
+    var y = ctx.state.y - 6; if (!sameRow) ctx.state.y += 30;
+    var g = ctx.group({ opacity: 0 }, ctx.state.seq);
+    var w = text.length * 6.7 + 18;
+    ctx.el('rect', { x: X[at] - w / 2, y: y - 10, width: w, height: 20, rx: 4, class: 'note ' + (c || '') }, g);
+    ctx.el('text', { x: X[at], y: y + 4, 'text-anchor': 'middle', class: 'mono small' + (c === 'bad' ? ' fill-bad' : c === 'warn' ? ' fill-warn' : c === 'ok' ? ' fill-ok' : ''), text: text }, g);
+    return ctx.fade(g, 1, 300);
+  }
+
+  function seqRun(ctx, items) {
+    return items.reduce(function (p, fn) { return p.then(fn); }, Promise.resolve());
+  }
+
+  function bothBook(ctx) {
+    return [
+      function () { return msg(ctx, 'A', 'S', 'POST /book A7', 'a', { log: 'Alice: POST /book A7' }); },
+      function () { return msg(ctx, 'B', 'S', 'POST /book A7', 'b', { log: 'Bob: POST /book A7 (same moment)' }); },
+    ];
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Two users, one seat',
+      say: 'Alice and Bob tap "Book A7" in the same millisecond. Time flows down. [A] lines are Alice\'s handler, [B] lines are Bob\'s. Both run in the same Node process.',
+    },
+    setup: function (ctx) {
+      hl([]);
+      defs(ctx);
+      header(ctx, X.A, 80, 'Alice');
+      header(ctx, X.B, 80, 'Bob');
+      ctx.state.server = header(ctx, X.S, 150, 'Node server', 'one process');
+      ctx.state.store = header(ctx, X.D, 120, 'Postgres');
+      ctx.state.seatBox = ctx.el('rect', { x: 670, y: 6, width: 84, height: 60, rx: 6, class: 'box' });
+      ctx.el('text', { x: 712, y: 22, 'text-anchor': 'middle', class: 'mono small muted', text: 'seat A7' });
+      ctx.state.seatOwner = ctx.el('text', { x: 712, y: 41, 'text-anchor': 'middle', class: 'b', text: 'free' });
+      ctx.state.seatSub = ctx.el('text', { x: 712, y: 57, 'text-anchor': 'middle', class: 'mono small', text: '' });
+      ctx.state.seq = ctx.group();
+      ctx.state.y = TOP;
+    },
+    steps: [
+      {
+        title: 'Check: both handlers read "free"',
+        say: 'Alice\'s handler reads the seat and hits <code>await</code>. The event loop runs Bob\'s handler there, and it also reads "free". Every <code>await</code> is a point where other requests run.',
+        run: function (ctx) {
+          hl([1, 2]);
+          scene(ctx, 'Postgres');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return msg(ctx, 'S', 'D', '[A] SELECT owner FROM seats', 'a'); },
+            function () { return note(ctx, 'S', '[A] await → loop runs [B]', 'warn'); },
+            function () { return msg(ctx, 'S', 'D', '[B] SELECT owner FROM seats', 'b'); },
+            function () { return msg(ctx, 'D', 'S', '[A] owner = null (free)', 'a', { ret: true, log: '[A] sees free' }); },
+            function () { return msg(ctx, 'D', 'S', '[B] owner = null (free)', 'b', { ret: true, log: '[B] sees free too', kind: 'warn' }); },
+          ]));
+        },
+      },
+      {
+        title: 'Act: both write, the seat is sold twice',
+        say: 'Both handlers write the owner. The last write wins: Bob overwrites Alice. Both users get "200 booked". This is a lost update.',
+        run: function (ctx) {
+          hl([3]);
+          return seqRun(ctx, [
+            function () { return msg(ctx, 'S', 'D', '[A] UPDATE owner = alice', 'a').then(function () { seat(ctx, 'alice', '', ''); }); },
+            function () { return msg(ctx, 'S', 'D', '[B] UPDATE owner = bob', 'b', { bad: true }).then(function () { seat(ctx, 'bob', 'alice lost', 'fill-bad'); ctx.log('Bob overwrote Alice (lost update)', 'bad'); }); },
+            function () { return msg(ctx, 'S', 'A', '200 booked', 'a', { ret: true, bad: true }); },
+            function () { return msg(ctx, 'S', 'B', '200 booked', 'b', { ret: true, bad: true, log: 'Double booking: 2 tickets for A7' }); },
+          ]);
+        },
+      },
+      {
+        title: 'Fix 0: remove the gap (in-memory, one process)',
+        say: 'Keep seats in a Map and do check + hold in one synchronous block. Nothing can run in between. Then do the slow payment, then confirm or release.',
+        run: function (ctx) {
+          hl([4]);
+          scene(ctx, 'in-memory Map', 'Node server', 'one process');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return note(ctx, 'S', '[A] hold(): check + set, same tick', 'ok').then(function () { seat(ctx, 'held', 'alice', 'fill-ok'); }); },
+            function () { return note(ctx, 'S', '[B] hold(): sees HELD → throw'); },
+            function () { return msg(ctx, 'S', 'B', '409 seat taken', 'b', { ret: true, good: true, log: 'Bob gets 409 without any lock', kind: 'ok' }); },
+            function () { return note(ctx, 'S', '[A] await payment (seat already held)'); },
+            function () { return msg(ctx, 'S', 'A', '200 booked', 'a', { ret: true, good: true }).then(function () { seat(ctx, 'alice', 'booked', 'fill-ok'); }); },
+          ]));
+        },
+      },
+      {
+        title: 'Fix 1: a per-seat mutex',
+        say: 'Wrap find + save in <code>lock(\'seat:A7\')</code>. In one process Bob waits, then sees Alice. Switch Try it to "2 pods": each pod has its own lock map, and the double booking is back.',
+        run: function (ctx) {
+          hl([5]);
+          if (PODS === 1) {
+            scene(ctx, 'Postgres', 'Node server', 'one process');
+            return seqRun(ctx, bothBook(ctx).concat([
+              function () { return note(ctx, 'S', '[A] lock(A7) acquired'); },
+              function () { return note(ctx, 'S', '[B] lock(A7) busy → waits', 'warn'); },
+              function () { return msg(ctx, 'S', 'D', '[A] SELECT → free', 'a'); },
+              function () { return msg(ctx, 'S', 'D', '[A] UPDATE owner = alice', 'a').then(function () { seat(ctx, 'alice', '', 'fill-ok'); }); },
+              function () { return note(ctx, 'S', '[A] unlock → [B] runs'); },
+              function () { return msg(ctx, 'S', 'D', '[B] SELECT → owner = alice', 'b'); },
+              function () { return msg(ctx, 'S', 'A', '200 booked', 'a', { ret: true, good: true, log: 'Alice booked', kind: 'ok' }); },
+              function () { return msg(ctx, 'S', 'B', '409 seat taken', 'b', { ret: true, log: 'Bob gets 409 (correct, 1 process)', kind: 'ok' }); },
+            ]));
+          }
+          scene(ctx, 'Postgres', 'pod-1 | pod-2', 'two processes');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return note(ctx, 'S', '[A] pod-1: lock(A7) acquired'); },
+            function () { return note(ctx, 'S', '[B] pod-2: lock(A7) acquired too!', 'bad'); },
+            function () { return msg(ctx, 'S', 'D', '[A] SELECT → free', 'a'); },
+            function () { return msg(ctx, 'S', 'D', '[B] SELECT → free', 'b'); },
+            function () { return msg(ctx, 'S', 'D', '[A] UPDATE owner = alice', 'a').then(function () { seat(ctx, 'alice', '', ''); }); },
+            function () { return msg(ctx, 'S', 'D', '[B] UPDATE owner = bob', 'b', { bad: true }).then(function () { seat(ctx, 'bob', 'alice lost', 'fill-bad'); }); },
+            function () { return msg(ctx, 'S', 'B', '200 booked', 'b', { ret: true, bad: true, log: '2 pods = 2 lock maps → double booking again' }); },
+          ]));
+        },
+      },
+      {
+        title: 'Fix 2: SELECT … FOR UPDATE',
+        say: 'Inside a transaction, <code>FOR UPDATE</code> locks the row in the database. Bob\'s same query blocks until Alice commits. Works across any number of servers. Keep the transaction short.',
+        run: function (ctx) {
+          hl([6]);
+          scene(ctx, 'Postgres', 'Node × N', 'any number');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return msg(ctx, 'S', 'D', '[A] BEGIN; SELECT … FOR UPDATE', 'a'); },
+            function () { return msg(ctx, 'D', 'S', '[A] free (row now locked)', 'a', { ret: true }); },
+            function () { return msg(ctx, 'S', 'D', '[B] BEGIN; SELECT … FOR UPDATE', 'b'); },
+            function () { return note(ctx, 'D', '[B] blocks: row locked by [A]', 'warn'); },
+            function () { return msg(ctx, 'S', 'D', '[A] UPDATE owner = alice; COMMIT', 'a').then(function () { seat(ctx, 'alice', '', 'fill-ok'); }); },
+            function () { return msg(ctx, 'D', 'S', '[B] unblocked: owner = alice', 'b', { ret: true }); },
+            function () { return msg(ctx, 'S', 'A', '200 booked', 'a', { ret: true, good: true }); },
+            function () { return msg(ctx, 'S', 'B', '409 seat taken (ROLLBACK)', 'b', { ret: true, log: 'Row lock serialised the two transactions', kind: 'ok' }); },
+          ]));
+        },
+      },
+      {
+        title: 'Fix 3: optimistic version check',
+        say: 'No lock. Both read <code>version = 3</code>. Each writes <code>WHERE version = 3</code>. The DB applies only the first; the second updates 0 rows and Bob gets 409 (or retries).',
+        run: function (ctx) {
+          hl([7, 8]);
+          scene(ctx, 'Postgres', 'Node × N', 'any number');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return msg(ctx, 'S', 'D', '[A] SELECT owner, version', 'a'); },
+            function () { return msg(ctx, 'S', 'D', '[B] SELECT owner, version', 'b'); },
+            function () { return msg(ctx, 'D', 'S', '[A] free, v3', 'a', { ret: true }); },
+            function () { return msg(ctx, 'D', 'S', '[B] free, v3', 'b', { ret: true }); },
+            function () { return msg(ctx, 'S', 'D', '[A] UPDATE … WHERE version = 3', 'a'); },
+            function () { return msg(ctx, 'D', 'S', '[A] 1 row updated (now v4)', 'a', { ret: true, good: true }).then(function () { seat(ctx, 'alice', 'v4', 'fill-ok'); }); },
+            function () { return msg(ctx, 'S', 'D', '[B] UPDATE … WHERE version = 3', 'b'); },
+            function () { return msg(ctx, 'D', 'S', '[B] 0 rows updated', 'b', { ret: true, log: '[B] lost the race: 0 rows → 409', kind: 'ok' }); },
+            function () { return msg(ctx, 'S', 'B', '409 seat taken', 'b', { ret: true }); },
+          ]));
+        },
+      },
+      {
+        title: 'Fix 4: a Redis hold with SET NX PX',
+        say: 'For "hold the seat 10 minutes while I pay", use <code>SET hold:A7 alice NX PX 600000</code>. NX lets exactly one user win; PX sets a TTL so the hold cannot get stuck.',
+        run: function (ctx) {
+          hl([9]);
+          scene(ctx, 'Redis', 'Node × N', 'any number');
+          return seqRun(ctx, bothBook(ctx).concat([
+            function () { return msg(ctx, 'S', 'D', '[A] SET hold:A7 alice NX PX 600000', 'a'); },
+            function () { return msg(ctx, 'D', 'S', '[A] OK', 'a', { ret: true, good: true }).then(function () { seat(ctx, 'held', 'alice, 10 min', 'fill-ok'); }); },
+            function () { return msg(ctx, 'S', 'D', '[B] SET hold:A7 bob NX PX 600000', 'b'); },
+            function () { return msg(ctx, 'D', 'S', '[B] nil (key exists)', 'b', { ret: true }); },
+            function () { return msg(ctx, 'S', 'A', '200 held, pay in 10 min', 'a', { ret: true, good: true, log: 'Alice holds A7 for 10 minutes', kind: 'ok' }); },
+            function () { return msg(ctx, 'S', 'B', '409 held by someone', 'b', { ret: true, log: 'Bob told: seat is held', kind: 'info' }); },
+          ]));
+        },
+      },
+      {
+        title: 'The TTL frees an abandoned hold',
+        say: 'Alice closes the tab and never pays. After 10 minutes Redis deletes the key. Bob retries and gets the hold. The final booking is still a conditional write in the DB.',
+        run: function (ctx) {
+          hl([9]);
+          return seqRun(ctx, [
+            function () { return note(ctx, 'A', 'leaves', '', true); },
+            function () { return note(ctx, 'D', '600 s later: TTL expires', 'warn').then(function () { seat(ctx, 'free', 'hold expired', ''); ctx.log('hold:A7 expired (TTL)', 'warn'); }); },
+            function () { return msg(ctx, 'B', 'S', 'POST /book A7 (retry)', 'b'); },
+            function () { return msg(ctx, 'S', 'D', '[B] SET hold:A7 bob NX PX 600000', 'b'); },
+            function () { return msg(ctx, 'D', 'S', '[B] OK', 'b', { ret: true, good: true }).then(function () { seat(ctx, 'held', 'bob, 10 min', 'fill-ok'); }); },
+            function () { return msg(ctx, 'S', 'B', '200 held, pay in 10 min', 'b', { ret: true, good: true, log: 'Bob now holds A7', kind: 'ok' }); },
+          ]);
+        },
+      },
+      {
+        title: 'Fix 5: a retry is concurrency too',
+        say: 'Alice pays, her app times out and retries with the same idempotency key. The UNIQUE insert fails for the retry, so the server returns the stored result instead of charging twice.',
+        run: function (ctx) {
+          hl([10]);
+          scene(ctx, 'Postgres', 'Payment API', 'Node × N');
+          return seqRun(ctx, [
+            function () { return msg(ctx, 'A', 'S', 'POST /pay key=k42', 'a', { log: 'Alice pays with key k42' }); },
+            function () { return msg(ctx, 'S', 'D', '[A] INSERT idem(k42) → ok', 'a'); },
+            function () { return note(ctx, 'S', '[A] charge gateway → txn_1'); },
+            function () { return msg(ctx, 'S', 'A', '(response lost: timeout)', 'a', { ret: true, bad: true, log: 'client never saw the reply', kind: 'warn' }); },
+            function () { return msg(ctx, 'A', 'S', 'POST /pay key=k42 (retry)', 'a'); },
+            function () { return msg(ctx, 'S', 'D', '[A] INSERT idem(k42)', 'a'); },
+            function () { return msg(ctx, 'D', 'S', 'unique violation: k42 exists', 'a', { ret: true }); },
+            function () { return msg(ctx, 'S', 'A', '200 txn_1 (stored result)', 'a', { ret: true, good: true, log: 'Same key → same answer, charged once', kind: 'ok' }).then(function () { seat(ctx, 'paid', 'once: txn_1', 'fill-ok'); }); },
+          ]);
+        },
+      },
+    ],
+  });
+
+  function syncTry() {
+    Array.prototype.forEach.call(document.querySelectorAll('#try [data-n]'), function (b) { b.classList.toggle('sel', +b.dataset.n === PODS); });
+  }
+  document.getElementById('try').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b || !b.dataset.n) return;
+    PODS = +b.dataset.n;
+    syncTry();
+    lab.goTo(4);
+  });
+  syncTry();
+})();
+</script>
+</body>
+</html>

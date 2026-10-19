@@ -92,5 +92,5 @@ Why inject the dice? `Math.random` inside `Game` makes every test random. With a
 
 ## Concepts used
 
-- [Builder](../../concepts/patterns/p03-builder.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Builder](../../2-creational/L11-builder/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

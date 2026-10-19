@@ -93,5 +93,5 @@ Do all checks first and all changes last in `purchase`. Then a failure in the mi
 
 ## Concepts used
 
-- [State pattern](../../concepts/patterns/p12-state.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [SOLID](../../concepts/02-solid.md) · [Machine-coding framework](../../concepts/04-lld-interview-framework.md)
-- Visual: [State pattern: vending machine](../../../visuals/v25-state-machine.html)
+- [State pattern](../../4-behavioral/L22-state/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md) · [Machine-coding framework](../../5-machine-coding/L30-machine-coding-framework/README.md)
+- Visual: [State pattern: vending machine](../../4-behavioral/L22-state/visual.html)

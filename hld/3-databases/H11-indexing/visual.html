@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H11 Database Indexes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; align-items: end; }
+  .try label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .try-out { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font: 13px/1.55 var(--font-mono); }
+  .try-out b { color: var(--accent); }
+  .try-out .badplan { color: var(--bad); }
+  .try-out .goodplan { color: var(--ok); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H11 · Databases</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Indexes: B+tree, composite, covering</h1>
+    <p class="lede">Without an index the database reads every page. A B+tree is wide and shallow, so a lookup is three or four page reads. Column order decides which queries it can serve, and every index makes writes slower.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A B+tree index above a table's heap pages, with a page-read counter"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Page read</span>
+        <span><i style="background: var(--signal)"></i>Lookup path</span>
+        <span><i style="background: var(--bad)"></i>Wasted read / write tax</span>
+        <span><i style="background: var(--ok)"></i>Answered</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>Try it: which plan does the database pick?</h3>
+      <div class="try">
+        <label>Index on <code>payments</code>
+          <select id="try-index">
+            <option value="none">none</option>
+            <option value="m">(merchant_id)</option>
+            <option value="mt" selected>(merchant_id, created_at)</option>
+            <option value="mtc">(merchant_id, created_at) INCLUDE (amount)</option>
+            <option value="tm">(created_at, merchant_id)</option>
+            <option value="s">(status)  -- 2 values</option>
+          </select>
+        </label>
+        <label>Query
+          <select id="try-query">
+            <option value="q1">SELECT * WHERE merchant_id = 42</option>
+            <option value="q2" selected>SELECT amount WHERE merchant_id = 42 ORDER BY created_at DESC LIMIT 20</option>
+            <option value="q3">SELECT * WHERE created_at &gt; now() - 1 hour</option>
+            <option value="q4">SELECT * WHERE merchant_id = 42 AND created_at &gt; now() - 1 day</option>
+            <option value="q5">SELECT * WHERE status = 'FAILED'</option>
+          </select>
+        </label>
+      </div>
+      <div class="try-out" id="try-out" aria-live="polite"></div>
+      <p style="margin-top:8px;color:var(--muted);font-size:13px">Table: 10M payments, 200k pages, 5,000 merchants (~2,000 rows each), 50% FAILED. Page reads are rough estimates, the way a planner would think about them.</p>
+    </div>
+
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"An index is a B+tree side-structure. Each node is an 8 KB page with hundreds of keys, so 100 million rows is three or four levels and the top levels sit in memory. For <code>merchant_id = ? ORDER BY created_at DESC LIMIT 20</code> I'd index <code>(merchant_id, created_at)</code>: equality first, then the sort column, so it seeks once and reads 20 entries in order. On a hot path I'd <code>INCLUDE</code> the selected columns for an index-only scan. I don't over-index, because every index taxes every write."</p>
+    </div>
+    <div class="note">
+      <h3>The key SQL</h3>
+<pre class="code">-- equality first, then sort/range column
+CREATE INDEX idx_pay_m_t
+  ON payments (merchant_id, created_at DESC)
+  INCLUDE (amount, status);   -- covering
+
+-- partial: small index for a rare value
+CREATE INDEX idx_pending
+  ON orders (created_at) WHERE status = 'PENDING';
+
+-- expression: makes lower(email) seekable
+CREATE INDEX idx_email_l ON users (lower(email));
+
+EXPLAIN ANALYZE SELECT ...;   -- always check</pre>
+    </div>
+    <div class="note wide">
+      <h3>Index types compared</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Type</th><th>Serves</th><th>Cannot do</th><th>Typical use</th></tr></thead>
+          <tbody>
+            <tr><td>B+tree (default)</td><td><code>=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>BETWEEN</code>, <code>ORDER BY</code>, <code>LIKE 'ab%'</code></td><td>Leading <code>%</code>, full text</td><td>Almost every OLTP index</td></tr>
+            <tr><td>Hash</td><td><code>=</code> in O(1)</td><td>Ranges, sorting</td><td>Exact-match keys (rarely beats B-tree in Postgres)</td></tr>
+            <tr><td>Composite B+tree</td><td>Leftmost prefixes: <code>a</code>, <code>a+b</code>, <code>a+b+c</code></td><td><code>b</code> or <code>c</code> alone</td><td>"Latest N for a user/merchant"</td></tr>
+            <tr><td>Covering (<code>INCLUDE</code>)</td><td>Index-only scan, no heap hops</td><td>-- (costs size and writes)</td><td>Hot read paths, dashboards</td></tr>
+            <tr><td>GIN (inverted)</td><td>Full text, <code>jsonb</code>, arrays</td><td>Cheap writes</td><td>Tags, search inside Postgres</td></tr>
+            <tr><td>BRIN</td><td>Ranges on physically ordered data</td><td>Random data order</td><td>Huge append-only time series</td></tr>
+            <tr><td>LSM-tree</td><td>Very high write rates</td><td>Cheapest point reads</td><td>Cassandra, RocksDB, ScyllaDB</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Binary trees are also O(log n). Why do databases use B+trees?</summary><div>Disks read whole pages. A binary tree reads one key per node (~23 reads for 10M rows). A B+tree fits hundreds of keys per page, so 3 levels hold 100M+ keys. Linked leaves make range scans cheap.</div></details>
+      <details class="qa"><summary>Index on (a, b, c). Which queries can seek: <code>a=1</code>, <code>b=2</code>, <code>a=1 AND b=2 ORDER BY c</code>?</summary><div><code>a=1</code> yes. <code>b=2</code> no, the leading column is missing. <code>a=1 AND b=2 ORDER BY c</code> yes, with no sort step.</div></details>
+      <details class="qa"><summary>Does Postgres have a clustered primary key like InnoDB?</summary><div>No. Postgres tables are heaps. Every index, including the PK, is secondary and points to the row by ctid (page, slot). InnoDB stores rows inside the PK B+tree and its secondary indexes store the PK value.</div></details>
+      <details class="qa"><summary>An index on a boolean column is ignored. Why is that correct?</summary><div>Half the rows match. Fetching them one random page at a time costs more than one sequential pass over the table. Use a partial index if you query the rare value.</div></details>
+      <details class="qa"><summary>Why can <code>WHERE lower(email) = ?</code> be slow with an index on email?</summary><div>The index is sorted by <code>email</code>, not <code>lower(email)</code>. Create an expression index on <code>lower(email)</code>, or store emails lowercased.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- layout ----------
+  var LEAF_W = 78, LEAF_H = 40, LEAF_Y = 200;
+  function leafX(i) { return 30 + i * 85; }
+  function leafC(i) { return [leafX(i) + LEAF_W / 2, LEAF_Y + LEAF_H / 2]; }
+  var INT_Y = 118, INT_H = 30, INT_W = 112;
+  var ROOT_Y = 40, ROOT_W = 150, ROOT_X = 281.5;
+  var HEAP_Y = 320, HEAP_W = 44, HEAP_H = 46;
+  function heapX(i) { return 30 + i * 52; }
+  function heapC(i) { return [heapX(i) + HEAP_W / 2, HEAP_Y + HEAP_H / 2]; }
+  function intC(j) { return (leafC(2 * j)[0] + leafC(2 * j + 1)[0]) / 2; }
+  var PX = 640; // right panel
+
+  var LEAVES_INT = [['1 5 9', '12 17 21'], ['25 30 34', '40 46 52'], ['61 66 70', '75 83 90']];
+  var INT_KEYS = ['< 12 | ≥ 12', '< 40 | ≥ 40', '< 75 | ≥ 75'];
+
+  function box(ctx, x, y, w, h, cls, parent) {
+    return ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (cls || '') }, parent);
+  }
+
+  function drawTree(ctx) {
+    var s = ctx.state;
+    var g = ctx.group({ opacity: 0 });
+    s.treeG = g;
+    // wires
+    for (var j = 0; j < 3; j++) {
+      ctx.el('path', { d: 'M' + ROOT_X + ',' + (ROOT_Y + 30) + ' L' + intC(j) + ',' + INT_Y, class: 'wire' }, g);
+      for (var k = 0; k < 2; k++) {
+        var lc = leafC(2 * j + k);
+        ctx.el('path', { d: 'M' + intC(j) + ',' + (INT_Y + INT_H) + ' L' + lc[0] + ',' + LEAF_Y, class: 'wire' }, g);
+      }
+    }
+    // root
+    s.root = box(ctx, ROOT_X - ROOT_W / 2, ROOT_Y, ROOT_W, 30, '', g);
+    s.rootT = ctx.el('text', { x: ROOT_X, y: ROOT_Y + 19, 'text-anchor': 'middle', class: 'mono', text: '< 25 | < 61 | ≥ 61' }, g);
+    ctx.el('text', { x: ROOT_X + ROOT_W / 2 + 8, y: ROOT_Y + 19, class: 'mono small muted', text: 'root page' }, g);
+    // internal
+    s.ints = []; s.intT = [];
+    for (j = 0; j < 3; j++) {
+      s.ints.push(box(ctx, intC(j) - INT_W / 2, INT_Y, INT_W, INT_H, '', g));
+      s.intT.push(ctx.el('text', { x: intC(j), y: INT_Y + 19, 'text-anchor': 'middle', class: 'mono small', text: INT_KEYS[j] }, g));
+    }
+    // leaves + leaf chain
+    s.leaves = [];
+    for (var i = 0; i < 6; i++) {
+      var r = box(ctx, leafX(i), LEAF_Y, LEAF_W, LEAF_H, '', g);
+      var t1 = ctx.el('text', { x: leafX(i) + LEAF_W / 2, y: LEAF_Y + 17, 'text-anchor': 'middle', class: 'mono small', text: LEAVES_INT[Math.floor(i / 2)][i % 2] }, g);
+      var t2 = ctx.el('text', { x: leafX(i) + LEAF_W / 2, y: LEAF_Y + 32, 'text-anchor': 'middle', class: 'mono small muted', text: '→ row ptrs' }, g);
+      s.leaves.push({ r: r, t1: t1, t2: t2 });
+      if (i < 5) ctx.el('path', { d: 'M' + (leafX(i) + LEAF_W) + ',' + (LEAF_Y + 20) + ' L' + leafX(i + 1) + ',' + (LEAF_Y + 20), class: 'wire accent' }, g);
+    }
+    ctx.el('text', { x: 30, y: LEAF_Y + 58, class: 'mono small muted', text: 'leaf pages, linked in sorted order →' }, g);
+    return g;
+  }
+
+  function drawHeap(ctx) {
+    var s = ctx.state;
+    s.heap = [];
+    ctx.el('text', { x: 30, y: HEAP_Y - 10, class: 'title', text: 'Table heap pages (rows in insert order)' });
+    for (var i = 0; i < 10; i++) {
+      var r = box(ctx, heapX(i), HEAP_Y, HEAP_W, HEAP_H);
+      for (var l = 0; l < 4; l++) ctx.el('line', { x1: heapX(i) + 6, x2: heapX(i) + HEAP_W - 6, y1: HEAP_Y + 10 + l * 9, y2: HEAP_Y + 10 + l * 9, class: 'wire' });
+      ctx.el('text', { x: heapX(i) + HEAP_W / 2, y: HEAP_Y + HEAP_H + 14, 'text-anchor': 'middle', class: 'mono small muted', text: 'p' + i });
+      s.heap.push(r);
+    }
+    ctx.el('text', { x: 30, y: HEAP_Y + HEAP_H + 34, class: 'mono small muted', text: '(each box stands for 20,000 real pages: 10M rows total)' });
+  }
+
+  function drawPanel(ctx) {
+    var s = ctx.state;
+    ctx.el('rect', { x: PX - 10, y: 18, width: 124, height: 400, rx: 8, class: 'box' });
+    ctx.el('text', { x: PX, y: 40, class: 'mono small muted', text: 'QUERY' });
+    s.q1 = ctx.el('text', { x: PX, y: 58, class: 'mono small', text: '--' });
+    s.q2 = ctx.el('text', { x: PX, y: 73, class: 'mono small', text: '' });
+    ctx.el('text', { x: PX, y: 104, class: 'mono small muted', text: 'PAGE READS' });
+    s.readsT = ctx.el('text', { x: PX, y: 140, class: 'title', style: 'font-size: 34px', text: '0' });
+    ctx.el('text', { x: PX, y: 172, class: 'mono small muted', text: 'PLAN' });
+    s.p1 = ctx.el('text', { x: PX, y: 190, class: 'mono small', text: '--' });
+    s.p2 = ctx.el('text', { x: PX, y: 205, class: 'mono small muted', text: '' });
+    s.reads = 0;
+  }
+
+  function setQuery(ctx, a, b) { ctx.state.q1.textContent = a; ctx.state.q2.textContent = b || ''; }
+  function setPlan(ctx, a, b, cls) {
+    ctx.state.p1.textContent = a; ctx.state.p2.textContent = b || '';
+    ctx.state.p1.setAttribute('class', 'mono small ' + (cls || ''));
+  }
+  function setReads(ctx, n, cls) {
+    ctx.state.reads = n;
+    ctx.state.readsT.textContent = n >= 1000 ? (n / 1000).toFixed(0) + 'k' : String(n);
+    ctx.state.readsT.setAttribute('class', 'title ' + (cls || ''));
+    ctx.flash(ctx.state.readsT);
+  }
+  function read(ctx, node, cls) {
+    node.setAttribute('class', 'box ' + (cls || 'accent'));
+    ctx.flash(node);
+    setReads(ctx, ctx.state.reads + 1);
+  }
+  function clearMarks(ctx) {
+    var s = ctx.state;
+    [s.root].concat(s.ints || [], (s.leaves || []).map(function (l) { return l.r; }), s.heap).forEach(function (n) {
+      if (n) n.setAttribute('class', 'box');
+    });
+    setReads(ctx, 0);
+  }
+
+  function setLeaves(ctx, labels) {
+    labels.forEach(function (lb, i) {
+      ctx.state.leaves[i].t1.textContent = lb[0];
+      ctx.state.leaves[i].t2.textContent = lb[1];
+    });
+  }
+
+  // Walk root -> internal j -> leaf i with packets, counting reads.
+  function descend(ctx, j, i) {
+    var s = ctx.state;
+    read(ctx, s.root, 'signal');
+    return ctx.packet([[ROOT_X, ROOT_Y + 30], [intC(j), INT_Y]], { ms: 450 })
+      .then(function () { read(ctx, s.ints[j], 'signal'); return ctx.packet([[intC(j), INT_Y + INT_H], leafC(i)], { ms: 450 }); })
+      .then(function () { read(ctx, s.leaves[i].r, 'signal'); });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: '10M payments, one question',
+      say: 'Find one payment, then a merchant\'s latest 20. Watch the <b>page reads</b> counter on the right: that is what an index saves.',
+    },
+    setup: function (ctx) {
+      drawHeap(ctx);
+      drawPanel(ctx);
+    },
+    steps: [
+      {
+        title: 'No index: sequential scan',
+        say: 'To find <code>id = 46</code> the database reads every page of the table, start to end. 10 boxes here, 200,000 pages in real life.',
+        run: function (ctx) {
+          setQuery(ctx, 'WHERE id = 46', '');
+          setPlan(ctx, 'Seq Scan', 'reads all pages', 'fill-bad');
+          var chain = Promise.resolve();
+          ctx.state.heap.forEach(function (p, i) {
+            chain = chain.then(function () { read(ctx, p, i === 7 ? 'ok' : 'bad'); return ctx.wait(140); });
+          });
+          return chain.then(function () {
+            setReads(ctx, 200000, 'fill-bad');
+            ctx.log('Seq Scan: 200,000 pages (~1.6 GB) to find 1 row', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Build a B+tree index on the key',
+        say: 'A separate sorted structure. Each node is one 8 KB page holding hundreds of keys, so the tree is wide and only 3 levels deep. Leaves hold key + row pointer and are linked in order.',
+        run: function (ctx) {
+          clearMarks(ctx);
+          setQuery(ctx, 'CREATE INDEX', 'ON payments(id)');
+          setPlan(ctx, '--', '');
+          var g = drawTree(ctx);
+          ctx.log('Fan-out ~500 → 3 levels hold 125M keys', 'info');
+          return ctx.fade(g, 1, 600);
+        },
+      },
+      {
+        title: 'Point lookup: 3 hops down the tree',
+        say: 'Root: 25 ≤ 46 &lt; 61, go to the middle child. Internal page: 46 ≥ 40, go right. The leaf has 46 and a pointer to the row. Only 3 index pages, and the top two are almost always in RAM.',
+        run: function (ctx) {
+          clearMarks(ctx);
+          setQuery(ctx, 'WHERE id = 46', '');
+          setPlan(ctx, 'Index Scan', 'seek 3 levels');
+          return descend(ctx, 1, 3).then(function () { ctx.log('root → internal → leaf: 3 page reads', 'info'); });
+        },
+      },
+      {
+        title: 'The heap hop: fetch the real row',
+        say: 'The leaf gives a pointer (Postgres: ctid = page + slot). One more read fetches the row from heap page p7. Total: 4 reads instead of 200,000.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([leafC(3), heapC(7)], { ms: 600 }).then(function () {
+            read(ctx, s.heap[7], 'ok');
+            setPlan(ctx, 'Index Scan', '4 reads total', 'fill-ok');
+            ctx.log('leaf → heap page p7: row found in 4 reads', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Range scan: walk the linked leaves',
+        say: '<code>BETWEEN 30 AND 66</code>: seek once to the leaf holding 30, then follow the leaf chain sideways. No need to climb back up the tree. This is why B+trees serve ranges and <code>ORDER BY</code>; hash indexes cannot.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          setQuery(ctx, 'WHERE id BETWEEN', '30 AND 66');
+          setPlan(ctx, 'Index Scan', 'seek + walk leaves');
+          return descend(ctx, 1, 2)
+            .then(function () { return ctx.packet([leafC(2), leafC(3)], { ms: 400 }); })
+            .then(function () { read(ctx, s.leaves[3].r, 'signal'); return ctx.packet([leafC(3), leafC(4)], { ms: 400 }); })
+            .then(function () { read(ctx, s.leaves[4].r, 'signal'); ctx.log('Seek to 30, then leaf → leaf → leaf until 66', 'info'); });
+        },
+      },
+      {
+        title: 'Composite index (merchant_id, created_at)',
+        say: 'Now the leaves are sorted by merchant first, then by time inside each merchant. Query: merchant 42, newest 20. Seek to the end of merchant 42\'s run and read backwards. Already in order, so no Sort step.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          setLeaves(ctx, [['m7', '09:00-18:00'], ['m19', '08:10-17:40'], ['m42', '00:00-09:30'], ['m42', '09:31-14:05'], ['m42', '14:06-23:59'], ['m88', '06:00-22:15']]);
+          setQuery(ctx, 'merchant_id=42', 'ORDER BY t DESC');
+          setPlan(ctx, 'Index Scan', 'no sort needed');
+          s.rootT.textContent = '< m42 | < m42@14h | ≥';
+          ['< m19 | ≥ m19', '< m42@09:31 | ≥', '< m88 | ≥ m88'].forEach(function (t, j) { s.intT[j].textContent = t; });
+          ctx.log('Index rebuilt as (merchant_id, created_at)', 'info');
+          return descend(ctx, 2, 4).then(function () {
+            var chain = Promise.resolve();
+            [7, 2, 9].forEach(function (p) {
+              chain = chain.then(function () { return ctx.packet([leafC(4), heapC(p)], { ms: 380 }); }).then(function () { read(ctx, s.heap[p], 'ok'); });
+            });
+            return chain.then(function () {
+              setReads(ctx, 23, 'fill-ok');
+              ctx.log('3 index pages + 20 heap hops = ~23 reads', 'ok');
+            });
+          });
+        },
+      },
+      {
+        title: 'Leftmost-prefix rule: missing first column',
+        say: '<code>WHERE created_at &gt; 10:00</code> without a merchant. The times are scattered inside every merchant\'s run, like finding every "Pappu" in a phone book sorted by last name. No seek is possible: read every leaf.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          setQuery(ctx, 'WHERE created_at', '> 10:00 (no merchant)');
+          setPlan(ctx, 'Full index scan', 'or Seq Scan', 'fill-bad');
+          var chain = Promise.resolve();
+          s.leaves.forEach(function (l, i) {
+            chain = chain.then(function () {
+              read(ctx, l.r, 'bad');
+              return i < 5 ? ctx.packet([leafC(i), leafC(i + 1)], { ms: 220, cls: 'bad' }) : null;
+            });
+          });
+          return chain.then(function () {
+            setReads(ctx, 33000, 'fill-bad');
+            ctx.log('No leading column → every leaf page read (~33k)', 'bad');
+            ctx.log('Fix: separate index on (created_at), or reorder if this is the main query', 'warn');
+          });
+        },
+      },
+      {
+        title: 'Covering index: skip the heap entirely',
+        say: '<code>INCLUDE (amount)</code> stores amount in the leaves. A query that only needs merchant, time and amount is answered from the index. The heap is never touched: an <b>Index Only Scan</b>.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          setLeaves(ctx, [['m7', '+amount'], ['m19', '+amount'], ['m42', '+amount'], ['m42', '+amount'], ['m42', '+amount'], ['m88', '+amount']]);
+          setQuery(ctx, 'SELECT amount', 'm=42 ORDER BY t');
+          setPlan(ctx, 'Index Only Scan', 'heap hops: 0');
+          s.heap.forEach(function (p) { p.setAttribute('class', 'box dim'); });
+          return descend(ctx, 2, 4).then(function () {
+            s.leaves[4].r.setAttribute('class', 'box ok');
+            setPlan(ctx, 'Index Only Scan', 'heap hops: 0', 'fill-ok');
+            setReads(ctx, 3, 'fill-ok');
+            ctx.log('Answered from the index: 3 reads (Postgres also checks the visibility map)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Low selectivity: the planner ignores the index',
+        say: 'An index on <code>status</code> (2 values). Half of all rows match, spread over every page. 5M random heap hops cost far more than 200k sequential reads, so the planner chooses Seq Scan. That is correct, not a bug.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          setQuery(ctx, "WHERE status=", "'FAILED' (50%)");
+          setPlan(ctx, 'Index Scan?', '5M random reads', 'fill-bad');
+          var chain = Promise.resolve();
+          [0, 3, 1, 8, 5, 2, 9, 6, 4, 7].forEach(function (p, n) {
+            chain = chain.then(function () {
+              var from = leafC(n % 6);
+              return ctx.packet([from, heapC(p)], { ms: 220, cls: 'bad' }).then(function () { read(ctx, s.heap[p], 'bad'); });
+            });
+          });
+          return chain.then(function () {
+            setReads(ctx, 200000);
+            setPlan(ctx, 'Seq Scan wins', '200k seq < 5M random', 'fill-ok');
+            ctx.log('Index would do ~5M random reads; Seq Scan does 200k sequential', 'bad');
+            ctx.log('Use a partial index for the rare value instead', 'warn');
+          });
+        },
+      },
+      {
+        title: 'The write tax: one INSERT, many trees',
+        say: 'Every INSERT writes the heap row and an entry in <b>every</b> index. Here the target leaf is full, so it splits into two pages and the parent gets a new key. 5 indexes means 6 page updates per row, plus WAL.',
+        run: function (ctx) {
+          var s = ctx.state;
+          clearMarks(ctx);
+          s.heap.forEach(function (p) { p.setAttribute('class', 'box'); });
+          setQuery(ctx, 'INSERT payment', 'm=42 t=23:59');
+          setPlan(ctx, 'heap + 5 indexes', '= 6 page writes', 'fill-bad');
+          var idxG = ctx.group();
+          var names = ['idx_m_t', 'idx_email', 'idx_status', 'idx_time', 'idx_idem'];
+          var boxes = names.map(function (n, i) {
+            var b = box(ctx, PX, 230 + i * 34, 104, 26, '', idxG);
+            ctx.el('text', { x: PX + 52, y: 247 + i * 34, 'text-anchor': 'middle', class: 'mono small', text: n }, idxG);
+            return b;
+          });
+          return ctx.packet([[PX - 40, 10], heapC(9)], { ms: 500, cls: 'bad' })
+            .then(function () { read(ctx, s.heap[9], 'bad'); })
+            .then(function () {
+              return Promise.all(boxes.map(function (b, i) {
+                return ctx.packet([heapC(9), [PX, 243 + i * 34]], { ms: 450 + i * 80, cls: 'bad' }).then(function () { read(ctx, b, 'bad'); });
+              }));
+            })
+            .then(function () {
+              s.leaves[4].r.setAttribute('class', 'box bad');
+              s.leaves[4].t1.textContent = 'm42 FULL';
+              s.leaves[4].t2.textContent = 'split →';
+              ctx.flash(s.leaves[4].r);
+              return ctx.wait(400);
+            })
+            .then(function () {
+              s.leaves[4].t1.textContent = 'm42 14:06-';
+              s.leaves[4].t2.textContent = '+ new page';
+              read(ctx, s.ints[2], 'bad');
+              ctx.log('1 row = 1 heap write + 5 index writes + WAL', 'bad');
+              ctx.log('Leaf split: new page, new key in the parent', 'warn');
+            });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it: a tiny planner (independent of the stage) ----------
+  var PAGES = 200000;
+  function plan(idx, q) {
+    // returns [planName, reads, why, good]
+    var seq = ['Seq Scan', PAGES, 'no usable index: read every page', false];
+    if (q === 'q1') {
+      if (idx === 'm' || idx === 'mt' || idx === 'mtc') return ['Index Scan', 3 + 2000, 'seek on merchant_id, ~2,000 heap hops (Bitmap Heap Scan in practice)', true];
+      if (idx === 'tm') return ['Full index scan / Seq Scan', 30000, 'merchant_id is the 2nd column: no seek', false];
+      return seq;
+    }
+    if (q === 'q2') {
+      if (idx === 'mtc') return ['Index Only Scan', 3, 'seek, read 20 in order, amount is in the leaf', true];
+      if (idx === 'mt') return ['Index Scan', 3 + 20, 'seek, 20 entries already in time order, 20 heap hops', true];
+      if (idx === 'm') return ['Index Scan + Sort', 3 + 2000, 'fetch all 2,000 rows of merchant 42, then sort, keep 20', true];
+      if (idx === 'tm') return ['Index Scan backward + filter', 2500, 'walks newest times for all merchants until 20 match', false];
+      return ['Seq Scan + Sort', PAGES, 'read every page, then sort', false];
+    }
+    if (q === 'q3') {
+      if (idx === 'tm') return ['Index Scan (range)', 3 + 400, 'created_at leads: seek to 1 hour ago, walk forward', true];
+      if (idx === 'mt' || idx === 'mtc') return ['Seq Scan', PAGES, 'created_at is not the leading column (leftmost-prefix rule)', false];
+      return seq;
+    }
+    if (q === 'q4') {
+      if (idx === 'mt' || idx === 'mtc') return ['Index Scan', 3 + 25, 'equality on merchant, then range on time: both used to seek', true];
+      if (idx === 'tm') return ['Index Scan + filter', 3 + 10000, 'seeks on the time range for ALL merchants, filters merchant 42', false];
+      if (idx === 'm') return ['Index Scan + filter', 3 + 2000, 'seek on merchant, filter time row by row', true];
+      return seq;
+    }
+    if (q === 'q5') {
+      if (idx === 's') return ['Seq Scan (index ignored)', PAGES, '50% match: 5M random hops would cost more than one sequential pass', false];
+      return seq;
+    }
+    return seq;
+  }
+  var selI = document.getElementById('try-index'), selQ = document.getElementById('try-query'), out = document.getElementById('try-out');
+  function render() {
+    var p = plan(selI.value, selQ.value);
+    out.innerHTML = 'Plan: <span class="' + (p[3] ? 'goodplan' : 'badplan') + '">' + p[0] + '</span><br>' +
+      'Page reads: <b>~' + p[1].toLocaleString() + '</b><br>Why: ' + p[2];
+  }
+  selI.addEventListener('change', render);
+  selQ.addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>

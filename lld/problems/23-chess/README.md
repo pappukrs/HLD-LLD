@@ -94,6 +94,6 @@ Many people make `Piece` an abstract class with `King extends Piece`. That works
 
 ## Concepts used
 
-- [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Factory](../../concepts/patterns/p02-factory.md) · [Command (for undo)](../../concepts/patterns/p13-command.md) · [SOLID](../../concepts/02-solid.md)
-- Related problem: [Tic-Tac-Toe](../07-tic-tac-toe/) (the same board + turn + status shape, but smaller)
-- Visual: [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Factory](../../2-creational/L09-factory-method/README.md) · [Command (for undo)](../../4-behavioral/L23-command/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md)
+- Related problem: [Tic-Tac-Toe](../07-tic-tac-toe) (the same board + turn + status shape, but smaller)
+- Visual: [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

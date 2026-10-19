@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H25 Microservices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H25 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Microservices and Service Discovery</h1>
+    <p class="lede">Split by business capability, give each service its own database, and put a gateway in front. Then the new problem: instances come and go, so how does Order find a live Payment instance? Watch registration, client-side and server-side discovery, a crash, and why sync chains cost availability.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 520" role="img" aria-label="Client, API gateway, services, a service registry and payment instances"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <button class="btn" type="button" id="add">Start a Payment pod</button>
+        <button class="btn" type="button" id="kill">Kill a Payment pod</button>
+        <button class="btn" type="button" id="call">Order → Payment call</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--accent)"></i>Registry / lookup</span>
+        <span><i style="background: var(--ok)"></i>Healthy / success</span>
+        <span><i style="background: var(--bad)"></i>Down / failure</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I split by business capability, each service with its own database. Clients enter through an API gateway that does TLS, JWT checks, rate limiting and request ids. Services find each other through Kubernetes DNS; a pod joins the endpoints only after its readiness probe passes. Checkout makes sync calls only where it needs the answer, each with a timeout and breaker. Everything else is async over Kafka."</p>
+    </div>
+    <div class="note">
+      <h3>Signs of a distributed monolith</h3>
+      <ul>
+        <li>Services share a database or read each other's tables.</li>
+        <li>Two services must always be deployed together.</li>
+        <li>One user request walks a sync chain of 5+ services.</li>
+        <li>Business logic lives in the gateway.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Discovery styles</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Client-side</th><th>Server-side</th><th>Service mesh</th></tr></thead>
+          <tbody>
+            <tr><td>Who picks the instance</td><td>The caller (library)</td><td>A proxy / LB</td><td>The sidecar next to the caller</td></tr>
+            <tr><td>Extra hop</td><td>No</td><td>Yes (often in-node, e.g. kube-proxy)</td><td>Local sidecar hop</td></tr>
+            <tr><td>Smart balancing</td><td>Yes (least-loaded, zone-aware)</td><td>Basic</td><td>Yes, plus retries and mTLS</td></tr>
+            <tr><td>Examples</td><td>Eureka + Ribbon, Consul client, gRPC resolver</td><td>K8s Service + DNS, AWS ALB</td><td>Istio, Linkerd</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why not hard-code Payment's IP addresses?</summary><div>Pods are replaced on every deploy, crash and autoscale. Their IPs change within minutes. Discovery keeps the list current.</div></details>
+      <details class="qa"><summary>What removes a dead instance from the registry?</summary><div>Missed heartbeats past a TTL (Eureka, Consul) or a failing readiness probe / deleted pod (Kubernetes endpoints).</div></details>
+      <details class="qa"><summary>5 sync services at 99.9% each. Combined availability?</summary><div>0.999^5 ≈ 99.5%, about 3.6 hours down a month instead of 43 minutes.</div></details>
+      <details class="qa"><summary>Why make the receipt email async?</summary><div>Checkout does not need its answer. With an event on Kafka, a slow or broken notification service cannot slow down or fail checkout.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CLIENT = { x: 16, y: 226, w: 80, h: 50 };
+  var GW = { x: 126, y: 210, w: 116, h: 82 };
+  var SVC = {
+    catalog: { x: 284, y: 96, w: 124, h: 50, name: 'Catalog' },
+    order: { x: 284, y: 220, w: 124, h: 60, name: 'Order' },
+    notif: { x: 284, y: 388, w: 124, h: 50, name: 'Notification' },
+  };
+  var REG = { x: 456, y: 20, w: 288, h: 64 };
+  var PROXY = { x: 456, y: 300, w: 96, h: 48 };
+  var KAFKA = { x: 456, y: 392, w: 100, h: 44 };
+  var SLOT_X = 590, SLOT_W = 154, SLOT_H = 44;
+  var SLOT_Y = [104, 166, 228, 290];
+  var IPS = ['10.0.1.11', '10.0.1.12', '10.0.1.13', '10.0.1.14'];
+
+  function box(ctx, b, title, sub, cls, parent) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: b.x + 10, y: b.y + 20, class: 'title', text: title }, g);
+    var s = ctx.el('text', { x: b.x + 10, y: b.y + 38, class: 'mono small muted', text: sub || '' }, g);
+    return { g: g, r: r, s: s };
+  }
+  function mid(b, side) {
+    if (side === 'r') return [b.x + b.w, b.y + b.h / 2];
+    if (side === 'l') return [b.x, b.y + b.h / 2];
+    if (side === 't') return [b.x + b.w / 2, b.y];
+    return [b.x + b.w / 2, b.y + b.h];
+  }
+  function toReg(i) { var y = SLOT_Y[i] + SLOT_H / 2; return [[SLOT_X + SLOT_W, y], [754, y], [754, 52], [REG.x + REG.w, 52]]; }
+  function slotBox(i) { return { x: SLOT_X, y: SLOT_Y[i], w: SLOT_W, h: SLOT_H }; }
+
+  function renderRegistry(ctx) {
+    var S = ctx.state;
+    var live = S.inst.filter(function (p) { return p.registered; }).map(function (p) { return p.ip.split('.').pop(); });
+    S.regList.textContent = 'payment → [.' + live.join(', .') + ']';
+    if (!live.length) S.regList.textContent = 'payment → []';
+  }
+  function setInst(ctx, i, status) {
+    var S = ctx.state, p = S.inst[i];
+    p.status = status;
+    p.r.setAttribute('class', 'box ' + ({ up: 'ok', starting: 'signal', down: 'bad', empty: 'dim' }[status]));
+    p.r.setAttribute('style', status === 'empty' ? 'stroke-dasharray: 5 4' : '');
+    p.t.textContent = status === 'empty' ? 'free slot' : 'payment-' + (i + 1);
+    p.s.textContent = status === 'empty' ? '' : p.ip + (status === 'starting' ? ' · starting' : status === 'down' ? ' · crashed' : '');
+  }
+
+  function pick(ctx) {
+    var S = ctx.state;
+    var live = S.inst.map(function (p, i) { return i; }).filter(function (i) { return S.inst[i].registered; });
+    if (!live.length) return -1;
+    var i = live[S.rr % live.length];
+    S.rr++;
+    return i;
+  }
+
+  function callInstance(ctx, i, viaProxy) {
+    var S = ctx.state, p = S.inst[i], sb = slotBox(i);
+    var from = mid(SVC.order, 'r');
+    var ty = sb.y + SLOT_H / 2;
+    var path = viaProxy ? [from, [430, from[1]], [430, 324], mid(PROXY, 'l'), mid(PROXY, 'r'), [570, 324], [570, ty], [SLOT_X, ty]] : [from, [560, from[1]], [560, ty], [SLOT_X, ty]];
+    return ctx.packet(path, { ms: 800, label: 'charge' }).then(function () {
+      var ok = p.status === 'up';
+      ctx.flash(p.r);
+      return ctx.packet(path.slice().reverse(), { ms: 600, cls: ok ? 'ok' : 'bad' }).then(function () { return ok; });
+    });
+  }
+
+  function lookup(ctx) {
+    var path = [[408, 236], [436, 236], [436, 60], [REG.x, 60]];
+    return ctx.packet(path, { ms: 600, cls: 'accent', label: 'lookup' })
+      .then(function () { ctx.flash(ctx.state.regBox.r); return ctx.packet(path.slice().reverse(), { ms: 500, cls: 'accent' }); });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A food-delivery backend',
+      say: 'It starts as one monolith with one database: orders, payments, catalog, reports and notifications all in one process and one deploy.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.rr = 0;
+      box(ctx, CLIENT, 'Client', 'app');
+      // monolith
+      S.mono = ctx.group();
+      ctx.el('rect', { x: 126, y: 70, width: 618, height: 384, rx: 12, class: 'box' }, S.mono);
+      ctx.el('text', { x: 144, y: 96, class: 'title', text: 'Monolith · one process · one deploy' }, S.mono);
+      S.modules = {};
+      ['Orders', 'Payments', 'Catalog', 'Reports', 'Notifications'].forEach(function (m, i) {
+        var x = 150 + (i % 3) * 190, y = 120 + Math.floor(i / 3) * 90;
+        S.modules[m] = ctx.el('rect', { x: x, y: y, width: 170, height: 60, rx: 8, class: 'box' }, S.mono);
+        ctx.el('text', { x: x + 14, y: y + 35, class: 'title', text: m }, S.mono);
+      });
+      ctx.el('rect', { x: 330, y: 340, width: 220, height: 60, rx: 30, class: 'box' }, S.mono);
+      ctx.el('text', { x: 440, y: 376, 'text-anchor': 'middle', class: 'mono', text: 'one shared DB' }, S.mono);
+      S.monoT = ctx.el('text', { x: 144, y: 438, class: 'mono small muted', text: '' }, S.mono);
+
+      // micro world (hidden)
+      S.micro = ctx.group({ opacity: 0 });
+      var m = S.micro;
+      [['r', SVC.catalog], ['r', SVC.order], ['r', SVC.notif]].forEach(function (pair) {
+        var a = mid(GW, 'r'), b = mid(pair[1], 'l');
+        ctx.el('polyline', { points: [a, [262, a[1]], [262, b[1]], b].join(' '), class: 'wire' }, m);
+      });
+      ctx.el('line', { x1: CLIENT.x + CLIENT.w, y1: 251, x2: GW.x, y2: 251, class: 'wire' }, m);
+      S.gw = box(ctx, GW, 'API gateway', 'TLS · JWT', 'accent', m);
+      ctx.el('text', { x: GW.x + 10, y: GW.y + 56, class: 'mono small muted', text: 'rate limit' }, m.lastChild);
+      ctx.el('text', { x: GW.x + 10, y: GW.y + 72, class: 'mono small muted', text: '/orders → Order' }, m.lastChild);
+      S.svc = {};
+      Object.keys(SVC).forEach(function (k) {
+        S.svc[k] = box(ctx, SVC[k], SVC[k].name, 'own DB', '', m);
+      });
+      S.regBox = box(ctx, REG, 'Service registry', '', 'accent', m);
+      S.regList = S.regBox.s;
+      S.regList.setAttribute('class', 'mono small');
+      S.inst = [];
+      for (var i = 0; i < 4; i++) {
+        var sb = slotBox(i);
+        var b = box(ctx, sb, 'payment-' + (i + 1), '', '', m);
+        S.inst.push({ ip: IPS[i], r: b.r, t: b.g.childNodes[1], s: b.s, status: 'up', registered: i < 3 });
+      }
+      ctx.el('text', { x: SLOT_X, y: 98, class: 'mono small muted', text: 'Payment instances' }, m);
+      S.proxy = ctx.group({ opacity: 0 }, m);
+      box(ctx, PROXY, 'payment', '.svc DNS', 'accent', S.proxy);
+      S.async = ctx.group({ opacity: 0 }, m);
+      box(ctx, KAFKA, 'Kafka', 'orders topic', '', S.async);
+      S.chainG = ctx.group({}, m);
+    },
+    steps: [
+      {
+        title: 'Monolith: one deploy, one failure domain',
+        say: 'Requests work fine. Then the <b>Reports</b> module leaks memory during a big export. It is the same process, so the whole app crashes, and customers cannot even place orders.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return ctx.packet([mid(CLIENT, 'r'), [150, 251], [150, 150]], { ms: 700 })
+            .then(function () { ctx.log('Order placed through the monolith', 'ok'); S.modules.Reports.setAttribute('class', 'box bad'); ctx.flash(S.modules.Reports); return ctx.wait(500); })
+            .then(function () {
+              Object.keys(S.modules).forEach(function (k) { S.modules[k].setAttribute('class', 'box bad'); });
+              S.monoT.textContent = 'OOM in Reports → whole process down → checkout down';
+              S.monoT.setAttribute('class', 'mono small fill-bad');
+              ctx.log('Reports leaks memory → process killed → every feature is down', 'bad');
+              return ctx.packet([mid(CLIENT, 'r'), [126, 251]], { ms: 500, cls: 'bad', label: '502' });
+            });
+        },
+      },
+      {
+        title: 'Split by business capability',
+        say: 'Each capability becomes a service with <b>its own database</b>. Teams deploy, scale and fail on their own. Nobody reads another service\'s tables; they call its API or listen to its events.',
+        run: function (ctx) {
+          var S = ctx.state;
+          ctx.log('Catalog, Order, Payment, Notification: one DB each', 'info');
+          return Promise.all([ctx.fade(S.mono, 0, 500), ctx.fade(S.micro, 1, 700)]).then(function () {
+            S.inst.forEach(function (p, i) { setInst(ctx, i, i < 3 ? 'up' : 'empty'); });
+            renderRegistry(ctx);
+          });
+        },
+      },
+      {
+        title: 'The API gateway is the one front door',
+        say: 'The client calls one host. The gateway terminates TLS, checks the JWT, applies the rate limit, adds a request id and routes <code>/orders</code> to the Order service. No business rules live here.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return ctx.packet([mid(CLIENT, 'r'), mid(GW, 'l')], { ms: 600, label: 'POST /orders' })
+            .then(function () { ctx.flash(S.gw.r); ctx.log('Gateway: JWT valid, under rate limit, req-id=7f3a', 'ok'); return ctx.wait(300); })
+            .then(function () { var a = mid(GW, 'r'), b = mid(SVC.order, 'l'); return ctx.packet([a, [262, a[1]], [262, b[1]], b], { ms: 600 }); })
+            .then(function () { ctx.flash(S.svc.order.r); ctx.log('Routed to Order service', 'info'); });
+        },
+      },
+      {
+        title: 'Where is Payment? Its IPs keep changing',
+        say: 'Order must call Payment, which runs as 3 pods. A deploy just replaced payment-2, and it came back with a <b>new IP</b>. A hard-coded host list would now send traffic into nothing.',
+        run: function (ctx) {
+          var S = ctx.state, p = S.inst[1];
+          setInst(ctx, 1, 'down');
+          ctx.log('payment-2 replaced by a deploy', 'warn');
+          return ctx.wait(500).then(function () {
+            p.ip = '10.0.1.27';
+            setInst(ctx, 1, 'up');
+            ctx.flash(p.r);
+            renderRegistry(ctx);
+            ctx.log('payment-2 is back as 10.0.1.27 (was .12). Registry updated; a config file would not be.', 'warn');
+          });
+        },
+      },
+      {
+        title: 'A new pod registers only when ready',
+        say: 'Autoscaling starts payment-4. It is not in the registry yet. Its <b>readiness probe</b> fails while it warms up, then passes. Only then is it added (Kubernetes adds it to the endpoints; Consul or Eureka get a register call plus heartbeats).',
+        run: function (ctx) {
+          var S = ctx.state, sb = slotBox(3);
+          setInst(ctx, 3, 'starting');
+          ctx.log('payment-4 starting: loading config, warming connections', 'info');
+          return ctx.packet([[SLOT_X + SLOT_W - 20, sb.y], [SLOT_X + SLOT_W - 20, sb.y - 14], [SLOT_X + SLOT_W - 40, sb.y - 14], [SLOT_X + SLOT_W - 40, sb.y]], { ms: 600, cls: 'bad', label: 'ready?' })
+            .then(function () { ctx.log('readiness probe: 503 (not ready)', 'warn'); return ctx.packet([[SLOT_X + SLOT_W - 20, sb.y], [SLOT_X + SLOT_W - 20, sb.y - 14], [SLOT_X + SLOT_W - 40, sb.y - 14], [SLOT_X + SLOT_W - 40, sb.y]], { ms: 600, cls: 'ok', label: 'ready?' }); })
+            .then(function () {
+              setInst(ctx, 3, 'up');
+              ctx.log('readiness probe: 200 → register', 'ok');
+              return ctx.packet(toReg(3), { ms: 700, cls: 'accent', label: 'register' });
+            })
+            .then(function () { S.inst[3].registered = true; renderRegistry(ctx); ctx.flash(S.regBox.r); ctx.log('Registry now lists 4 payment instances', 'ok'); });
+        },
+      },
+      {
+        title: 'Client-side discovery: ask, cache, pick',
+        say: 'Order asks the registry for <code>payment</code>, caches the list, and picks an instance itself with round robin. No extra hop. This is Eureka + Ribbon, a Consul client, or a gRPC resolver.',
+        run: function (ctx) {
+          return lookup(ctx).then(function () {
+            ctx.log('Order got 4 addresses, cached for 30 s', 'info');
+            var i = pick(ctx);
+            ctx.log('Round robin → payment-' + (i + 1), 'info');
+            return callInstance(ctx, i, false);
+          }).then(function () {
+            var i = pick(ctx);
+            ctx.log('Next call → payment-' + (i + 1), 'info');
+            return callInstance(ctx, i, false);
+          }).then(function () { ctx.log('Both charges returned 200', 'ok'); });
+        },
+      },
+      {
+        title: 'Server-side discovery: call one stable name',
+        say: 'On Kubernetes, Order just calls <code>http://payment</code>. DNS gives a stable virtual IP and kube-proxy picks a ready pod. The caller stays simple; the platform keeps the endpoint list.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return ctx.fade(S.proxy, 1, 400).then(function () {
+            var i = pick(ctx);
+            ctx.log('Order → payment.svc → kube-proxy chose payment-' + (i + 1), 'info');
+            return callInstance(ctx, i, true);
+          }).then(function () { ctx.log('200 OK. Note: one long gRPC connection would stick to one pod.', 'warn'); });
+        },
+      },
+      {
+        title: 'A pod crashes; health checks take it out',
+        say: 'payment-3 crashes. One call already in flight fails, so the caller retries on another pod. Missed heartbeats (or a failing probe) remove it from the registry, and later calls only go to live pods.',
+        run: function (ctx) {
+          var S = ctx.state;
+          setInst(ctx, 2, 'down');
+          ctx.log('payment-3 crashed', 'bad');
+          return callInstance(ctx, 2, false).then(function () {
+            ctx.log('In-flight call to payment-3 failed → retry elsewhere', 'bad');
+            var sb = slotBox(2);
+            return ctx.packet(toReg(2), { ms: 700, cls: 'bad', label: 'no heartbeat' });
+          }).then(function () {
+            S.inst[2].registered = false;
+            renderRegistry(ctx);
+            ctx.flash(S.regBox.r);
+            ctx.log('TTL expired → payment-3 removed from the registry', 'warn');
+            var i = pick(ctx);
+            return callInstance(ctx, i, false).then(function () { ctx.log('Next call → payment-' + (i + 1) + ': 200 OK', 'ok'); });
+          });
+        },
+      },
+      {
+        title: 'Every sync hop multiplies the risk',
+        say: 'Gateway → Order → Payment → Bank → Ledger: five sync hops, each 99.9% available. The chain is only as good as their <b>product</b>: 0.999^5 ≈ 99.5%, about 3.6 hours down a month instead of 43 minutes.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.chainG, chain = Promise.resolve();
+          var names = ['Gateway', 'Order', 'Payment', 'Bank', 'Ledger'];
+          ctx.el('text', { x: 20, y: 470, class: 'mono small muted', text: 'sync chain:' }, g);
+          names.forEach(function (n, i) {
+            chain = chain.then(function () {
+              var x = 100 + i * 96;
+              ctx.el('rect', { x: x, y: 456, width: 84, height: 22, rx: 5, class: 'box signal' }, g);
+              ctx.el('text', { x: x + 42, y: 471, 'text-anchor': 'middle', class: 'mono small', text: n }, g);
+              var a = Math.pow(0.999, i + 1);
+              S.availT && S.availT.remove();
+              S.availT = ctx.el('text', { x: 100, y: 504, class: 'mono ' + (i > 1 ? 'fill-bad' : ''), text: '0.999^' + (i + 1) + ' = ' + (a * 100).toFixed(2) + '%  →  ~' + Math.round((1 - a) * 30 * 24 * 60) + ' min down / month' }, g);
+              return ctx.wait(300);
+            });
+          });
+          return chain.then(function () { ctx.log('5 sync hops at 99.9% → 99.50% overall', 'bad'); });
+        },
+      },
+      {
+        title: 'Go async where you do not need the answer',
+        say: 'Order does not need the receipt email to finish checkout. It writes an <code>OrderPlaced</code> event to Kafka and returns <b>201</b> at once. Notification reads the event when it can. If it is slow or down, checkout does not care.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.svc.notif.r.setAttribute('class', 'box signal');
+          S.svc.notif.s.textContent = 'slow: 3 s/mail';
+          return ctx.fade(S.async, 1, 400).then(function () {
+            var a = mid(SVC.order, 'b');
+            return ctx.packet([a, [a[0], 350], [KAFKA.x + 50, 350], [KAFKA.x + 50, KAFKA.y]], { ms: 700, label: 'OrderPlaced' });
+          }).then(function () {
+            ctx.log('Order → Kafka: OrderPlaced (outbox, same DB transaction)', 'info');
+            var a = mid(GW, 'r'), b = mid(SVC.order, 'l');
+            return Promise.all([
+              ctx.packet([b, [262, b[1]], [262, a[1]], a, mid(CLIENT, 'r')], { ms: 700, cls: 'ok', label: '201' }),
+              ctx.packet([mid(KAFKA, 'l'), mid(SVC.notif, 'r')], { ms: 1600, cls: 'accent' }),
+            ]);
+          }).then(function () {
+            ctx.log('Client got 201 in ~40 ms; receipt sent later by Notification', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  function ready() { return lab.ctx.state.inst && lab.ctx.state.micro && parseFloat(lab.ctx.state.micro.getAttribute('opacity')) > 0.5; }
+  document.getElementById('add').addEventListener('click', function () {
+    var ctx = lab.ctx, S = ctx.state;
+    if (!ready()) { ctx.log('Step to "Split by business capability" first', 'warn'); return; }
+    var i = S.inst.findIndex(function (p) { return p.status === 'empty' || p.status === 'down'; });
+    if (i < 0) { ctx.log('All 4 slots are running', 'warn'); return; }
+    S.inst[i].ip = '10.0.1.' + (30 + Math.floor(S.rr % 60) + i);
+    setInst(ctx, i, 'up');
+    S.inst[i].registered = true;
+    renderRegistry(ctx);
+    ctx.flash(S.regBox.r);
+    ctx.log('You: payment-' + (i + 1) + ' ready at ' + S.inst[i].ip + ' → registered', 'ok');
+  });
+  document.getElementById('kill').addEventListener('click', function () {
+    var ctx = lab.ctx, S = ctx.state;
+    if (!ready()) { ctx.log('Step to "Split by business capability" first', 'warn'); return; }
+    var i = S.inst.findIndex(function (p) { return p.status === 'up'; });
+    if (i < 0) { ctx.log('No running Payment pod left', 'bad'); return; }
+    setInst(ctx, i, 'down');
+    S.inst[i].registered = false;
+    renderRegistry(ctx);
+    ctx.log('You: payment-' + (i + 1) + ' killed → removed after missed heartbeats', 'bad');
+  });
+  document.getElementById('call').addEventListener('click', function () {
+    var ctx = lab.ctx;
+    if (!ready()) { ctx.log('Step to "Split by business capability" first', 'warn'); return; }
+    var i = pick(ctx);
+    if (i < 0) { ctx.log('You: lookup returned [] → 503, no healthy Payment instance', 'bad'); return; }
+    callInstance(ctx, i, false).then(function (ok) { ctx.log('You: Order → payment-' + (i + 1) + (ok ? ' → 200 OK' : ' → failed'), ok ? 'ok' : 'bad'); });
+  });
+})();
+</script>
+</body>
+</html>

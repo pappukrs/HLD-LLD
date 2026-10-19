@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H31 Auth and JWT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H31 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Login, Tokens and Access Checks</h1>
+    <p class="lede">Follow a user through OAuth2 authorization code + PKCE, get a JWT, and call an API. Then watch the attacks fail: a stolen code, a tampered token, someone else's order id, and a reused refresh token. Authentication says who you are; authorization is checked on every resource.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 580" role="img" aria-label="Browser, client app, auth server, API gateway and order service exchanging messages, with a token inspector and a checks list below"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <button class="btn" type="button" id="t-ok">GET /orders/1001</button>
+        <button class="btn" type="button" id="t-idor">GET /orders/1002</button>
+        <button class="btn" type="button" id="t-tamper">Edit role to admin</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--accent)"></i>Token / key material</span>
+        <span><i style="background: var(--ok)"></i>Check passed</span>
+        <span><i style="background: var(--bad)"></i>Rejected / attacker</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Users sign in with OIDC, authorization code + PKCE. The provider issues a 10-minute RS256 access token and a rotating refresh token. The gateway verifies signature, expiry, issuer, audience and scope locally with cached JWKS keys. Each service still scopes every query by the caller, so another user's order id returns 404. Services talk over mTLS."</p>
+    </div>
+    <div class="note">
+      <h3>Checks in order</h3>
+      <ol>
+        <li><code>alg</code> is on the allow-list (never <code>none</code>).</li>
+        <li>Signature valid with the public key for <code>kid</code>.</li>
+        <li><code>exp</code> not passed (allow ~30 s skew); <code>iss</code> and <code>aud</code> match.</li>
+        <li>Scope allows the action (gateway).</li>
+        <li>Caller owns the resource (service, in the query).</li>
+      </ol>
+    </div>
+    <div class="note wide">
+      <h3>Which credential for which caller</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Caller</th><th>Credential</th><th>Lifetime</th><th>Revocation</th></tr></thead>
+          <tbody>
+            <tr><td>User in a browser / app</td><td>OIDC code + PKCE → access JWT + refresh token</td><td>10 min / days (rotated)</td><td>Revoke refresh family; jti denylist</td></tr>
+            <tr><td>Merchant server</td><td>API key (hashed at rest) or client-credentials token</td><td>Until rotated / ~1 h</td><td>Disable key; 2 active keys for rotation</td></tr>
+            <tr><td>Internal service</td><td>mTLS certificate from the mesh (+ narrow-scope token)</td><td>Hours, auto-rotated</td><td>Mesh policy / cert expiry</td></tr>
+            <tr><td>Webhook sender</td><td>HMAC-SHA256 signature over timestamp + body</td><td>Per message</td><td>Rotate the shared secret</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did the stolen code fail in step 5?</summary><div>The token endpoint wants the <code>code_verifier</code> whose SHA-256 equals the challenge sent at the start. Only the real app has it.</div></details>
+      <details class="qa"><summary>The payload is readable. Is that a problem?</summary><div>Only if you put secrets or PII in it. It is signed, not encrypted. Keep it to ids, scopes and expiry.</div></details>
+      <details class="qa"><summary>Why 404 and not 403 for someone else's order?</summary><div>403 confirms the order exists, which helps an attacker enumerate ids. 404 reveals nothing.</div></details>
+      <details class="qa"><summary>Why revoke the whole family on refresh token reuse?</summary><div>A rotated token should never come back. If it does, one copy is stolen and you cannot tell which, so you cut both and force a fresh login.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var ACT = [
+    { id: 'browser', name: 'Browser', x: 70 },
+    { id: 'app', name: 'App (BFF)', x: 220 },
+    { id: 'auth', name: 'Auth server', x: 380 },
+    { id: 'gw', name: 'API gateway', x: 540 },
+    { id: 'order', name: 'Order svc', x: 690 },
+  ];
+  var X = {}; ACT.forEach(function (a) { X[a.id] = a.x; });
+  var ROW0 = 102, ROWH = 30, MAXROW = 6;
+  var JX = 16, JY = 318;           // token inspector
+  var CX = 470, CY = 318;          // checks panel
+
+  function clearG(g) { while (g.firstChild) g.removeChild(g.firstChild); }
+
+  // A message: arrow with label on its row, plus a moving packet.
+  function msg(ctx, from, to, label, cls, ms) {
+    var S = ctx.state;
+    var row = S.row++;
+    var y = ROW0 + (row % MAXROW) * ROWH;
+    var x1 = X[from], x2 = X[to], dir = x2 > x1 ? 1 : -1;
+    var g = ctx.group({ opacity: 0 }, S.msgG);
+    ctx.el('line', { x1: x1 + dir * 6, y1: y, x2: x2 - dir * 8, y2: y, class: 'wire ' + (cls === 'bad' ? 'bad' : 'accent'), 'marker-end': 'url(#arr)' }, g);
+    ctx.el('text', { x: (x1 + x2) / 2, y: y - 6, 'text-anchor': 'middle', class: 'mono small ' + (cls === 'bad' ? 'fill-bad' : cls === 'ok' ? 'fill-ok' : ''), text: label }, g);
+    return ctx.fade(g, 1, 150).then(function () { return ctx.packet([[x1, y], [x2, y]], { ms: ms || 650, cls: cls || '' }); });
+  }
+  function note(ctx, id, text, cls) {
+    var S = ctx.state;
+    S.notes[id].textContent = text;
+    S.notes[id].setAttribute('class', 'mono small ' + (cls || 'muted'));
+    ctx.flash(S.boxes[id]);
+  }
+  function newStep(ctx) { var S = ctx.state; clearG(S.msgG); S.row = 0; }
+
+  // ---- token inspector ----
+  var HEADER = '{"alg":"RS256","kid":"k-2026-10"}';
+  function payloadText(S) { return '{"sub":"user_42","scope":"orders:read","role":"' + S.role + '",'; }
+  function renderToken(ctx) {
+    var S = ctx.state, g = S.jwtG;
+    clearG(g);
+    if (!S.token) {
+      ctx.el('text', { x: JX + 12, y: JY + 48, class: 'mono small muted', text: 'no token yet' }, g);
+      return;
+    }
+    var rows = [
+      ['header', HEADER, 'fill-accent'],
+      ['payload', payloadText(S), S.role === 'user' ? 'fill-ok' : 'fill-bad'],
+      ['', ' "iss":"auth.shop.in","aud":"api","exp":+10 min}', S.role === 'user' ? 'fill-ok' : 'fill-bad'],
+      ['signature', S.role === 'user' ? 'RS256(header.payload, private key) = Xy9mQ2…' : 'Xy9mQ2… (old signature, payload changed!)', S.role === 'user' ? 'fill-signal' : 'fill-bad'],
+    ];
+    rows.forEach(function (r, i) {
+      ctx.el('text', { x: JX + 12, y: JY + 48 + i * 22, class: 'mono small muted', text: r[0] }, g);
+      ctx.el('text', { x: JX + 84, y: JY + 48 + i * 22, class: 'mono small ' + r[2], text: r[1] }, g);
+    });
+    ctx.el('text', { x: JX + 12, y: JY + 148, class: 'mono small muted', text: 'base64url only: anyone holding it can read the payload' }, g);
+    ctx.el('text', { x: JX + 12, y: JY + 176, class: 'mono small', text: 'App holds: access JWT (10 min) · refresh ' + S.refresh + (S.refresh.charAt(0) === '(' ? '' : ' (rotating)') }, g);
+    if (S.retired.length) ctx.el('text', { x: JX + 12, y: JY + 196, class: 'mono small muted', text: 'retired refresh tokens: ' + S.retired.join(', ') }, g);
+  }
+
+  // ---- checks panel ----
+  var CHECKS = ['alg allowed (RS256)', 'signature (JWKS kid)', 'exp / iss / aud', 'scope orders:read', 'owner of resource'];
+  function resetChecks(ctx) {
+    var S = ctx.state;
+    S.checkT.forEach(function (t, i) { t.textContent = '·  ' + CHECKS[i]; t.setAttribute('class', 'mono small muted'); });
+  }
+  function setCheck(ctx, i, ok) {
+    var t = ctx.state.checkT[i];
+    t.textContent = (ok ? '✓  ' : '✗  ') + CHECKS[i];
+    t.setAttribute('class', 'mono small ' + (ok ? 'fill-ok' : 'fill-bad'));
+    ctx.flash(t);
+    return ctx.wait(160);
+  }
+
+  // A full API call through gateway and service, evaluated from state.
+  function apiCall(ctx, orderId) {
+    var S = ctx.state;
+    resetChecks(ctx);
+    var owner = orderId === 1001 ? 'user_42' : 'user_77';
+    return msg(ctx, 'app', 'gw', 'GET /orders/' + orderId + ' · Bearer eyJ…', '').then(function () {
+      return setCheck(ctx, 0, true);
+    }).then(function () {
+      var sigOk = S.role === 'user';
+      return setCheck(ctx, 1, sigOk).then(function () {
+        if (!sigOk) {
+          note(ctx, 'gw', 'bad signature', 'fill-bad');
+          return msg(ctx, 'gw', 'app', '401 invalid_token', 'bad').then(function () { return '401'; });
+        }
+        return setCheck(ctx, 2, true).then(function () { return setCheck(ctx, 3, true); }).then(function () {
+          note(ctx, 'gw', 'valid · user_42', 'fill-ok');
+          return msg(ctx, 'gw', 'order', 'X-User: user_42', '');
+        }).then(function () {
+          var mine = owner === 'user_42';
+          note(ctx, 'order', mine ? 'owner 42 ✓' : 'owner is 77 ✗', mine ? 'fill-ok' : 'fill-bad');
+          return setCheck(ctx, 4, mine).then(function () {
+            return msg(ctx, 'order', 'gw', mine ? '200 order 1001' : '404 not found', mine ? 'ok' : 'bad');
+          }).then(function () { return msg(ctx, 'gw', 'app', mine ? '200' : '404', mine ? 'ok' : 'bad'); })
+            .then(function () { return mine ? '200' : '404'; });
+        });
+      });
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Five parties',
+      say: 'The user\'s browser, the shop\'s app (a backend-for-frontend that keeps tokens server-side), the auth server (OIDC provider), the API gateway and the order service. Messages appear as arrows; the bottom shows the token and the checks.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.row = 0; S.token = false; S.role = 'user'; S.refresh = 'rt_1'; S.retired = [];
+      var defs = ctx.el('defs');
+      var m = ctx.el('marker', { id: 'arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+      ctx.el('path', { d: 'M0,0 L10,5 L0,10 z', class: 'fill-muted' }, m);
+      S.boxes = {}; S.notes = {};
+      ACT.forEach(function (a) {
+        ctx.el('line', { x1: a.x, y1: 66, x2: a.x, y2: 286, class: 'wire dashed', opacity: 0.6 });
+        S.boxes[a.id] = ctx.el('rect', { x: a.x - 64, y: 14, width: 128, height: 52, rx: 8, class: 'box' + (a.id === 'auth' ? ' accent' : '') });
+        ctx.el('text', { x: a.x, y: 34, 'text-anchor': 'middle', class: 'title', text: a.name });
+        S.notes[a.id] = ctx.el('text', { x: a.x, y: 54, 'text-anchor': 'middle', class: 'mono small muted', text: '' });
+      });
+      S.msgG = ctx.group();
+      ctx.el('line', { x1: 0, y1: 300, x2: 760, y2: 300, class: 'wire' });
+      ctx.el('text', { x: JX, y: JY + 18, class: 'title', text: 'Token inspector' });
+      S.jwtG = ctx.group();
+      ctx.el('line', { x1: CX - 14, y1: 300, x2: CX - 14, y2: 580, class: 'wire' });
+      ctx.el('text', { x: CX, y: CY + 18, class: 'title', text: 'Checks on the last API call' });
+      S.checkT = CHECKS.map(function (c, i) { return ctx.el('text', { x: CX, y: CY + 48 + i * 24, class: 'mono small muted', text: '·  ' + c }); });
+      S.pkce = ctx.el('text', { x: CX, y: CY + 186, class: 'mono small muted', text: '' });
+      S.pkce2 = ctx.el('text', { x: CX, y: CY + 206, class: 'mono small muted', text: '' });
+      S.foot = ctx.el('text', { x: CX, y: CY + 240, class: 'mono small muted', text: '' });
+      renderToken(ctx);
+    },
+    steps: [
+      {
+        title: 'Login starts with a secret only the app knows',
+        say: 'The user clicks Login. The app makes a random <code>code_verifier</code> and keeps it. It sends only <code>code_challenge = SHA256(verifier)</code> in the redirect to the auth server. This is <b>PKCE</b>.',
+        run: function (ctx) {
+          var S = ctx.state;
+          newStep(ctx);
+          return msg(ctx, 'browser', 'app', 'click Login', '').then(function () {
+            note(ctx, 'app', 'verifier dBjftJ…', 'fill-signal');
+            S.pkce.textContent = 'PKCE verifier dBjftJ… (stays in app)';
+            S.pkce2.textContent = 'challenge E9Mel… = SHA256(verifier)';
+            return msg(ctx, 'app', 'browser', '302 → /authorize?code_challenge=E9Mel…&state=xyz', '');
+          }).then(function () { return msg(ctx, 'browser', 'auth', 'GET /authorize?…challenge…', ''); })
+            .then(function () { ctx.log('Auth server stores the challenge with this login attempt', 'info'); });
+        },
+      },
+      {
+        title: 'The password goes only to the auth server',
+        say: 'The user types the password and OTP on the <b>auth server\'s</b> page. It checks them against an argon2id hash and the OTP limit. The app never sees the password. This is <b>authentication</b>: proving who you are.',
+        run: function (ctx) {
+          newStep(ctx);
+          return msg(ctx, 'browser', 'auth', 'POST login: password + OTP', '').then(function () {
+            note(ctx, 'auth', 'argon2id ✓ OTP ✓', 'fill-ok');
+            ctx.log('Authenticated user_42 (password hash + OTP, 3 tries max)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A short-lived code comes back',
+        say: 'The auth server redirects the browser back to the app with an <b>authorization code</b>: valid about 60 seconds, usable once. The <code>state</code> value must match what the app sent, which blocks CSRF on the callback.',
+        run: function (ctx) {
+          newStep(ctx);
+          return msg(ctx, 'auth', 'browser', '302 → /callback?code=SplxlO&state=xyz', '').then(function () {
+            return msg(ctx, 'browser', 'app', 'code=SplxlO', '');
+          }).then(function () { note(ctx, 'app', 'state matches ✓', 'fill-ok'); ctx.log('App received code SplxlO (60 s, one use)', 'info'); });
+        },
+      },
+      {
+        title: 'Code + verifier are swapped for tokens',
+        say: 'The app sends the code <b>and the verifier</b> to the token endpoint. The auth server hashes the verifier, compares it with the stored challenge, and issues a 10-minute <b>access JWT</b>, a rotating <b>refresh token</b> and an ID token.',
+        run: function (ctx) {
+          var S = ctx.state;
+          newStep(ctx);
+          return msg(ctx, 'app', 'auth', 'POST /token code + verifier', '').then(function () {
+            note(ctx, 'auth', 'hash(verifier) ✓', 'fill-ok');
+            return msg(ctx, 'auth', 'app', 'access JWT · refresh rt_1 · id_token', 'ok');
+          }).then(function () {
+            S.token = true;
+            renderToken(ctx);
+            note(ctx, 'app', 'tokens in server', 'fill-ok');
+            ctx.log('Tokens issued: JWT (10 min), refresh rt_1', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A stolen code is useless',
+        say: 'Suppose the code leaked through a log or a malicious app. The attacker sends it to the token endpoint, but has no verifier. The hash check fails: <b>400 invalid_grant</b>. The code was also single-use and already spent.',
+        run: function (ctx) {
+          var S = ctx.state;
+          newStep(ctx);
+          note(ctx, 'browser', 'attacker has code', 'fill-bad');
+          return msg(ctx, 'browser', 'auth', 'POST /token code=SplxlO (no verifier)', 'bad').then(function () {
+            note(ctx, 'auth', 'no verifier → 400', 'fill-bad');
+            return msg(ctx, 'auth', 'browser', '400 invalid_grant', 'bad');
+          }).then(function () {
+            S.pkce2.textContent = 'attacker: no verifier → 400';
+            S.pkce2.setAttribute('class', 'mono small fill-bad');
+            ctx.log('Stolen code rejected: PKCE verifier missing', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The gateway verifies the token locally',
+        say: 'The app calls <code>GET /orders/1001</code> with the JWT. The gateway fetched the auth server\'s public keys (JWKS) once and caches them. It checks alg, signature, expiry, issuer, audience and scope with <b>no network call</b>, then the order service checks the user owns order 1001.',
+        run: function (ctx) {
+          newStep(ctx);
+          return msg(ctx, 'gw', 'auth', 'GET /.well-known/jwks.json (cached 1 h)', '').then(function () {
+            note(ctx, 'gw', 'JWKS k-2026-10', 'fill-signal');
+            return apiCall(ctx, 1001);
+          }).then(function (r) { ctx.log('GET /orders/1001 → ' + r + ' (all checks passed)', 'ok'); });
+        },
+      },
+      {
+        title: 'A tampered token fails the signature',
+        say: 'The payload is only base64url, so an attacker can decode it, change <code>"role":"user"</code> to <code>"admin"</code>, and encode it again. But the signature was made over the old payload with a key they do not have. Verification fails: <b>401</b>.',
+        run: function (ctx) {
+          var S = ctx.state;
+          newStep(ctx);
+          S.role = 'admin';
+          renderToken(ctx);
+          ctx.log('Attacker edits payload: role → admin', 'warn');
+          return apiCall(ctx, 1001).then(function (r) {
+            ctx.log('Tampered token → ' + r + ' (signature mismatch)', 'ok');
+            S.role = 'user';
+            renderToken(ctx);
+          });
+        },
+      },
+      {
+        title: 'Valid token, someone else\'s order: 404',
+        say: 'Now a genuine token asks for <code>/orders/1002</code>, which belongs to user_77. The gateway is happy: the token is valid and has <code>orders:read</code>. Only the order service knows the owner, and its query is scoped by the caller, so it returns <b>404</b>. This is how you stop IDOR.',
+        run: function (ctx) {
+          newStep(ctx);
+          return apiCall(ctx, 1002).then(function (r) { ctx.log('GET /orders/1002 by user_42 → ' + r + ' (not the owner)', 'ok'); });
+        },
+      },
+      {
+        title: 'Refresh rotation catches a stolen refresh token',
+        say: 'After 10 minutes the app uses refresh <code>rt_1</code> and gets a new JWT plus <code>rt_2</code>; rt_1 is retired. Later a thief replays the old rt_1. A retired token should never return, so the auth server <b>revokes the whole family</b> (rt_2 too) and forces a new login.',
+        run: function (ctx) {
+          var S = ctx.state;
+          newStep(ctx);
+          return msg(ctx, 'app', 'auth', 'POST /token refresh rt_1', '').then(function () {
+            return msg(ctx, 'auth', 'app', 'new JWT · rt_2 (rt_1 retired)', 'ok');
+          }).then(function () {
+            S.refresh = 'rt_2'; S.retired = ['rt_1']; renderToken(ctx);
+            ctx.log('Rotated: rt_1 → rt_2', 'info');
+            note(ctx, 'browser', 'thief has rt_1', 'fill-bad');
+            return msg(ctx, 'browser', 'auth', 'POST /token refresh rt_1 (old)', 'bad');
+          }).then(function () {
+            note(ctx, 'auth', 'reuse → revoke', 'fill-bad');
+            return msg(ctx, 'auth', 'browser', '401 · family revoked', 'bad');
+          }).then(function () {
+            S.refresh = '(revoked: log in again)'; S.retired = ['rt_1', 'rt_2']; renderToken(ctx);
+            S.foot.textContent = 'Thief now holds nothing valid.';
+            ctx.log('Reuse detected → rt_2 revoked too; user must log in again', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  function tryCall(orderId, tamper) {
+    var ctx = lab.ctx, S = ctx.state;
+    if (!S.token) { ctx.log('You: no token yet. Step to "Code + verifier are swapped for tokens" first.', 'warn'); return; }
+    newStep(ctx);
+    if (tamper) { S.role = 'admin'; renderToken(ctx); }
+    apiCall(ctx, orderId).then(function (r) {
+      ctx.log('You: ' + (tamper ? 'tampered token, ' : '') + 'GET /orders/' + orderId + ' → ' + r, r === '200' ? 'ok' : 'bad');
+      if (tamper) { S.role = 'user'; renderToken(ctx); }
+    });
+  }
+  document.getElementById('t-ok').addEventListener('click', function () { tryCall(1001, false); });
+  document.getElementById('t-idor').addEventListener('click', function () { tryCall(1002, false); });
+  document.getElementById('t-tamper').addEventListener('click', function () { tryCall(1001, true); });
+})();
+</script>
+</body>
+</html>

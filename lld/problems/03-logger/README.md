@@ -90,6 +90,6 @@ Is Chain of Responsibility really needed? A plain `handlers: LogHandler[]` loop 
 
 ## Concepts used
 
-- [Chain of Responsibility](../../concepts/patterns/p14-chain-of-responsibility.md) · [Strategy](../../concepts/patterns/p10-strategy.md) · [Singleton](../../concepts/patterns/p01-singleton.md) · [Decorator](../../concepts/patterns/p06-decorator.md) · [SOLID](../../concepts/02-solid.md)
-- HLD link: [Observability: logs, metrics, traces, SLOs](../../../hld/concepts/31-observability.md)
-- Visual: [Decorator and Chain of Responsibility](../../../visuals/v26-decorator-chain.html)
+- [Chain of Responsibility](../../4-behavioral/L25-chain-of-responsibility/README.md) · [Strategy](../../4-behavioral/L20-strategy/README.md) · [Singleton](../../2-creational/L08-singleton/README.md) · [Decorator](../../3-structural/L14-decorator/README.md) · [SOLID](../../1-foundations/L04-solid-srp-ocp/README.md)
+- HLD link: [Observability: logs, metrics, traces, SLOs](../../../hld/5-reliability/H30-observability/README.md)
+- Visual: [Decorator and Chain of Responsibility](../../3-structural/L14-decorator/visual.html)

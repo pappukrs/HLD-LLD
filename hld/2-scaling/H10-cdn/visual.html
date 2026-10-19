@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H10 CDN and Edge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: grid; grid-template-columns: auto 1fr auto; gap: 8px 12px; align-items: center; margin-bottom: 10px; font-size: 14px; }
+  .try input[type="range"] { width: 100%; }
+  .try output { font: 12px var(--font-mono); min-width: 5em; text-align: right; }
+  .try-out { font: 12.5px/1.6 var(--font-mono); color: var(--muted); }
+  .try-out b { color: var(--ink); }
+  .try-out .bad { color: var(--bad); }
+  .try-out .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H10 · Scaling</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>CDN: edges, shield, headers and invalidation</h1>
+    <p class="lede">Users in India, origin in the US. Watch the first request pay the long trip, the next ones get served from a nearby edge, the shield collapse misses, a wrong header leak private data, and a hashed file name make purges unnecessary.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Three users, three edge PoPs, a regional shield and a US origin"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Hit / response</span>
+        <span><i style="background: var(--bad)"></i>Miss / leak / stale</span>
+        <span><i style="background: var(--accent)"></i>Cached copy</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Try it: size the origin</h3>
+      <div class="try">
+        <label for="t-rps">Requests / s</label><input type="range" id="t-rps" min="10000" max="2000000" step="10000" value="500000"><output id="o-rps"></output>
+        <label for="t-hit">Edge hit rate</label><input type="range" id="t-hit" min="50" max="99.9" step="0.1" value="95"><output id="o-hit"></output>
+        <label for="t-pops">PoPs missing a new object</label><input type="range" id="t-pops" min="1" max="400" value="300"><output id="o-pops"></output>
+        <label for="t-shield">Origin shield</label><select id="t-shield"><option value="1" selected>on</option><option value="0">off</option></select><span></span>
+      </div>
+      <div class="try-out" id="t-out"></div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Static assets and media live in S3 behind a CDN. File names carry a content hash, so they are cached for a year with immutable and deploys never purge; only the HTML has a short s-maxage. Personal API responses are private, no-store. An origin shield and request collapsing turn a viral miss storm into one origin fetch. Paid videos use signed URLs that the edge verifies."</p>
+    </div>
+    <div class="note wide">
+      <h3>Which Cache-Control for what</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Content</th><th>Header</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>Hashed JS/CSS/images</td><td><code>public, max-age=31536000, immutable</code></td><td>New version = new URL, so caching forever is safe</td></tr>
+            <tr><td>HTML entry page</td><td><code>public, max-age=0, s-maxage=60, stale-while-revalidate=30</code></td><td>CDN keeps it briefly; browsers always revalidate</td></tr>
+            <tr><td>Shared API data (catalog, scores)</td><td><code>public, s-maxage=5..60</code></td><td>Same for everyone; short freshness</td></tr>
+            <tr><td>User-specific API (<code>/api/me</code>, cart)</td><td><code>private, no-store</code></td><td>Never in a shared cache</td></tr>
+            <tr><td>Paid video segments</td><td><code>public, max-age=86400</code> + signed URL</td><td>Cached at the edge, access checked by signature</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did user B see user A's profile?</summary><div><code>/api/me</code> is the same URL for everyone. With a public header the edge cached A's response under that URL and served it to B. Personal responses must be <code>private, no-store</code>.</div></details>
+      <details class="qa"><summary>Why prefer hashed file names over purge?</summary><div>A new version is a new URL, so nothing stale can be served, nothing needs purging, and you can cache for a year. A purge takes seconds to minutes and then every PoP misses at once.</div></details>
+      <details class="qa"><summary>What does the shield buy you?</summary><div>Misses from many PoPs for the same object become one origin request. Without it, a viral object means one origin fetch per PoP, all at the same moment.</div></details>
+      <details class="qa"><summary>Does a CDN help an uncacheable API?</summary><div>Yes. TLS ends at a nearby PoP and the edge reuses warm connections to the origin, saving long round trips on every new connection.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Previous: <a href="../H09-caching/visual.html">H09 Caching patterns</a></li>
+        <li>Used in: <a href="../../case-studies/14-video-streaming/README.md">Video streaming</a>, <a href="../../case-studies/16-photo-sharing/README.md">Photo sharing</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var USERS = [{ id: 'Bengaluru', y: 70 }, { id: 'Delhi', y: 190 }, { id: 'Kolkata', y: 310 }];
+  var POPS = [{ id: 'Chennai edge', y: 60 }, { id: 'Delhi edge', y: 180 }, { id: 'Kolkata edge', y: 300 }];
+  var UX = 20, UW = 96, PX = 180, PW = 170, PH = 84;
+  var SH = { x: 420, y: 168, w: 130, h: 90 }, OR = { x: 610, y: 168, w: 130, h: 90 };
+
+  function uMid(i) { return [UX + UW, USERS[i].y + 22]; }
+  function pIn(i) { return [PX, POPS[i].y + 30]; }
+  function pOut(i) { return [PX + PW, POPS[i].y + PH / 2]; }
+  function toPop(i) { return [uMid(i), pIn(i)]; }
+  function popToShield(i) { return [pOut(i), [390, POPS[i].y + PH / 2], [390, SH.y + SH.h / 2], [SH.x, SH.y + SH.h / 2]]; }
+  function shieldToOrigin() { return [[SH.x + SH.w, SH.y + SH.h / 2], [OR.x, OR.y + OR.h / 2]]; }
+  function rev(p) { return p.slice().reverse(); }
+
+  function renderPop(ctx, i) {
+    var S = ctx.state, lines = S.pops[i].lines;
+    var items = S.popCache[i];
+    for (var k = 0; k < 3; k++) {
+      var it = items[k];
+      lines[k].textContent = it ? it.k : '';
+      lines[k].setAttribute('class', 'mono small ' + (it ? (it.cls || '') : ''));
+    }
+  }
+  function putPop(ctx, i, key, cls) {
+    var items = ctx.state.popCache[i].filter(function (x) { return x.k !== key; });
+    items.unshift({ k: key, cls: cls });
+    ctx.state.popCache[i] = items.slice(0, 3);
+    renderPop(ctx, i);
+    ctx.flash(ctx.state.pops[i].g);
+  }
+  function putShield(ctx, key) {
+    var S = ctx.state;
+    S.shieldItems = [key].concat(S.shieldItems.filter(function (x) { return x !== key; })).slice(0, 3);
+    S.shieldItems.forEach(function (k, n) { S.shieldLines[n].textContent = k; });
+    ctx.flash(S.shieldG);
+  }
+  function originHit(ctx) { ctx.state.originCount++; ctx.state.originText.textContent = 'origin fetches: ' + ctx.state.originCount; ctx.flash(ctx.state.originG); }
+  function setLat(ctx, i, text, cls) { var t = ctx.state.lat[i]; t.textContent = text; t.setAttribute('class', 'mono small ' + (cls || '')); }
+
+  function box(ctx, x, y, w, h, title, sub, cls) {
+    var g = ctx.group();
+    ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: x + 10, y: y + 18, class: 'title', style: 'font-size: 13px', text: title }, g);
+    if (sub) ctx.el('text', { x: x + w - 8, y: y + 18, 'text-anchor': 'end', class: 'mono small muted', text: sub }, g);
+    return g;
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'India users, US origin', say: 'Three users, their nearest edge PoPs, one regional shield in Mumbai and the origin in us-east-1, about 230 ms away. Press Play.' },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.popCache = [[], [], []];
+      S.shieldItems = [];
+      S.originCount = 0;
+      S.pops = []; S.lat = [];
+      USERS.forEach(function (u, i) {
+        ctx.el('polyline', { points: toPop(i).join(' '), class: 'wire' });
+        ctx.el('polyline', { points: popToShield(i).join(' '), class: 'wire' });
+        ctx.el('rect', { x: UX, y: u.y, width: UW, height: 44, rx: 8, class: 'box' });
+        ctx.el('text', { x: UX + UW / 2, y: u.y + 27, 'text-anchor': 'middle', class: 'mono small', text: u.id });
+        S.lat.push(ctx.el('text', { x: UX, y: u.y + 62, class: 'mono small', text: '' }));
+      });
+      POPS.forEach(function (p, i) {
+        var g = box(ctx, PX, p.y, PW, PH, p.id, '~12 ms', '');
+        var lines = [0, 1, 2].map(function (k) { return ctx.el('text', { x: PX + 10, y: p.y + 40 + k * 15, class: 'mono small', text: '' }, g); });
+        S.pops.push({ g: g, lines: lines });
+      });
+      ctx.el('polyline', { points: shieldToOrigin().join(' '), class: 'wire dashed' });
+      ctx.el('text', { x: (SH.x + SH.w + OR.x) / 2, y: SH.y + SH.h / 2 - 8, 'text-anchor': 'middle', class: 'mono small muted', text: '~230 ms' });
+      S.shieldG = box(ctx, SH.x, SH.y, SH.w, SH.h, 'Shield', 'Mumbai', 'accent');
+      S.shieldLines = [0, 1, 2].map(function (k) { return ctx.el('text', { x: SH.x + 10, y: SH.y + 40 + k * 15, class: 'mono small', text: '' }, S.shieldG); });
+      S.originG = box(ctx, OR.x, OR.y, OR.w, OR.h, 'Origin', 'us-east-1', '');
+      ctx.el('text', { x: OR.x + 10, y: OR.y + 42, class: 'mono small muted', text: 'S3 + app LB' }, S.originG);
+      S.originText = ctx.el('text', { x: OR.x + 10, y: OR.y + 62, class: 'mono small', text: 'origin fetches: 0' }, S.originG);
+      S.header = ctx.el('text', { x: 420, y: 300, class: 'mono small', text: '' });
+      S.header2 = ctx.el('text', { x: 420, y: 318, class: 'mono small muted', text: '' });
+      S.banner = ctx.el('text', { x: 20, y: 448, class: 'mono', text: '' });
+    },
+    steps: [
+      {
+        title: 'First request: miss at the edge and the shield',
+        say: 'A user in Bengaluru loads <code>logo.v7.png</code>. The Chennai edge has nothing, the Mumbai shield has nothing, so the request crosses to the US origin. Both tiers store the response on the way back. This user waits ~270 ms.',
+        run: function (ctx) {
+          var S = ctx.state;
+          ctx.log('GET /img/logo.v7.png from Bengaluru');
+          return ctx.packet(toPop(0), { ms: 400 })
+            .then(function () { ctx.log('Chennai edge: MISS', 'bad'); return ctx.packet(popToShield(0), { ms: 500, cls: 'bad' }); })
+            .then(function () { ctx.log('Mumbai shield: MISS', 'bad'); return ctx.packet(shieldToOrigin(), { ms: 900, cls: 'bad', label: '230 ms' }); })
+            .then(function () { originHit(ctx); S.header.textContent = 'Cache-Control: public, max-age=31536000, immutable'; return ctx.packet(rev(shieldToOrigin()), { ms: 900, cls: 'ok' }); })
+            .then(function () { putShield(ctx, 'logo.v7.png'); return ctx.packet(rev(popToShield(0)), { ms: 500, cls: 'ok' }); })
+            .then(function () { putPop(ctx, 0, 'logo.v7.png', 'fill-accent'); return ctx.packet(rev(toPop(0)), { ms: 400, cls: 'ok' }); })
+            .then(function () { setLat(ctx, 0, 'miss: ~270 ms', 'fill-bad'); ctx.log('Stored at shield and Chennai edge for 1 year', 'info'); });
+        },
+      },
+      {
+        title: 'Next requests near Chennai: edge hit',
+        say: 'Everyone else routed to Chennai gets the logo from the edge in ~12 ms. The origin counter does not move. A 95% hit rate means the origin sees only 1 in 20 requests.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function (n) {
+            chain = chain.then(function () { return ctx.packet(toPop(0), { ms: 350 }); })
+              .then(function () { return ctx.packet(rev(toPop(0)), { ms: 350, cls: 'ok' }); });
+          });
+          return chain.then(function () { setLat(ctx, 0, 'hit: ~12 ms', 'fill-ok'); ctx.log('3 more requests: Chennai HIT, origin untouched', 'ok'); });
+        },
+      },
+      {
+        title: 'Delhi misses at its edge, but the shield has it',
+        say: 'Delhi\'s edge has never seen the logo. Its miss goes to the Mumbai shield, which already holds it, so the US origin is not asked again. The shield turns "one miss per PoP" into "one miss per object".',
+        run: function (ctx) {
+          return ctx.packet(toPop(1), { ms: 400 })
+            .then(function () { ctx.log('Delhi edge: MISS', 'bad'); return ctx.packet(popToShield(1), { ms: 500, cls: 'bad' }); })
+            .then(function () { ctx.flash(ctx.state.shieldG); ctx.log('Mumbai shield: HIT (origin not asked)', 'ok'); return ctx.packet(rev(popToShield(1)), { ms: 500, cls: 'ok' }); })
+            .then(function () { putPop(ctx, 1, 'logo.v7.png', 'fill-accent'); return ctx.packet(rev(toPop(1)), { ms: 400, cls: 'ok' }); })
+            .then(function () { setLat(ctx, 1, 'shield hit: ~40 ms', 'fill-ok'); });
+        },
+      },
+      {
+        title: 'A viral image: request collapsing',
+        say: 'A new product image goes viral. All three PoPs miss at the same instant, each with many waiting users. Each PoP sends one fetch (it holds the rest), and the shield sends one fetch to the origin. Without these, the origin would get every miss at once.',
+        run: function (ctx) {
+          ctx.log('New image sale.jpg: 3 PoPs × many users at once', 'warn');
+          return Promise.all([0, 1, 2].map(function (i) {
+            return Promise.all([0, 1, 2].map(function (k) { return ctx.wait(k * 70).then(function () { return ctx.packet(toPop(i), { ms: 380 }); }); }));
+          })).then(function () {
+            ctx.log('Each PoP collapses its users into 1 fetch', 'info');
+            return Promise.all([0, 1, 2].map(function (i) { return ctx.packet(popToShield(i), { ms: 500, cls: 'bad' }); }));
+          }).then(function () {
+            ctx.log('Shield collapses 3 PoP misses into 1 origin fetch', 'info');
+            return ctx.packet(shieldToOrigin(), { ms: 700, cls: 'bad' });
+          }).then(function () {
+            originHit(ctx);
+            return ctx.packet(rev(shieldToOrigin()), { ms: 700, cls: 'ok' });
+          }).then(function () {
+            putShield(ctx, 'sale.jpg');
+            return Promise.all([0, 1, 2].map(function (i) { return ctx.packet(rev(popToShield(i)), { ms: 500, cls: 'ok' }).then(function () { putPop(ctx, i, 'sale.jpg', 'fill-accent'); }); }));
+          }).then(function () { ctx.log('Origin fetches for sale.jpg: 1 (not 9, not 3)', 'ok'); });
+        },
+      },
+      {
+        title: 'The leak: /api/me cached as public',
+        say: 'A junior sets <code>Cache-Control: public, max-age=300</code> on every response. User A (Bengaluru) calls <code>/api/me</code>; the edge caches A\'s profile under that URL. User B on the same edge calls <code>/api/me</code> and gets A\'s name and email.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.header.textContent = '/api/me → Cache-Control: public, max-age=300';
+          S.header.setAttribute('class', 'mono small fill-bad');
+          return ctx.packet(toPop(0), { ms: 400, label: 'A: /api/me' })
+            .then(function () { return ctx.packet(popToShield(0).concat(shieldToOrigin().slice(1)), { ms: 900, cls: 'bad' }); })
+            .then(function () { originHit(ctx); return ctx.packet(rev(popToShield(0).concat(shieldToOrigin().slice(1))), { ms: 900, cls: 'ok' }); })
+            .then(function () { putPop(ctx, 0, '/api/me = Asha', 'fill-bad'); ctx.log('Edge cached /api/me with A\'s profile', 'warn'); return ctx.packet(toPop(0), { ms: 400, label: 'B: /api/me' }); })
+            .then(function () { return ctx.packet(rev(toPop(0)), { ms: 400, cls: 'bad', label: 'Asha\'s data' }); })
+            .then(function () { S.banner.textContent = 'B received A\'s profile: a data breach'; S.banner.setAttribute('class', 'mono fill-bad'); ctx.log('User B got user A\'s profile', 'bad'); });
+        },
+      },
+      {
+        title: 'The fix: private, no-store',
+        say: 'Personal responses carry <code>private, no-store</code>. The edge forwards them without storing anything, so each user gets their own data. The CDN still helps: TLS ends nearby and the edge reuses a warm connection to the origin.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.popCache[0] = S.popCache[0].filter(function (x) { return x.k.indexOf('/api/me') !== 0; });
+          renderPop(ctx, 0);
+          S.header.textContent = '/api/me → Cache-Control: private, no-store';
+          S.header.setAttribute('class', 'mono small fill-ok');
+          S.banner.textContent = '';
+          return ctx.packet(toPop(0), { ms: 400, label: 'B: /api/me' })
+            .then(function () { ctx.log('Edge: private → bypass cache', 'info'); return ctx.packet(popToShield(0).concat(shieldToOrigin().slice(1)), { ms: 900 }); })
+            .then(function () { originHit(ctx); return ctx.packet(rev(popToShield(0).concat(shieldToOrigin().slice(1))), { ms: 900, cls: 'ok' }); })
+            .then(function () { return ctx.packet(rev(toPop(0)), { ms: 400, cls: 'ok', label: 'B\'s data' }); })
+            .then(function () { ctx.log('B gets B\'s profile; nothing stored at the edge', 'ok'); });
+        },
+      },
+      {
+        title: 'Deploy with a fixed name: stale until purge',
+        say: 'A CSS fix ships as <code>style.css</code>, cached for a day. The Kolkata edge keeps serving the old file. A purge API call clears it from every PoP in seconds to minutes, and then every PoP misses at once.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.header.setAttribute('class', 'mono small');
+          S.header.textContent = 'style.css → max-age=86400 (fixed name)';
+          putPop(ctx, 2, 'style.css (v1)', 'fill-accent');
+          ctx.log('Origin now has style.css v2', 'info');
+          return ctx.packet(toPop(2), { ms: 400 })
+            .then(function () { putPop(ctx, 2, 'style.css (v1)', 'fill-bad'); return ctx.packet(rev(toPop(2)), { ms: 400, cls: 'bad', label: 'old v1' }); })
+            .then(function () {
+              setLat(ctx, 2, 'served stale v1', 'fill-bad');
+              ctx.log('Kolkata serves stale v1', 'bad');
+              ctx.log('POST /purge /style.css → all PoPs', 'warn');
+              S.popCache[2] = S.popCache[2].filter(function (x) { return x.k.indexOf('style.css') !== 0; });
+              renderPop(ctx, 2);
+              S.pops.forEach(function (p) { ctx.flash(p.g); });
+              return ctx.wait(300);
+            });
+        },
+      },
+      {
+        title: 'Deploy with a hashed name: nothing to purge',
+        say: 'The build emits <code>style.8c1d.css</code> and the HTML (cached only 60 s) points to it. It is a brand-new URL, so no cache can hold an old copy, and it can be cached for a year with <code>immutable</code>. Deploys never need a purge.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.header.textContent = 'style.8c1d.css → max-age=31536000, immutable';
+          S.header2.textContent = 'index.html → s-maxage=60, stale-while-revalidate=30';
+          return ctx.packet(toPop(2), { ms: 400, label: 'style.8c1d.css' })
+            .then(function () { return ctx.packet(popToShield(2).concat(shieldToOrigin().slice(1)), { ms: 900, cls: 'bad' }); })
+            .then(function () { originHit(ctx); putShield(ctx, 'style.8c1d.css'); return ctx.packet(rev(popToShield(2).concat(shieldToOrigin().slice(1))), { ms: 900, cls: 'ok' }); })
+            .then(function () { putPop(ctx, 2, 'style.8c1d.css', 'fill-accent'); return ctx.packet(rev(toPop(2)), { ms: 400, cls: 'ok' }); })
+            .then(function () { setLat(ctx, 2, 'new file, cached 1 year', 'fill-ok'); ctx.log('New URL = fresh by definition. No purge.', 'ok'); });
+        },
+      },
+      {
+        title: 'Signed URLs for paid video',
+        say: 'Video segments are cached at the edge like any file, but each URL carries <code>?exp=…&amp;sig=…</code>, an HMAC made by your server. The edge checks the signature and expiry itself: a valid link is served from cache, a forged or expired one gets <code>403</code> at the edge.',
+        run: function (ctx) {
+          putPop(ctx, 1, 'seg_042.ts (paid)', 'fill-accent');
+          return ctx.packet(toPop(1), { ms: 400, label: 'sig ok' })
+            .then(function () { ctx.log('Delhi edge: signature valid, serve from cache', 'ok'); return ctx.packet(rev(toPop(1)), { ms: 400, cls: 'ok' }); })
+            .then(function () { return ctx.packet(toPop(1), { ms: 400, label: 'forged sig' }); })
+            .then(function () { setLat(ctx, 1, 'forged: 403 at edge', 'fill-bad'); ctx.log('Forged signature → 403, origin never asked', 'bad'); return ctx.packet(rev(toPop(1)), { ms: 400, cls: 'bad', label: '403' }); });
+        },
+      },
+      {
+        title: 'Why physics favours the edge',
+        say: 'A new HTTPS connection needs about 3 round trips (TCP, TLS 1.3, request). To the US origin that is 3 × 230 ms ≈ 690 ms. To a nearby edge it is 3 × 12 ms ≈ 36 ms, plus one warm 230 ms hop on a miss. Even uncacheable APIs get faster.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var g = ctx.group({ opacity: 0 });
+          var rows = [['direct to origin', 690, 'fill-bad'], ['edge miss (warm)', 266, 'fill-warn'], ['edge hit', 36, 'fill-ok']];
+          ctx.el('text', { x: 420, y: 352, class: 'mono small muted', text: 'first HTTPS request, new connection' }, g);
+          var bars = rows.map(function (r, i) {
+            ctx.el('text', { x: 420, y: 374 + i * 22, class: 'mono small', text: r[0] }, g);
+            var b = ctx.el('rect', { x: 540, y: 364 + i * 22, width: 0, height: 12, rx: 3, class: r[2] }, g);
+            ctx.el('text', { x: 545 + (r[1] / 690) * 150, y: 374 + i * 22, class: 'mono small', text: r[1] + ' ms' }, g);
+            return { b: b, w: (r[1] / 690) * 150 };
+          });
+          S.header2.textContent = '';
+          ctx.log('690 ms direct vs 36 ms at the edge', 'info');
+          return ctx.fade(g, 1, 300).then(function () { return Promise.all(bars.map(function (x) { return ctx.animate(x.b, { width: x.w }, 700); })); });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  function fmt(n) { return Math.round(n).toLocaleString(); }
+  function update() {
+    var rps = +document.getElementById('t-rps').value;
+    var hit = +document.getElementById('t-hit').value / 100;
+    var pops = +document.getElementById('t-pops').value;
+    var shield = document.getElementById('t-shield').value === '1';
+    document.getElementById('o-rps').textContent = fmt(rps);
+    document.getElementById('o-hit').textContent = (hit * 100).toFixed(1) + '%';
+    document.getElementById('o-pops').textContent = pops;
+    var origin = rps * (1 - hit);
+    var burst = shield ? 1 : pops;
+    document.getElementById('t-out').innerHTML =
+      'origin steady load: <b>' + fmt(origin) + ' req/s</b> (' + ((1 - hit) * 100).toFixed(1) + '% of ' + fmt(rps) + ')<br>' +
+      'new viral object: <b class="' + (shield ? 'ok' : 'bad') + '">' + burst + '</b> simultaneous origin fetch' + (burst > 1 ? 'es' : '') + (shield ? ' (shield collapses them)' : ' (one per PoP)') + '<br>' +
+      'traffic ×100 spike: origin gets <b class="' + (origin * 100 > 50000 ? 'bad' : 'ok') + '">' + fmt(origin * 100) + ' req/s</b><br>' +
+      'hit 95% → 99% cuts origin load <b>5x</b>';
+  }
+  ['t-rps', 't-hit', 't-pops', 't-shield'].forEach(function (id) { document.getElementById(id).addEventListener('input', update); });
+  update();
+})();
+</script>
+</body>
+</html>

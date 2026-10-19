@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L07 Design principles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+
+  .stage .link-bad { fill: none; stroke: var(--bad); stroke-width: 1.6; }
+  .stage .link-ok { fill: none; stroke: var(--ok); stroke-width: 1.6; }
+  .stage .capsule { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+  .try input[type="text"] { font: 13px var(--font-mono); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); width: 100%; min-width: 0; }
+  .try { flex-direction: column; align-items: stretch; }
+  .try .row { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L07 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>DRY, KISS, YAGNI, coupling, cohesion, Demeter</h1>
+    <p class="lede">A checkout that reaches into the wallet, a tax rule copied three times and a junk-drawer utility class. Watch a small change ripple through the bad design, then stay contained in the good one.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Changes rippling through coupled modules and being contained by good design"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Class / object</span>
+        <span><i style="background: var(--accent)"></i>Boundary / owner of a rule</span>
+        <span><i style="background: var(--bad)"></i>Broken by the change / stranger</span>
+        <span><i style="background: var(--ok)"></i>Contained / friend</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">// coupling: callers use methods, never Wallet's fields</span><span class="ln" data-l="1">class Wallet { #entries: number[] = []; has(a: number) { ... } debit(a: number) { ... } }</span><span class="ln" data-l="2">// Law of Demeter: ask a friend, not a stranger</span><span class="ln" data-l="3">if (order.getCustomer().getWallet().getBalance() &gt;= total) { ... }   // before</span><span class="ln" data-l="4">if (order.canPay(total)) { ... }                                      // after</span><span class="ln" data-l="5">class Order { canPay(a: number) { return this.customer.canAfford(a); } }</span><span class="ln" data-l="6">class Customer { canAfford(a: number) { return this.wallet.has(a); } }</span><span class="ln" data-l="7">// cohesion: one theme per class</span><span class="ln" data-l="8">class TaxPolicy { ... }  class SmsSender { ... }  class DateFormatter { ... }</span><span class="ln" data-l="9">// DRY: one owner for the rule</span><span class="ln" data-l="10">class TaxPolicy { constructor(private gst: number) {} addTax(a: number) { return Math.round(a * (1 + this.gst)); } }</span><span class="ln" data-l="11">// KISS / YAGNI: one provider today = one class</span><span class="ln" data-l="12">class RazorpayClient { charge(amount: number) { ... } }</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: Law of Demeter checker</h3>
+      <p>Type a call chain. The checker counts how many objects you reach through, and ignores fluent data chains like <code>filter().map()</code>.</p>
+      <div class="try">
+        <input type="text" id="t-chain" value="order.getCustomer().getWallet().getBalance()" aria-label="call chain">
+        <div class="row" id="t-examples"></div>
+        <button class="btn primary" type="button" id="t-check">Check</button>
+      </div>
+      <div class="try-out" id="try-out">Press Check.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Checkout doesn't reach into the wallet. It asks <code>order.canPay(amount)</code>, and each object answers for its own data, so when the wallet moves to a ledger only <code>Wallet</code> changes. The GST rule lives in one <code>TaxPolicy</code>, so cart and invoice can't disagree. And I'm not building a plugin system for one payment provider; if more are coming, I'll add an interface then."</p>
+    </div>
+    <div class="note wide">
+      <h3>Six principles, one table</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Principle</th><th>Rule</th><th>Smell</th><th>Fix</th><th>Overdone looks like</th></tr></thead>
+          <tbody>
+            <tr><td>Low coupling</td><td>Know as little as possible about other modules</td><td>One change forces edits in many classes</td><td>Encapsulate; interfaces; pass data; events</td><td>Interfaces and events for code that never changes</td></tr>
+            <tr><td>High cohesion</td><td>Everything in a module serves one theme</td><td><code>Utils</code>, <code>Manager</code>, methods using disjoint fields</td><td>Split by theme</td><td>One-method classes everywhere</td></tr>
+            <tr><td>Law of Demeter</td><td>Call only this, fields, params, objects you made</td><td><code>a.getB().getC().doX()</code></td><td>Tell, don't ask: <code>a.doX()</code></td><td>Wrappers for every field of a plain DTO</td></tr>
+            <tr><td>DRY</td><td>Each piece of knowledge has one owner</td><td>Same formula in 3 files</td><td>Extract the rule to its owner</td><td>Merging look-alike code that encodes different rules</td></tr>
+            <tr><td>KISS</td><td>Fewest concepts that solve today's problem</td><td>Reflection, deep generics, layers of managers</td><td>Plain classes, one interface where variation is real</td><td>A 400-line if/else called "simple"</td></tr>
+            <tr><td>YAGNI</td><td>Don't build for requirements you don't have</td><td>Plugin system for one provider</td><td>Build it when the need is real</td><td>Ignoring extensibility the problem asked for</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Is <code>items.filter(..).map(..)</code> a Demeter violation?</summary><div>No. It is a fluent chain over data. Demeter is about reaching through objects with behaviour to use their internals.</div></details>
+      <details class="qa"><summary>Why did the loose design survive the wallet change?</summary><div>Callers only used <code>Wallet.has()</code> and <code>debit()</code>. Swapping a balance field for a ledger changed what is inside, not the methods, so the ripple stopped at the boundary.</div></details>
+      <details class="qa"><summary>Two services both use <code>maxRetries = 3</code>. DRY them?</summary><div>Only if it is the same decision. Different owners and reasons means incidental duplication; keep them separate.</div></details>
+      <details class="qa"><summary>OCP says add interfaces, YAGNI says don't. Which wins?</summary><div>Both: interfaces where the problem says behaviour varies, nothing speculative elsewhere.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+
+
+  function counter(ctx, g, label, val) {
+    ctx.el('rect', { x: 610, y: 36, width: 130, height: 54, rx: 8, class: 'box' }, g);
+    T(ctx, g, 675, 56, label, 'mono small muted', 'middle');
+    return T(ctx, g, 675, 80, val, 'title', 'middle');
+  }
+
+  // ---------- scenes ----------
+  function sceneTight(ctx, g) {
+    T(ctx, g, 20, 28, 'Tight coupling: three services read a field', 'title');
+    var svcs = ['CheckoutService', 'InvoiceService', 'RefundService'].map(function (n, i) {
+      return cls(ctx, g, 30, 70 + i * 110, 200, n, ['reads wallet.balance'], { cls: 'signal' });
+    });
+    var w = cls(ctx, g, 470, 170, 200, 'Wallet', ['+ balance: number   public'], { cls: 'signal' });
+    var wy = parseFloat(w.lines[0].getAttribute('y')) - 4;
+    svcs.forEach(function (s) { ctx.el('path', { d: 'M230,' + (s.b.y + 40) + ' C350,' + (s.b.y + 40) + ' 360,' + wy + ' 470,' + wy, class: 'link-bad' }, g); });
+    var count = counter(ctx, g, 'classes broken', '0');
+    ctx.state.tight = { svcs: svcs, w: w, wy: wy, count: count };
+  }
+
+  function sceneLoose(ctx, g) {
+    T(ctx, g, 20, 28, 'Loose coupling: talk to methods, not fields', 'title');
+    var svcs = ['CheckoutService', 'InvoiceService', 'RefundService'].map(function (n, i) {
+      return cls(ctx, g, 20, 70 + i * 110, 180, n, ['customer.canAfford(x)'], { cls: 'signal' });
+    });
+    var cu = cls(ctx, g, 260, 175, 160, 'Customer', ['+ canAfford(x)'], { cls: 'signal' });
+    ctx.el('rect', { x: 460, y: 130, width: 270, height: 150, rx: 30, class: 'capsule' }, g);
+    T(ctx, g, 595, 158, 'Wallet', 'b', 'middle');
+    var inner = T(ctx, g, 595, 205, '#balance: number', 'mono small', 'middle');
+    T(ctx, g, 595, 262, '+ has(x)   + debit(x)', 'mono small fill-ok', 'middle');
+    svcs.forEach(function (s) { arrow(ctx, g, 'M200,' + (s.b.y + 40) + ' L260,' + (cu.b.cy), 'assoc'); });
+    arrow(ctx, g, 'M420,205 H460', 'assoc');
+    var count = counter(ctx, g, 'classes broken', '0');
+    ctx.state.loose = { svcs: svcs, cu: cu, inner: inner, count: count };
+  }
+
+  var OBJ = [['CheckoutService', 20], ['order', 210], ['customer', 400], ['wallet', 590]];
+  function sceneDemeter(ctx, g) {
+    T(ctx, g, 20, 28, 'Law of Demeter: who does checkout talk to?', 'title');
+    var code = T(ctx, g, 20, 70, 'order.getCustomer().getWallet().getBalance() >= total', 'mono');
+    var boxes = OBJ.map(function (o, i) { return cls(ctx, g, o[1], 200, 150, o[0], [], { cls: i === 0 ? 'accent' : 'signal' }); });
+    var arcs = ctx.group({ opacity: 0 }, g);
+    ctx.el('path', { d: 'M95,200 C95,120 475,120 475,200', class: 'link-bad' }, arcs);
+    ctx.el('path', { d: 'M95,226 C95,330 665,330 665,226', class: 'link-bad' }, arcs);
+    T(ctx, arcs, 285, 120, 'stranger', 'mono small fill-bad', 'middle');
+    T(ctx, arcs, 380, 322, 'stranger', 'mono small fill-bad', 'middle');
+    ctx.el('path', { d: 'M170,213 H210', class: 'link-ok' }, arcs);
+    T(ctx, arcs, 190, 205, 'friend', 'mono small fill-ok', 'middle');
+    var good = ctx.group({ opacity: 0 }, g);
+    [[170, 210], [360, 400], [550, 590]].forEach(function (p) {
+      ctx.el('path', { d: 'M' + p[0] + ',213 H' + p[1], class: 'link-ok' }, good);
+      T(ctx, good, (p[0] + p[1]) / 2, 205, 'friend', 'mono small fill-ok', 'middle');
+    });
+    var methods = ctx.group({ opacity: 0 }, g);
+    ['canPay(x)', 'canAfford(x)', 'has(x)'].forEach(function (m, i) { T(ctx, methods, OBJ[i + 1][1] + 75, 255, m, 'mono small fill-ok', 'middle'); });
+    ctx.state.dm = { code: code, boxes: boxes, arcs: arcs, good: good, methods: methods, g: g };
+  }
+
+  var JUNK = [['formatDate()', 'locale'], ['calcGst()', 'gstRate'], ['sendSms()', 'smsClient'], ['hashPassword()', 'salt']];
+  function sceneCohesion(ctx, g) {
+    T(ctx, g, 20, 28, 'Cohesion: does everything here belong together?', 'title');
+    ctx.el('rect', { x: 30, y: 60, width: 330, height: 200, rx: 8, class: 'box bad' }, g);
+    T(ctx, g, 195, 82, 'OrderUtils', 'b', 'middle');
+    var homes = ['DateFormatter', 'TaxPolicy', 'SmsSender', 'PasswordHasher'].map(function (n, i) {
+      var hg = ctx.group({ opacity: 0 }, g);
+      ctx.el('rect', { x: 400 + (i % 2) * 180, y: 120 + Math.floor(i / 2) * 140, width: 165, height: 110, rx: 8, class: 'box ok' }, hg);
+      T(ctx, hg, 482 + (i % 2) * 180, 142 + Math.floor(i / 2) * 140, n, 'b', 'middle');
+      return hg;
+    });
+    var chips = JUNK.map(function (j, i) { return chip(ctx, g, 45, 115 + i * 40, 140, j[0], 'signal'); });
+    var fields = JUNK.map(function (j, i) { return chip(ctx, g, 230, 115 + ((i * 3) % 4) * 40, 110, j[1], ''); });
+    var wires = ctx.group({}, g);
+    JUNK.forEach(function (j, i) { ctx.el('path', { d: 'M185,' + (115 + i * 40) + ' L230,' + (115 + ((i * 3) % 4) * 40), class: 'link-bad' }, wires); });
+    var score = counter(ctx, g, 'lack of cohesion', '1.00');
+    ctx.state.co = { chips: chips, fields: fields, wires: wires, score: score, homes: homes };
+  }
+
+  function sceneDry(ctx, g, fixed) {
+    T(ctx, g, 20, 28, fixed ? 'DRY: one owner for the tax rule' : 'DRY broken: one rule, three copies', 'title');
+    var names = ['Cart', 'Invoice', 'Refund'];
+    var boxes = names.map(function (n, i) {
+      return cls(ctx, g, 40 + i * 240, 250, 200, n, [fixed ? 'tax.addTax(1000)' : 'Math.round(1000 * 1.18)'], { cls: 'signal' });
+    });
+    var totals = boxes.map(function (b) { return T(ctx, g, b.b.cx, b.b.bottom + 30, '= 1180', 'mono b', 'middle'); });
+    var tp = null;
+    if (fixed) {
+      tp = cls(ctx, g, 270, 70, 220, 'TaxPolicy', ['gst = 0.18', 'addTax(a)'], { cls: 'accent' });
+      boxes.forEach(function (b) { arrow(ctx, g, 'M' + b.b.cx + ',' + b.b.y + ' L' + tp.b.cx + ',' + tp.b.bottom, 'assoc'); });
+    } else {
+      chip(ctx, g, 280, 90, 200, 'Change: GST 18% → 12%', 'accent');
+    }
+    ctx.state.dry = { boxes: boxes, totals: totals, tp: tp };
+  }
+
+  function sceneKiss(ctx, g) {
+    T(ctx, g, 20, 28, 'KISS / YAGNI: one provider, five layers?', 'title');
+    var names = ['PaymentProviderManager', 'ProviderRegistry', 'ProviderFactory', 'AbstractProviderPlugin', 'RazorpayPlugin'];
+    var tower = names.map(function (n, i) {
+      var b = cls(ctx, g, 60 + i * 18, 60 + i * 66, 260, n, [], { cls: 'signal' });
+      if (i > 0) arrow(ctx, b, 'M' + (190 + (i - 1) * 18) + ',' + (60 + (i - 1) * 66 + 26) + ' V' + (60 + i * 66), 'assoc');
+      return b;
+    });
+    var simple = cls(ctx, g, 470, 180, 230, 'RazorpayClient', ['charge(amount)'], { cls: 'ok' });
+    simple.setAttribute('opacity', 0);
+    var note = ctx.group({ opacity: 0 }, g);
+    T(ctx, note, 470, 270, 'Same behaviour. 1 class, not 5.', 'small fill-ok');
+    T(ctx, note, 470, 292, 'Add an interface when a second', 'small muted');
+    T(ctx, note, 470, 312, 'provider is a real requirement.', 'small muted');
+    ctx.state.kiss = { tower: tower, simple: simple, note: note };
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Small changes, big ripples', say: 'Each step makes one realistic change and shows how far it spreads. Good design keeps the ripple small.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneTight(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'Tight coupling: the ripple spreads',
+        say: 'The wallet team replaces the <code>balance</code> field with a ledger of entries. Three services read that field directly, so all three break. The change was inside one class; the damage is in four.',
+        run: function (ctx) {
+          var s = ctx.state.tight;
+          s.w.lines[0].textContent = '+ entries: number[] (new)';
+          s.w.lines[0].setAttribute('class', 'mono small fill-bad');
+          ctx.flash(s.w.r);
+          return Promise.all(s.svcs.map(function (sv) {
+            return ctx.packet([[470, s.wy], [360, s.wy], [230, sv.b.y + 40]], { cls: 'bad', ms: 900 });
+          })).then(function () {
+            s.svcs.forEach(function (sv) { sv.r.setAttribute('class', 'box bad'); ctx.flash(sv.r); });
+            s.count.textContent = '3';
+            ctx.log('Wallet.balance → entries[]: Checkout, Invoice, Refund break', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Loose coupling: the ripple stops at the wall',
+        say: 'Now callers go through <code>customer.canAfford(x)</code>, and the customer calls <code>wallet.has(x)</code>. The same change happens inside the wallet. Its methods keep their meaning, so nothing outside breaks.',
+        run: function (ctx) {
+          hl([0, 1]);
+          return swap(ctx, function (g) { sceneLoose(ctx, g); }).then(function () {
+            var s = ctx.state.loose;
+            s.inner.textContent = '#entries: number[]';
+            s.inner.setAttribute('class', 'mono small fill-accent');
+            ctx.flash(s.inner);
+            return ctx.packet([[595, 205], [470, 205]], { cls: 'bad', ms: 600 });
+          }).then(function () {
+            ctx.log('Same change: contained inside Wallet. 0 callers broken.', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Law of Demeter: a train wreck',
+        say: '<code>order.getCustomer().getWallet().getBalance()</code>: checkout talks to the order (a friend), but then to the customer and the wallet, objects it only got by reaching through. Checkout now depends on three classes\' shapes.',
+        run: function (ctx) {
+          hl([2, 3]);
+          return swap(ctx, function (g) { sceneDemeter(ctx, g); }).then(function () {
+            var hops = [[95, 285], [285, 95], [95, 475], [475, 95], [95, 665]];
+            var chain = Promise.resolve();
+            hops.forEach(function (h, i) {
+              chain = chain.then(function () {
+                return ctx.packet([[h[0], 213], [h[1], 213]], { cls: i % 2 ? 'accent' : (i === 0 ? 'ok' : 'bad'), ms: 450, label: ['getCustomer()', 'customer', 'getWallet()', 'wallet', 'getBalance()'][i] });
+              });
+            });
+            return chain;
+          }).then(function () {
+            ctx.fade(ctx.state.dm.arcs, 1, 400);
+            ctx.log('checkout → order (friend) → customer (stranger) → wallet (stranger)', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Tell, don\'t ask: one hop each',
+        say: 'Checkout asks <code>order.canPay(total)</code>. The order asks its customer, the customer asks its wallet. Each object talks only to its own field. The answer travels back; nobody reached inside anyone.',
+        run: function (ctx) {
+          hl([4, 5, 6]);
+          var d = ctx.state.dm;
+          d.code.textContent = 'order.canPay(total)';
+          d.code.setAttribute('class', 'mono fill-ok');
+          return ctx.fade(d.arcs, 0, 300).then(function () {
+            ctx.fade(d.methods, 1, 300);
+            return ctx.fade(d.good, 1, 300);
+          }).then(function () {
+            return ctx.packet([[95, 213], [285, 213], [475, 213], [665, 213]], { cls: 'ok', ms: 1200, label: 'canPay' });
+          }).then(function () {
+            return ctx.packet([[665, 213], [95, 213]], { cls: 'accent', ms: 900, label: 'true' });
+          }).then(function () { ctx.log('each object talks only to its direct field: friends only', 'ok'); });
+        },
+      },
+      {
+        title: 'Low cohesion: the junk drawer',
+        say: '<code>OrderUtils</code> formats dates, computes GST, sends SMS and hashes passwords. Each method uses a different field. Nothing here belongs together, so every team edits this file.',
+        run: function (ctx) {
+          hl([7]);
+          return swap(ctx, function (g) { sceneCohesion(ctx, g); }).then(function () {
+            ctx.state.co.chips.forEach(function (c) { ctx.flash(c); });
+            ctx.log('4 methods, 4 fields, 0 shared: lack of cohesion = 1.00', 'bad');
+            return ctx.wait(400);
+          });
+        },
+      },
+      {
+        title: 'High cohesion: regroup by theme',
+        say: 'Each method moves, with the field it uses, into a class about one thing: <code>DateFormatter</code>, <code>TaxPolicy</code>, <code>SmsSender</code>, <code>PasswordHasher</code>. Each new class is fully cohesive.',
+        run: function (ctx) {
+          hl([8]);
+          var c = ctx.state.co;
+          ctx.fade(c.wires, 0, 300);
+          c.homes.forEach(function (h) { ctx.fade(h, 1, 300); });
+          return Promise.all(c.chips.map(function (ch, i) {
+            var x = 412 + (i % 2) * 180, y = 175 + Math.floor(i / 2) * 140;
+            return Promise.all([ctx.move(ch, x, y, 800), ctx.move(c.fields[i], x + 20, y + 34, 800)]);
+          })).then(function () {
+            c.score.textContent = '0.00';
+            ctx.flash(c.score);
+            ctx.log('4 classes, each method uses its class\'s field: cohesion high', 'ok');
+          });
+        },
+      },
+      {
+        title: 'DRY broken: the forgotten copy',
+        say: 'The GST formula lives in cart, invoice and refund. GST drops to 12%. The change reaches two of the three copies. Now the invoice says 1180 while the cart charged 1120.',
+        run: function (ctx) {
+          hl([9]);
+          return swap(ctx, function (g) { sceneDry(ctx, g, false); }).then(function () {
+            var d = ctx.state.dry;
+            return Promise.all([0, 2].map(function (i) {
+              return ctx.packet([[380, 104], [d.boxes[i].b.cx, d.boxes[i].b.y]], { cls: 'accent', ms: 800, label: '1.12' });
+            }));
+          }).then(function () {
+            var d = ctx.state.dry;
+            [0, 2].forEach(function (i) { d.boxes[i].lines[0].textContent = 'Math.round(1000 * 1.12)'; d.totals[i].textContent = '= 1120'; });
+            d.totals[1].setAttribute('class', 'mono b fill-bad');
+            d.boxes[1].r.setAttribute('class', 'box bad');
+            ctx.flash(d.boxes[1].r);
+            ctx.log('cart 1120, invoice 1180, refund 1120: the copies disagree', 'bad');
+          });
+        },
+      },
+      {
+        title: 'DRY: one owner for the rule',
+        say: 'Move the rule into <code>TaxPolicy</code>. Cart, invoice and refund call it. The GST change is one edit in one place, and all three always agree.',
+        run: function (ctx) {
+          hl([10]);
+          return swap(ctx, function (g) { sceneDry(ctx, g, true); }).then(function () {
+            var d = ctx.state.dry;
+            d.tp.lines[0].textContent = 'gst = 0.12';
+            ctx.flash(d.tp.r);
+            return Promise.all(d.boxes.map(function (b) {
+              return ctx.packet([[d.tp.b.cx, d.tp.b.bottom], [b.b.cx, b.b.y]], { cls: 'ok', ms: 800 });
+            }));
+          }).then(function () {
+            ctx.state.dry.totals.forEach(function (t) { t.textContent = '= 1120'; t.setAttribute('class', 'mono b fill-ok'); });
+            ctx.log('1 edit in TaxPolicy → cart, invoice, refund all 1120', 'ok');
+          });
+        },
+      },
+      {
+        title: 'KISS and YAGNI: collapse the tower',
+        say: 'One payment provider, five layers of manager, registry, factory and plugin. Nobody asked for plugins. Replace the tower with one <code>RazorpayClient</code>. Add an interface when a second provider is real.',
+        run: function (ctx) {
+          hl([11, 12]);
+          return swap(ctx, function (g) { sceneKiss(ctx, g); }).then(function () {
+            var k = ctx.state.kiss;
+            return Promise.all(k.tower.map(function (b, i) {
+              return ctx.wait(i * 120).then(function () { return ctx.fade(b, 0.15, 400); });
+            })).then(function () { return ctx.fade(k.simple, 1, 400); }).then(function () {
+              ctx.log('5 speculative classes → 1 class, same behaviour', 'ok');
+              return ctx.fade(k.note, 1, 300);
+            });
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it: Demeter checker ----------
+  var FLUENT = /^(map|filter|reduce|forEach|find|some|every|slice|concat|flat|flatMap|sort|join|split|trim|toLowerCase|toUpperCase|then|catch|finally|where|andWhere|orderBy|select|limit|offset|set|with|build|pipe|subscribe)$/;
+  var EX = ['order.getCustomer().getWallet().getBalance()', 'order.canPay(total)', 'users.filter(u => u.active).map(u => u.email)', 'this.repo.findById(id)', 'ride.getDriver().getCar().getPlate()', 'qb.where("a").orderBy("b").limit(10)'];
+  var input = document.getElementById('t-chain'), out = document.getElementById('try-out');
+  function check() {
+    var src = input.value.trim().replace(/\([^()]*\)/g, '()').replace(/\([^()]*\)/g, '()');
+    var parts = src.split('.').map(function (p) { return p.replace(/\(\)$/, '').trim(); }).filter(Boolean);
+    if (parts[0] === 'this') parts.shift();
+    var calls = parts.slice(1);
+    var nonFluent = calls.filter(function (c) { return !FLUENT.test(c); });
+    var hops = Math.max(0, nonFluent.length - 1);
+    var lines = ['root: ' + (parts[0] || '?') + '   members called: ' + (calls.join(' → ') || 'none')];
+    if (nonFluent.length < calls.length) lines.push('fluent/data calls ignored: ' + calls.filter(function (c) { return FLUENT.test(c); }).join(', '));
+    if (hops === 0) lines.push('✓ OK: you talk to one object (a friend).');
+    else lines.push('✗ Reaches through ' + hops + ' object' + (hops > 1 ? 's' : '') + ' you did not get directly (strangers).\n  Fix: tell, don\'t ask. Add a method on "' + parts[0] + '" that does the work, e.g. ' + parts[0] + '.' + (nonFluent[nonFluent.length - 1] || 'doIt').replace(/^get/, 'canUse') + '(...)');
+    out.textContent = lines.join('\n');
+  }
+  var exBox = document.getElementById('t-examples');
+  EX.forEach(function (e, i) {
+    var b = document.createElement('button');
+    b.className = 'btn'; b.type = 'button'; b.textContent = 'Example ' + (i + 1);
+    b.title = e;
+    b.addEventListener('click', function () { input.value = e; check(); });
+    exBox.appendChild(b);
+  });
+  document.getElementById('t-check').addEventListener('click', check);
+})();
+</script>
+</body>
+</html>

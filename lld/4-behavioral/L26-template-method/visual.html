@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L26 Template Method</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .kind { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; }
+  .stage .ext { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 3px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  pre.code .ln.badl { background: rgba(184, 56, 47, 0.14); box-shadow: inset 3px 0 0 var(--bad); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .filelinks { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L26 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Template Method: one webhook flow, many providers</h1>
+    <p class="lede">The base class owns the steps and their order in <code>handle()</code>. Each provider subclass fills in only <code>verifySignature</code> and <code>parse</code>, and may use the <code>afterApply</code> hook. The shared dedupe step can never be skipped.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="Abstract webhook handler skeleton with provider subclasses"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Running now</span>
+        <span><i style="background: var(--ok)"></i>Step passed</span>
+        <span><i style="background: var(--bad)"></i>Flow stopped</span>
+        <span><i style="background: var(--signal)"></i>Call down to subclass</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Try it">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 470" role="img" aria-label="Interactive webhook handler"></svg>
+      </div>
+      <div class="controls">
+        <label>Provider
+          <select id="try-provider">
+            <option value="razorpay">RazorpayHandler</option>
+            <option value="stripe">StripeHandler</option>
+            <option value="cashfree">CashfreeHandler</option>
+          </select>
+        </label>
+        <label>Event id <input type="text" id="try-event" value="evt_1" size="7"></label>
+        <label>Result
+          <select id="try-status"><option value="SUCCESS">success</option><option value="FAILED">failed</option></select>
+        </label>
+        <label><input type="checkbox" id="try-sig" checked> valid signature</label>
+        <button class="btn primary" type="button" id="try-send">Send webhook</button>
+        <button class="btn" type="button" id="try-reset">Clear</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Send your own webhooks</h2>
+        <p>Pick a provider and send. Then send the same event id again: the shared dedupe step catches it for every provider. Untick the signature box to see the flow stop at step 1.</p>
+      </section>
+      <section class="log">
+        <h3>Handler log</h3>
+        <ol id="try-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Every provider's webhook follows the same flow: verify, parse, dedupe by event id, update the payment, reply. I put that flow in an abstract <code>WebhookHandler.handle()</code>, so the order and the dedupe can't be skipped. Each provider implements only <code>verifySignature</code> and <code>parse</code>. Extra per-provider work goes in the <code>afterApply</code> hook. If we need to swap steps at runtime, I inject them as a strategy instead."</p>
+    </div>
+    <div class="note">
+      <h3>The code (lines light up with the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">abstract class WebhookHandler {</span><span class="ln" data-l="1">  handle(raw: RawWebhook): string {</span><span class="ln" data-l="2">    if (!this.verifySignature(raw)) return this.reply(401);</span><span class="ln" data-l="3">    const e = this.parse(raw.body);</span><span class="ln" data-l="4">    if (seen.has(e.eventId)) return this.reply(200, 'dup');</span><span class="ln" data-l="5">    seen.add(e.eventId); db.set(e.paymentId, e.status);</span><span class="ln" data-l="6">    this.afterApply(e);              // hook</span><span class="ln" data-l="7">    return this.reply(200, 'ok');</span><span class="ln" data-l="8">  }</span><span class="ln" data-l="9">  protected abstract verifySignature(raw: RawWebhook): boolean;</span><span class="ln" data-l="10">  protected abstract parse(body: string): PaymentEvent;</span><span class="ln" data-l="11">  protected afterApply(_e: PaymentEvent): void {}</span><span class="ln" data-l="12">}</span><span class="ln" data-l="13">class StripeHandler extends WebhookHandler { /* 2 steps + hook */ }</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Template Method vs Strategy vs copy-paste</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Copy the flow per provider</th><th>Template Method</th><th>Strategy (injected steps)</th></tr></thead>
+          <tbody>
+            <tr><td>Where the order lives</td><td>In every class (drifts)</td><td>Base class <code>handle()</code></td><td>One processor class</td></tr>
+            <tr><td>Mechanism</td><td>None</td><td>Inheritance, subclass overrides steps</td><td>Composition, steps passed in</td></tr>
+            <tr><td>Swap at runtime</td><td>No</td><td>No (class fixed at <code>new</code>)</td><td>Yes</td></tr>
+            <tr><td>Shared steps guaranteed</td><td>No</td><td>Yes, if nobody overrides <code>handle()</code></td><td>Yes</td></tr>
+            <tr><td>Best for</td><td>Never</td><td>Stable skeleton, few variants, framework hooks</td><td>Parts that mix and match, easy unit tests</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Which steps can a subclass change, and which can it not?</summary><div>It must implement abstract steps, may override default steps and hooks, and must not touch fixed steps or the template method itself.</div></details>
+      <details class="qa"><summary>Why did the retried Razorpay event not credit twice?</summary><div>Dedupe is a fixed step in the base class. Every subclass gets it for free and cannot skip it.</div></details>
+      <details class="qa"><summary>What is a hook, and why is it empty by default?</summary><div>An optional extension point. Empty means "do nothing" so most subclasses can ignore it. Stripe overrides it to alert on failures.</div></details>
+      <details class="qa"><summary>Where does Node use this pattern?</summary><div>Streams: <code>Readable</code> calls your <code>_read()</code>, <code>Transform</code> calls <code>_transform()</code> and <code>_flush()</code>. NestJS lifecycle hooks too.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/05-notification-service/README.md">Notification Service</a> (validate, render, deliver)</li>
+        <li>Same idea: <a href="../../problems/03-logger/README.md">Logger</a>, <a href="../../problems/11-atm/README.md">ATM</a></li>
+        <li>Compare: <a href="../L20-strategy/README.md">L20 Strategy</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="filelinks">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- model ----------
+  var ROWS = [
+    { label: 'verifySignature(raw)', kind: 'abstract', line: 2 },
+    { label: 'parse(body)', kind: 'abstract', line: 3 },
+    { label: 'dedupe by eventId', kind: 'fixed', line: 4 },
+    { label: 'db.set(paymentId, status)', kind: 'fixed', line: 5 },
+    { label: 'afterApply(e)', kind: 'hook', line: 6 },
+    { label: 'reply(code)', kind: 'default', line: 7 },
+  ];
+  var CARDS = {
+    razorpay: { name: 'RazorpayHandler', y: 40, hook: '(no hook)', sig: 'x-razorpay-signature' },
+    stripe: { name: 'StripeHandler', y: 180, hook: 'afterApply: alert if FAILED', sig: 'stripe-signature' },
+    cashfree: { name: 'CashfreeHandler', y: 320, hook: 'afterApply: log to audit', sig: 'x-webhook-signature' },
+  };
+  function rowY(i) { return 80 + i * 44; }
+
+  function newModel() { return { db: { pay_1: 'PENDING', pay_2: 'PENDING', pay_3: 'PENDING' }, seen: [] }; }
+
+  // ---------- view ----------
+  function buildView(mk, root, showCashfree) {
+    var v = { rows: [], cards: {}, cardLines: {} };
+    mk('rect', { x: 20, y: 24, width: 380, height: 300, rx: 10, class: 'box' }, root);
+    mk('text', { x: 36, y: 50, class: 'title', text: '«abstract» WebhookHandler' }, root);
+    mk('text', { x: 384, y: 50, 'text-anchor': 'end', class: 'mono small muted', text: 'handle(raw)' }, root);
+    ROWS.forEach(function (r, i) {
+      var y = rowY(i);
+      var g = mk('g', {}, root);
+      v.rows.push(mk('rect', { x: 36, y: y - 16, width: 348, height: 34, rx: 6, class: 'box' }, g));
+      mk('text', { x: 50, y: y + 5, class: 'mono', text: (i + 1) + '. ' + r.label }, g);
+      mk('text', { x: 372, y: y + 5, 'text-anchor': 'end', class: 'kind ' + (r.kind === 'abstract' ? 'fill-signal' : r.kind === 'hook' ? 'fill-accent' : 'fill-muted'), text: r.kind.toUpperCase() }, g);
+    });
+    Object.keys(CARDS).forEach(function (k) {
+      var c = CARDS[k];
+      var g = mk('g', { opacity: k === 'cashfree' && !showCashfree ? 0 : 1 }, root);
+      mk('path', { d: 'M470,' + (c.y + 50) + ' H400', class: 'ext' }, g);
+      mk('path', { d: 'M400,' + (c.y + 44) + ' L412,' + (c.y + 50) + ' L400,' + (c.y + 56) + ' Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, g);
+      mk('text', { x: 435, y: c.y + 44, 'text-anchor': 'middle', class: 'mono small muted', text: 'extends' }, g);
+      var box = mk('rect', { x: 470, y: c.y, width: 272, height: 112, rx: 8, class: 'box' }, g);
+      mk('text', { x: 484, y: c.y + 24, class: 'b', text: c.name }, g);
+      var l1 = mk('text', { x: 484, y: c.y + 50, class: 'mono small', text: 'verifySignature: ' + c.sig }, g);
+      var l2 = mk('text', { x: 484, y: c.y + 72, class: 'mono small', text: 'parse: provider JSON → PaymentEvent' }, g);
+      var l3 = mk('text', { x: 484, y: c.y + 94, class: 'mono small ' + (k === 'razorpay' ? 'muted' : ''), text: c.hook }, g);
+      v.cards[k] = { g: g, box: box };
+      v.cardLines[k] = [l1, l2, l3];
+    });
+    // DB panel
+    mk('rect', { x: 20, y: 340, width: 380, height: 120, rx: 10, class: 'box' }, root);
+    mk('text', { x: 36, y: 364, class: 'title', text: 'payments DB' }, root);
+    v.db = [0, 1, 2].map(function (i) { return mk('text', { x: 36, y: 390 + i * 20, class: 'mono', text: '' }, root); });
+    v.seen = mk('text', { x: 230, y: 390, class: 'mono small muted', text: '' }, root);
+    v.seen2 = mk('text', { x: 230, y: 410, class: 'mono small muted', text: '' }, root);
+    v.reply = mk('text', { x: 230, y: 446, class: 'mono', text: '' }, root);
+    // incoming webhook label
+    v.inbox = mk('text', { x: 470, y: 458, class: 'mono small muted', text: '' }, root);
+    return v;
+  }
+
+  function renderDb(v, m) {
+    ['pay_1', 'pay_2', 'pay_3'].forEach(function (id, i) {
+      var s = m.db[id];
+      v.db[i].textContent = id + ': ' + s;
+      v.db[i].setAttribute('class', 'mono ' + (s === 'SUCCESS' ? 'fill-ok' : s === 'FAILED' ? 'fill-bad' : ''));
+    });
+    v.seen.textContent = 'seen event ids:';
+    v.seen2.textContent = m.seen.length ? m.seen.join(', ') : '(none)';
+  }
+
+  function setRow(v, i, cls) { v.rows[i].setAttribute('class', 'box' + (cls ? ' ' + cls : '')); }
+  function clearRows(v) { v.rows.forEach(function (r) { r.setAttribute('class', 'box'); }); }
+  function setActiveCard(v, key) {
+    Object.keys(v.cards).forEach(function (k) { v.cards[k].box.setAttribute('class', 'box' + (k === key ? ' signal' : '')); });
+  }
+
+  // code highlight (outside the svg, but fully deterministic)
+  var codeLines = Array.prototype.slice.call(document.querySelectorAll('#code .ln'));
+  function hl(line, bad) {
+    codeLines.forEach(function (l) { l.className = 'ln'; });
+    if (line !== null && codeLines[line]) codeLines[line].className = 'ln ' + (bad ? 'badl' : 'on');
+  }
+
+  // Pure logic: what the template method does, step by step.
+  // Returns a list of { row, result: 'ok'|'stop'|'skip', call: bool, msg }.
+  function trace(m, provider, ev, sigOk) {
+    var t = [];
+    if (!sigOk) { t.push({ row: 0, result: 'stop', call: true, msg: 'signature invalid → 401' }); t.push({ row: 5, result: 'stop', call: false, msg: 'reply 401' }); return t; }
+    t.push({ row: 0, result: 'ok', call: true, msg: CARDS[provider].name + '.verifySignature() → true' });
+    t.push({ row: 1, result: 'ok', call: true, msg: CARDS[provider].name + '.parse() → ' + ev.eventId + ' ' + ev.paymentId + ' ' + ev.status });
+    if (m.seen.indexOf(ev.eventId) >= 0) {
+      t.push({ row: 2, result: 'stop', call: false, msg: 'duplicate ' + ev.eventId + ' → ignore' });
+      t.push({ row: 5, result: 'stop', call: false, msg: 'reply 200 (dup)' });
+      return t;
+    }
+    t.push({ row: 2, result: 'ok', call: false, msg: 'new event id, remember it', apply: function () { m.seen.push(ev.eventId); } });
+    t.push({ row: 3, result: 'ok', call: false, msg: ev.paymentId + ' → ' + ev.status, apply: function () { m.db[ev.paymentId] = ev.status; } });
+    if (provider === 'razorpay') t.push({ row: 4, result: 'skip', call: false, msg: 'hook empty in base → nothing' });
+    else if (provider === 'stripe') t.push({ row: 4, result: 'ok', call: true, msg: ev.status === 'FAILED' ? 'hook: alert on-call for ' + ev.paymentId : 'hook: status ok, no alert' });
+    else t.push({ row: 4, result: 'ok', call: true, msg: 'hook: write audit row' });
+    t.push({ row: 5, result: 'ok', call: false, msg: 'reply 200 ok' });
+    return t;
+  }
+
+  // ---------- guided lab ----------
+  function callPoints(i, provider) {
+    var y = rowY(i), cy = CARDS[provider].y + 56;
+    return [[384, y], [440, (y + cy) / 2], [470, cy]];
+  }
+
+  async function runFlow(ctx, provider, ev, sigOk) {
+    var v = ctx.state.v, m = ctx.state.m;
+    clearRows(v);
+    setActiveCard(v, provider);
+    v.reply.textContent = '';
+    v.inbox.textContent = 'incoming: ' + ev.eventId + ' (' + CARDS[provider].name.replace('Handler', '') + ')';
+    var steps = trace(m, provider, ev, sigOk);
+    ctx.log('webhook ' + ev.eventId + ' → ' + CARDS[provider].name + '.handle()', 'info');
+    await ctx.packet([[560, 460], [560, 440], [210, 440], [210, 330], [30, 330], [30, rowY(0)]], { ms: 700, cls: 'accent' });
+    for (var k = 0; k < steps.length; k++) {
+      var s = steps[k];
+      setRow(v, s.row, 'accent');
+      hl(ROWS[s.row].line, s.result === 'stop');
+      if (s.call) {
+        var pts = callPoints(s.row, provider);
+        await ctx.packet(pts, { ms: 450 });
+        ctx.flash(v.cards[provider].box);
+        await ctx.packet(pts.slice().reverse(), { ms: 350, cls: 'ok' });
+      } else {
+        await ctx.wait(350);
+      }
+      if (s.apply) s.apply();
+      renderDb(v, m);
+      setRow(v, s.row, s.result === 'ok' ? 'ok' : s.result === 'stop' ? 'bad' : 'dim');
+      ctx.log('  ' + (s.row + 1) + '. ' + s.msg, s.result === 'ok' ? 'ok' : s.result === 'stop' ? 'bad' : '');
+      if (s.result === 'stop' && s.row !== 5) {
+        for (var r = s.row + 1; r < 5; r++) setRow(v, r, 'dim');
+      }
+    }
+    var last = steps[steps.length - 1];
+    v.reply.textContent = last.msg;
+    v.reply.setAttribute('class', 'mono ' + (last.result === 'ok' ? 'fill-ok' : 'fill-bad'));
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One skeleton, provider-specific steps',
+      say: 'Left: the abstract base class with the six steps of <code>handle()</code> in a fixed order. Right: provider subclasses. Watch who calls whom.',
+    },
+    setup: function (ctx) {
+      ctx.state.m = newModel();
+      ctx.state.v = buildView(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg, false);
+      ctx.state.cashfree = false;
+      renderDb(ctx.state.v, ctx.state.m);
+      hl(null);
+    },
+    steps: [
+      {
+        title: 'The template method owns the order',
+        say: '<code>handle()</code> runs six steps. Two are <b>abstract</b> (orange): each provider must write them. Dedupe and the DB write are <b>fixed</b>. <code>afterApply</code> is a <b>hook</b>, empty by default.',
+        run: async function (ctx) {
+          var v = ctx.state.v;
+          hl(1);
+          for (var i = 0; i < ROWS.length; i++) {
+            setRow(v, i, ROWS[i].kind === 'abstract' ? 'signal' : ROWS[i].kind === 'hook' ? 'accent' : '');
+            ctx.flash(v.rows[i]);
+            await ctx.wait(140);
+          }
+          ctx.log('WebhookHandler.handle(): verify → parse → dedupe → db → hook → reply', 'info');
+        },
+      },
+      {
+        title: 'Razorpay webhook: the base calls down',
+        say: 'A captured payment arrives. The base class runs step 1 and 2 by calling <i>down</i> into <code>RazorpayHandler</code>. That is the Hollywood principle: "don\'t call us, we\'ll call you".',
+        run: function (ctx) { return runFlow(ctx, 'razorpay', { eventId: 'evt_r1', paymentId: 'pay_1', status: 'SUCCESS' }, true); },
+      },
+      {
+        title: 'Razorpay retries the same event',
+        say: 'Providers retry when they miss your 200. Same <code>evt_r1</code> again. The <b>fixed</b> dedupe step stops it. Razorpay\'s subclass did nothing special to get this.',
+        run: function (ctx) { return runFlow(ctx, 'razorpay', { eventId: 'evt_r1', paymentId: 'pay_1', status: 'SUCCESS' }, true); },
+      },
+      {
+        title: 'Stripe: same skeleton, different steps',
+        say: 'Now a Stripe <code>payment_failed</code> event. The order is identical. Stripe overrides the hook, so step 5 calls down and alerts on-call.',
+        run: function (ctx) { return runFlow(ctx, 'stripe', { eventId: 'evt_s1', paymentId: 'pay_2', status: 'FAILED' }, true); },
+      },
+      {
+        title: 'Forged webhook: stopped at step 1',
+        say: 'A request with a bad signature. <code>verifySignature</code> returns false and the template returns 401 before parse. No subclass can forget this check.',
+        run: function (ctx) { return runFlow(ctx, 'stripe', { eventId: 'evt_x', paymentId: 'pay_2', status: 'SUCCESS' }, false); },
+      },
+      {
+        title: 'Add a provider: one new subclass',
+        say: 'Cashfree joins. We write one class with two steps and a hook. <code>handle()</code> is not touched (Open/Closed).',
+        run: async function (ctx) {
+          var g = ctx.state.v.cards.cashfree.g;
+          clearRows(ctx.state.v);
+          await ctx.fade(g, 1, 500);
+          ctx.flash(ctx.state.v.cards.cashfree.box);
+          hl(13);
+          ctx.log('class CashfreeHandler extends WebhookHandler { verifySignature, parse, afterApply }', 'ok');
+        },
+      },
+      {
+        title: 'Cashfree webhook runs the same flow',
+        say: 'The new provider gets dedupe, the DB write and the reply for free. Only its own steps run in its own class.',
+        run: function (ctx) { return runFlow(ctx, 'cashfree', { eventId: 'evt_c1', paymentId: 'pay_3', status: 'SUCCESS' }, true); },
+      },
+      {
+        title: 'The rule: never override handle()',
+        say: 'If a subclass overrides <code>handle()</code> itself, the guarantees vanish. TS has no <code>final</code>, so keep it as a team rule, or inject the steps as a Strategy instead.',
+        run: async function (ctx) {
+          var v = ctx.state.v;
+          clearRows(v);
+          for (var i = 0; i < ROWS.length; i++) setRow(v, i, ROWS[i].kind === 'fixed' ? 'bad' : '');
+          hl(1, true);
+          ctx.flash(v.rows[2]); ctx.flash(v.rows[3]);
+          await ctx.wait(500);
+          ctx.log('override handle() → dedupe + db steps can be skipped. Avoid.', 'warn');
+          v.reply.textContent = 'try it below ↓';
+          v.reply.setAttribute('class', 'mono muted');
+        },
+      },
+    ],
+  });
+
+  // ---------- try-it panel ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('try-log');
+  var tm, tv;
+  function tlog(msg, kind) {
+    var li = document.createElement('li');
+    li.className = kind || '';
+    li.textContent = msg;
+    logList.appendChild(li);
+    logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  function fresh() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    tm = newModel();
+    tv = buildView(function (t, a, p) { return Kit.el(t, a, p); }, svg, true);
+    renderDb(tv, tm);
+    logList.innerHTML = '';
+    tlog('Handlers ready. DB: pay_1..pay_3 PENDING', 'info');
+  }
+  var payFor = { razorpay: 'pay_1', stripe: 'pay_2', cashfree: 'pay_3' };
+  function send() {
+    var provider = document.getElementById('try-provider').value;
+    var ev = { eventId: document.getElementById('try-event').value.trim() || 'evt_1', paymentId: payFor[provider], status: document.getElementById('try-status').value };
+    var sigOk = document.getElementById('try-sig').checked;
+    clearRows(tv);
+    setActiveCard(tv, provider);
+    var steps = trace(tm, provider, ev, sigOk);
+    tlog(ev.eventId + ' → ' + CARDS[provider].name + '.handle()', 'info');
+    steps.forEach(function (s) {
+      if (s.apply) s.apply();
+      setRow(tv, s.row, s.result === 'ok' ? 'ok' : s.result === 'stop' ? 'bad' : 'dim');
+      tlog('  ' + (s.row + 1) + '. ' + s.msg, s.result === 'ok' ? 'ok' : s.result === 'stop' ? 'bad' : '');
+    });
+    renderDb(tv, tm);
+    var last = steps[steps.length - 1];
+    tv.reply.textContent = last.msg;
+    tv.reply.setAttribute('class', 'mono ' + (last.result === 'ok' ? 'fill-ok' : 'fill-bad'));
+    tv.inbox.textContent = 'last: ' + ev.eventId;
+  }
+  document.getElementById('try-send').addEventListener('click', send);
+  document.getElementById('try-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

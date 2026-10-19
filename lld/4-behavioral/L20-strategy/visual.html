@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L20 Strategy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .link { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 2 4; stroke-linecap: round; }
+  .stage .rowhl { fill: var(--accent-soft); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .try select, .try input[type="number"] { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .try input[type="number"] { width: 90px; }
+  ol.trace { font: 12.5px/1.6 var(--font-mono); margin: 0; padding-left: 22px; }
+  ol.trace li.ok { color: var(--ok); } ol.trace li.bad { color: var(--bad); } ol.trace li.warn { color: var(--warn); }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L20 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Strategy: swap the algorithm, keep the caller</h1>
+    <p class="lede">The user picks a payment method at checkout. Instead of a growing <code>switch</code>, each method is a strategy behind one interface. A factory turns the string <code>'upi'</code> into a strategy object, and the checkout service only calls <code>strategy.pay()</code>.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A switch statement replaced by a factory creating payment strategies for a checkout service"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Runtime link: the strategy the context holds now</span>
+        <span><i style="background: var(--signal)"></i>Request / call</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Rejected / edited</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code</h3>
+<pre class="code">interface PaymentStrategy { pay(amount: number): Promise&lt;Receipt&gt;; }
+
+class UpiStrategy implements PaymentStrategy {
+  constructor(private psp: UpiPsp) {}
+  async pay(amount: number) { return this.psp.collect(amount); }
+}
+
+const registry: Record&lt;string, () =&gt; PaymentStrategy&gt; = {
+  card:   () =&gt; new CardStrategy(gateway),
+  upi:    () =&gt; new UpiStrategy(psp),
+  wallet: () =&gt; new WalletStrategy(walletRepo),
+};
+
+class PaymentFactory {
+  static create(type: string): PaymentStrategy {
+    const make = registry[type];
+    if (!make) throw new UnsupportedMethodError(type); // 400
+    return make();
+  }
+}
+
+class CheckoutService {
+  constructor(private strategy: PaymentStrategy) {}
+  setStrategy(s: PaymentStrategy) { this.strategy = s; }
+  checkout(amount: number) { return this.strategy.pay(amount); }
+}</pre>
+    </div>
+    <div class="note">
+      <h3>Try it: send a checkout request</h3>
+      <div class="try">
+        <label>method <select id="t-m"><option>card</option><option selected>upi</option><option>wallet</option><option>paylater</option><option>crypto</option></select></label>
+        <label>amount ₹ <input id="t-a" type="number" min="1" value="499"></label>
+        <label><input id="t-reg" type="checkbox"> paylater registered</label>
+        <button class="btn primary" id="t-run" type="button">POST /checkout</button>
+      </div>
+      <ol class="trace" id="t-out"><li>Pick a method and send. Tick "paylater registered" to see that adding a method changes only the registry.</li></ol>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each payment method is a strategy behind one PaymentStrategy interface. A factory maps the request's method string to a strategy and fails fast on unknown values with a 400. CheckoutService holds the interface and delegates, so adding pay-later is one new class plus one registry line, with no change to checkout. That is open/closed."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Strategy vs State: they look the same in UML. What is different?</summary><div>In Strategy the client chooses the object and it rarely changes during the call. In State the state objects themselves move the context to the next state as events arrive.</div></details>
+      <details class="qa"><summary>Why a registry map instead of a switch inside the factory?</summary><div>A map can be extended (even by plugins) without editing the factory. A switch in one factory is also acceptable: at least it lives in one place, not in every service.</div></details>
+      <details class="qa"><summary>Should strategies be singletons or new per request?</summary><div>Stateless strategies can be shared. If a strategy keeps per-request data, create a new one for each request so requests do not leak into each other.</div></details>
+      <details class="qa"><summary>When is a function enough?</summary><div>One method, no state, no dependencies beyond a closure: <code>type PricingFn = (minutes: number) =&gt; number</code>.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Which tool for which job</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>if / switch in the service</th><th>Strategy</th><th>Factory</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td>Answers</td><td>Everything in one place</td><td>How to do it (the algorithm)</td><td>Which object to create</td><td>What to do in the current state</td></tr>
+            <tr><td>Who picks</td><td>The service, every call</td><td>The caller sets it</td><td>Factory, from input or config</td><td>The state objects switch themselves</td></tr>
+            <tr><td>Add a new case</td><td>Edit and re-test the service</td><td>Add one class</td><td>Add one registry entry</td><td>Add one state class</td></tr>
+            <tr><td>Good for</td><td>2 cases that never change</td><td>Pricing, payment, splits, routing</td><td>Hiding <code>new</code> and wiring dependencies</td><td>Vending machine, order lifecycle</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var STRATS = [
+    { id: 'card', name: 'CardStrategy', does: 'pay() → card gateway', result: 'Card charged ₹499' },
+    { id: 'upi', name: 'UpiStrategy', does: 'pay() → UPI collect', result: 'UPI collect sent ₹499' },
+    { id: 'wallet', name: 'WalletStrategy', does: 'pay() → wallet debit', result: 'Wallet debited ₹499' },
+    { id: 'paylater', name: 'PayLaterStrategy', does: 'pay() → BNPL partner', result: 'Pay-later approved ₹499' },
+  ];
+  var SX = 520, SW = 190;
+  function sy(i) { return 120 + i * 65; }
+  var CORRIDOR = 284;
+
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+
+  function cls(ctx, parent, x, y, w, name, methods, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = methods.length ? head + 8 + methods.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (methods.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    g.lines = methods.map(function (m, i) {
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono', text: m }, g);
+    });
+    g.r = r; g.head = head;
+    return g;
+  }
+
+  function setLink(ctx, i, ms) {
+    var line = ctx.state.link;
+    ctx.state.current = i;
+    ctx.fade(line, 1, 200);
+    return ctx.animate(line, { y2: sy(i) + 25 }, ms === undefined ? 500 : ms);
+  }
+
+  function request(ctx, method) {
+    ctx.state.reqBody.textContent = "method: '" + method + "', amt: 499";
+    ctx.flash(ctx.state.req.r);
+    ctx.log("POST /checkout { method: '" + method + "' }", 'info');
+    return ctx.packet([[120, 104], [120, 150]], { ms: 450 });
+  }
+
+  function pickRow(ctx, i) {
+    var hl = ctx.state.rowhl;
+    hl.setAttribute('opacity', 1);
+    return ctx.animate(hl, { y: 190 + (i + 1) * 17 - 12 }, 300);
+  }
+
+  function create(ctx, i) {
+    var y = sy(i) + 25;
+    return ctx.packet([[120, 269], [120, CORRIDOR], [500, CORRIDOR], [500, y], [SX, y]], { ms: 900, label: 'new' }).then(function () {
+      ctx.flash(ctx.state.strat[i].r);
+      ctx.log('PaymentFactory.create → new ' + STRATS[i].name + '()', 'ok');
+      return ctx.packet([[SX, y], [480, 192]], { ms: 450, cls: 'accent' });
+    }).then(function () {
+      ctx.log('checkout.setStrategy(' + STRATS[i].id + ')', 'info');
+      return setLink(ctx, i);
+    });
+  }
+
+  function checkout(ctx) {
+    var i = ctx.state.current, y = sy(i) + 25;
+    ctx.log('checkout.checkout(499) → this.strategy.pay(499)', 'info');
+    return ctx.packet([[480, 192], [SX, y]], { ms: 500, label: 'pay(499)' }).then(function () {
+      ctx.flash(ctx.state.strat[i].r);
+      return ctx.packet([[SX, y], [500, y], [500, 335], [480, 335]], { ms: 600, cls: 'ok' });
+    }).then(function () {
+      ctx.state.resText.textContent = STRATS[i].result;
+      ctx.state.resText.setAttribute('class', 'mono fill-ok');
+      ctx.state.res.r.setAttribute('class', 'box ok');
+      ctx.flash(ctx.state.res.r);
+      ctx.log(STRATS[i].result, 'ok');
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Pay with card, UPI or wallet',
+      say: 'Three payment methods, one checkout. First the version everyone writes first (a switch), then strategies, the context that uses them, and the factory that picks one from the request.',
+    },
+    setup: function (ctx) {
+      defs(ctx);
+      ctx.state.strat = [];
+      var sg = ctx.group({ opacity: 0.2 });
+      ctx.state.stratGroup = sg;
+      cls(ctx, sg, SX, 30, SW, 'PaymentStrategy', ['pay(amount): Receipt'], { stereo: 'interface', cls: 'accent' });
+      STRATS.forEach(function (s, i) {
+        var g = ctx.group(i === 3 ? { opacity: 0 } : {}, sg);
+        var c = cls(ctx, g, SX, sy(i), SW, s.name, [s.does], i === 3 ? { cls: 'ok' } : {});
+        ctx.el('path', { d: 'M' + (SX + SW) + ',' + (sy(i) + 25) + ' H738 V62 H' + (SX + SW), class: 'uml dash', 'marker-end': 'url(#m-tri)' }, g);
+        c.wrap = g;
+        ctx.state.strat.push(c);
+      });
+      // before: the switch version
+      var bg = ctx.group({ opacity: 0 });
+      ctx.state.before = bg;
+      ctx.state.beforeBox = cls(ctx, bg, 250, 130, 250, 'CheckoutService (before)', [
+        'checkout(method, amt) {',
+        '  switch (method) {',
+        "    case 'card':   /* 40 lines */",
+        "    case 'upi':    /* 35 lines */",
+        "    case 'wallet': /* 30 lines */",
+        '    default: throw ...',
+        '  }',
+        '}',
+      ], { cls: 'bad' });
+      ctx.state.beforeNew = ctx.el('text', { x: 260, y: 335, class: 'mono small fill-bad', text: '', opacity: 1 }, bg);
+      // context
+      var cg = ctx.group({ opacity: 0 });
+      ctx.state.ctxGroup = cg;
+      ctx.state.svc = cls(ctx, cg, 250, 150, 230, 'CheckoutService', ['- strategy: PaymentStrategy', 'setStrategy(s)', 'checkout(amt)', '  → this.strategy.pay(amt)'], { cls: 'accent' });
+      ctx.el('path', { d: 'M480,160 L' + SX + ',70', class: 'uml', 'marker-end': 'url(#m-open)' }, cg);
+      ctx.el('text', { x: 470, y: 128, 'text-anchor': 'end', class: 'mono small muted', text: 'knows only the interface' }, cg);
+      ctx.state.link = ctx.el('line', { x1: 480, y1: 192, x2: SX, y2: 192, class: 'link', opacity: 0 }, cg);
+      ctx.state.res = cls(ctx, cg, 250, 300, 230, 'Result', []);
+      ctx.state.res.r.setAttribute('height', 64);
+      ctx.state.resText = ctx.el('text', { x: 365, y: 350, 'text-anchor': 'middle', class: 'mono muted', text: 'nothing yet' }, cg);
+      // request + factory
+      var fg = ctx.group({ opacity: 0.2 });
+      ctx.state.facGroup = fg;
+      ctx.state.req = cls(ctx, fg, 20, 40, 200, 'POST /checkout', []);
+      ctx.state.req.r.setAttribute('height', 64);
+      ctx.state.reqBody = ctx.el('text', { x: 30, y: 90, class: 'mono', text: '' }, fg);
+      var fac = cls(ctx, fg, 20, 150, 200, 'PaymentFactory', ['create(type)', 'card     → CardStrategy', 'upi      → UpiStrategy', 'wallet   → WalletStrategy', '']);
+      ctx.state.rowhl = ctx.el('rect', { x: 22, y: 0, width: 196, height: 17, class: 'rowhl', opacity: 0 }, fg);
+      ctx.state.fac = fac;
+      ctx.state.regLine = fac.lines[4];
+      ctx.state.err = ctx.el('text', { x: 20, y: 400, class: 'mono fill-bad', text: '', opacity: 1 });
+    },
+    steps: [
+      {
+        title: 'Before: one method, one switch, every method inside',
+        say: 'The first draft puts every payment method in a <code>switch</code> inside <code>checkout()</code>. Each case talks to a different provider. The class imports all of them, and its tests must cover all of them.',
+        run: function (ctx) {
+          ctx.log('checkout(): switch with 3 cases, ~105 lines', 'warn');
+          return ctx.fade(ctx.state.before, 1, 450);
+        },
+      },
+      {
+        title: 'Adding pay-later means editing checkout()',
+        say: 'Business wants pay-later. You open <code>CheckoutService</code>, add a fourth case, and re-test card, UPI and wallet too, because they live in the same method. That breaks the open/closed principle.',
+        run: function (ctx) {
+          var lines = ctx.state.beforeBox.lines;
+          lines[5].textContent = "    case 'paylater': /* +45 */";
+          lines[5].setAttribute('class', 'mono fill-bad');
+          lines[6].textContent = '    default: throw ...';
+          ctx.flash(ctx.state.beforeBox.r);
+          ctx.state.beforeNew.textContent = 'edit + re-test the whole checkout() for one new method';
+          ctx.log("edit CheckoutService: + case 'paylater'", 'bad');
+          ctx.log('re-test all 4 payment paths', 'bad');
+          return ctx.wait(500);
+        },
+      },
+      {
+        title: 'One interface, many algorithms',
+        say: 'Pull each case out into its own class. Every payment method implements <code>PaymentStrategy.pay(amount)</code>. They do very different work inside, but from outside they look the same. That is what makes them swappable.',
+        run: function (ctx) {
+          ctx.log('interface PaymentStrategy { pay(amount) }', 'info');
+          ctx.log('Card, Upi, Wallet implement it', 'info');
+          return Promise.all([ctx.fade(ctx.state.before, 0, 400), ctx.fade(ctx.state.stratGroup, 1, 500)]);
+        },
+      },
+      {
+        title: 'The context holds a strategy',
+        say: '<code>CheckoutService</code> has one field typed as the <b>interface</b>. It does not import <code>CardStrategy</code> or <code>UpiStrategy</code>. It cannot know which one it holds, and it does not need to.',
+        run: function (ctx) {
+          ctx.log('CheckoutService(strategy: PaymentStrategy)', 'info');
+          return ctx.fade(ctx.state.ctxGroup, 1, 500);
+        },
+      },
+      {
+        title: "A request arrives with method 'upi'",
+        say: 'The request carries a plain string. Someone must turn <code>\'upi\'</code> into an object. That is the factory\'s only job: it looks up the string in a registry.',
+        run: function (ctx) {
+          return ctx.fade(ctx.state.facGroup, 1, 400)
+            .then(function () { return request(ctx, 'upi'); })
+            .then(function () { return pickRow(ctx, 1); })
+            .then(function () { ctx.log("registry['upi'] found", 'ok'); });
+        },
+      },
+      {
+        title: 'The factory creates the strategy',
+        say: 'The factory calls <code>new UpiStrategy(psp)</code> with its dependencies and hands it to the context. All the <code>new</code> calls live in one place, so the rest of the code never needs the concrete classes.',
+        run: function (ctx) { return create(ctx, 1); },
+      },
+      {
+        title: 'The context delegates',
+        say: '<code>checkout(499)</code> just calls <code>this.strategy.pay(499)</code>. No <code>if</code>, no <code>switch</code>. The UPI strategy does the UPI work and returns a receipt.',
+        run: function (ctx) { return checkout(ctx); },
+      },
+      {
+        title: 'Swap the strategy at runtime',
+        say: 'The next user picks card. The factory builds a <code>CardStrategy</code>, the context gets it with <code>setStrategy()</code>, and the same <code>checkout()</code> code now charges a card. The context did not change at all.',
+        run: function (ctx) {
+          return request(ctx, 'card')
+            .then(function () { return pickRow(ctx, 0); })
+            .then(function () { return create(ctx, 0); })
+            .then(function () { return checkout(ctx); })
+            .then(function () { ctx.log('CheckoutService: 0 lines changed', 'ok'); });
+        },
+      },
+      {
+        title: 'Add pay-later without touching checkout',
+        say: 'Compare with step 2. Now pay-later is one new class, <code>PayLaterStrategy</code>, and one registry line. <code>CheckoutService</code> and the other strategies are untouched and need no re-test.',
+        run: function (ctx) {
+          ctx.state.regLine.textContent = 'paylater → PayLaterStrat…';
+          ctx.state.regLine.setAttribute('class', 'mono fill-ok');
+          ctx.flash(ctx.state.regLine);
+          ctx.log('+ class PayLaterStrategy, + 1 registry entry', 'ok');
+          return ctx.fade(ctx.state.strat[3].wrap, 1, 500)
+            .then(function () { return request(ctx, 'paylater'); })
+            .then(function () { return pickRow(ctx, 3); })
+            .then(function () { return create(ctx, 3); })
+            .then(function () { return checkout(ctx); });
+        },
+      },
+      {
+        title: 'Unknown method: fail fast at the boundary',
+        say: 'A client sends <code>\'crypto\'</code>. The registry has no entry, so the factory throws <code>UnsupportedMethodError</code> and the API returns 400. The context keeps its old strategy and never sees bad input.',
+        run: function (ctx) {
+          ctx.state.rowhl.setAttribute('opacity', 0);
+          return request(ctx, 'crypto').then(function () {
+            ctx.flash(ctx.state.fac.r);
+            ctx.state.fac.r.setAttribute('class', 'box bad');
+            ctx.state.err.textContent = "throw UnsupportedMethodError('crypto') → 400";
+            ctx.flash(ctx.state.err);
+            ctx.log("registry['crypto'] is undefined → 400 Bad Request", 'bad');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: a real registry in plain JS ----
+  var REG = {
+    card: function (a) { return 'CardStrategy.pay → card gateway charged ₹' + a; },
+    upi: function (a) { return 'UpiStrategy.pay → UPI collect sent for ₹' + a; },
+    wallet: function (a) { return a > 10000 ? null : 'WalletStrategy.pay → wallet debited ₹' + a; },
+  };
+  var PAYLATER = function (a) { return a > 5000 ? null : 'PayLaterStrategy.pay → BNPL approved ₹' + a; };
+  document.getElementById('t-run').addEventListener('click', function () {
+    var m = document.getElementById('t-m').value, a = Math.max(1, +document.getElementById('t-a').value || 1);
+    var reg = {}; Object.keys(REG).forEach(function (k) { reg[k] = REG[k]; });
+    if (document.getElementById('t-reg').checked) reg.paylater = PAYLATER;
+    var rows = [["POST /checkout { method: '" + m + "', amount: " + a + ' }', '']];
+    var make = reg[m];
+    if (!make) {
+      rows.push(["registry['" + m + "'] is undefined", 'bad'], ['throw UnsupportedMethodError → 400; CheckoutService never called', 'bad']);
+    } else {
+      rows.push(["registry['" + m + "'] found → new strategy", 'ok'], ['checkout.checkout(' + a + ') → this.strategy.pay(' + a + ')', '']);
+      var r = make(a);
+      if (r) rows.push([r, 'ok']);
+      else rows.push([m + ' strategy declined: amount over its limit (its own rule, not checkout\'s)', 'warn']);
+    }
+    rows.push(['CheckoutService lines changed: 0', 'ok']);
+    var out = document.getElementById('t-out'); out.innerHTML = '';
+    rows.forEach(function (x) { var li = document.createElement('li'); li.textContent = x[0]; if (x[1]) li.className = x[1]; out.appendChild(li); });
+  });
+})();
+</script>
+</body>
+</html>

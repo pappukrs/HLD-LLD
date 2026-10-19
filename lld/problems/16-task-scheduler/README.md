@@ -87,6 +87,6 @@ Why not a heap keyed on priority? Because "is it due?" depends on time. Key the 
 
 ## Concepts used
 
-- [Strategy](../../concepts/patterns/p10-strategy.md) · [Command](../../concepts/patterns/p13-command.md) (a task is a command object) · [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md)
-- HLD link: [Distributed Job Scheduler](../../../hld/problems/24-job-scheduler/) · [Resilience: retries and backoff](../../../hld/concepts/24-resilience-patterns.md)
-- Visuals: [Circuit breaker and retries](../../../visuals/v13-circuit-breaker.html) · [Node.js event loop](../../../visuals/v30-node-event-loop.html)
+- [Strategy](../../4-behavioral/L20-strategy/README.md) · [Command](../../4-behavioral/L23-command/README.md) (a task is a command object) · [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- HLD link: [Distributed Job Scheduler](../../../hld/case-studies/24-job-scheduler) · [Resilience: retries and backoff](../../../hld/5-reliability/H27-resilience/README.md)
+- Visuals: [Circuit breaker and retries](../../../hld/5-reliability/H27-resilience/visual.html) · [Node.js event loop](../../5-machine-coding/L32-concurrency-in-node/visual.html)

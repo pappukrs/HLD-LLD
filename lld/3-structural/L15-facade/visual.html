@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L15 Facade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .wire.thin { stroke-width: 1.2; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  pre.code .ln.err { background: rgba(184, 56, 47, 0.14); outline: 1px solid var(--bad); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  ol.trace { font: 12.5px/1.6 var(--font-mono); margin: 0; padding-left: 22px; }
+  ol.trace li.ok { color: var(--ok); } ol.trace li.bad { color: var(--bad); } ol.trace li.warn { color: var(--warn); }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L15 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Facade: one door in front of many rooms</h1>
+    <p class="lede">Three callers each wire up five subsystems, and one of them forgets the rollback. A facade writes the checkout flow once: right order, one try/catch, side effects off the hot path. Callers make one call.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="Three callers, a CheckoutService facade, and five subsystems"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call</span>
+        <span><i style="background: var(--accent)"></i>Dependency</span>
+        <span><i style="background: var(--ok)"></i>Success</span>
+        <span><i style="background: var(--bad)"></i>Failure / leak</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The facade (lines light up with the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">async checkout(userId, items, coupon) {</span><span class="ln" data-l="2">  const hold = this.inventory.reserve(items);</span><span class="ln" data-l="3">  try {</span><span class="ln" data-l="4">    const total = this.pricing.total(items, coupon);</span><span class="ln" data-l="5">    const txn = await this.payments.charge(userId, total);</span><span class="ln" data-l="6">    const order = this.orders.create(userId, total, txn);</span><span class="ln" data-l="7">    this.inventory.commit(hold);</span><span class="ln" data-l="8">    void this.notifier.send(userId, '...').catch(log);</span><span class="ln" data-l="9">    return order;</span><span class="ln" data-l="10">  } catch (e) {</span><span class="ln" data-l="11">    this.inventory.release(hold);   // compensation</span><span class="ln" data-l="12">    throw e;</span><span class="ln" data-l="13">  }</span><span class="ln" data-l="14">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: run checkout() with your inputs</h3>
+      <div class="try">
+        <label>Stock <select id="t-stock"><option value="ok">in stock</option><option value="out">out of stock</option></select></label>
+        <label>Card <select id="t-card"><option value="ok">approved</option><option value="declined">declined</option></select></label>
+        <label>Email <select id="t-mail"><option value="ok">up</option><option value="down">SMTP down</option></select></label>
+        <button class="btn primary" id="t-run" type="button">Run checkout()</button>
+      </div>
+      <ol class="trace" id="t-out"><li>Pick inputs and press Run. The trace shows which subsystem calls the facade makes, and what the caller gets back.</li></ol>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"CheckoutService is a facade over inventory, pricing, payments, orders and notifications. It owns the order of steps and the compensation: if payment fails, it releases the reserved stock. Every caller uses this one method, so the flow is written once. The subsystems keep their own rules, and I keep one facade per use case so it never becomes a god class."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Does a subsystem ever call back into the facade?</summary><div>No. Arrows go one way: callers to facade, facade to subsystems. If the parts talk to each other through a central object that they know about, that is a Mediator.</div></details>
+      <details class="qa"><summary>Why is the email sent without await?</summary><div>The order is already paid. A slow or failing SMTP server must not slow down or fail it. Start the send, catch and log errors, or publish an event for a worker.</div></details>
+      <details class="qa"><summary>Is it still OK to call Pricing directly?</summary><div>Yes. A facade is a shortcut for the common flow, not a wall. A report job can use Pricing on its own.</div></details>
+      <details class="qa"><summary>What changes when the steps are separate services?</summary><div>No local try/catch rollback. The facade becomes a saga orchestrator with persisted state, retries, idempotency keys and a compensating action per step.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Facade vs the other wrappers</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Pattern</th><th>Interface it offers</th><th>Wraps</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><b>Facade</b></td><td>New and simpler</td><td>Many objects</td><td>Run a common flow in one call</td></tr>
+            <tr><td>Adapter</td><td>One you already depend on</td><td>One object</td><td>Make a foreign API fit</td></tr>
+            <tr><td>Proxy</td><td>Same as the real object</td><td>One object</td><td>Control access: cache, lazy, auth, remote</td></tr>
+            <tr><td>Decorator</td><td>Same as the wrapped object</td><td>One, stackable</td><td>Add behaviour in layers</td></tr>
+            <tr><td>Mediator</td><td>Peers talk through it</td><td>Many, two-way</td><td>Coordinate objects that know the mediator</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CALLERS = ['Controller', 'RetryJob', 'AdminTool'];
+  var SUBS = ['Inventory', 'Pricing', 'Payments', 'Orders', 'Notifier'];
+  function cy(i) { return 70 + i * 130; }      // caller box top
+  function sy(i) { return 22 + i * 84; }       // subsystem box top
+  var FX = 300, FY = 150, FW = 170, FH = 150;  // facade box
+  function cIn(i) { return [150, cy(i) + 25]; }
+  function sIn(i) { return [590, sy(i) + 27]; }
+  function fOut() { return [FX + FW, FY + FH / 2]; }
+  function fIn() { return [FX, FY + FH / 2]; }
+
+  function hl(lines, kind) {
+    var all = document.querySelectorAll('#code .ln');
+    Array.prototype.forEach.call(all, function (n) {
+      n.classList.remove('on', 'err');
+      if (lines.indexOf(+n.getAttribute('data-l')) >= 0) n.classList.add(kind || 'on');
+    });
+  }
+  function box(ctx, parent, x, y, w, h, name, sub, c) {
+    var g = ctx.group({}, parent);
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: x + w / 2, y: y + 20, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    var s = ctx.el('text', { x: x + w / 2, y: y + 38, 'text-anchor': 'middle', class: 'mono small muted', text: sub || '' }, g);
+    g.r = r; g.s = s;
+    return g;
+  }
+  function status(ctx, i, t, c) {
+    var s = ctx.state.subs[i].s;
+    s.textContent = t;
+    s.setAttribute('class', 'mono small ' + (c || 'muted'));
+    ctx.state.subs[i].r.setAttribute('class', 'box ' + (c === 'fill-bad' ? 'bad' : c === 'fill-ok' ? 'ok' : c === 'fill-warn' ? 'signal' : ''));
+  }
+  function line(ctx, a, b, c, parent) {
+    return ctx.el('path', { d: 'M' + a[0] + ',' + a[1] + ' C' + (a[0] + b[0]) / 2 + ',' + a[1] + ' ' + (a[0] + b[0]) / 2 + ',' + b[1] + ' ' + b[0] + ',' + b[1], class: 'wire ' + (c || ''), opacity: 0 }, parent);
+  }
+  function call(ctx, i, label, cls) {   // facade -> subsystem i and back
+    var a = fOut(), b = sIn(i);
+    return ctx.packet([a, [530, a[1]], [530, b[1]], b], { ms: 650, label: label, cls: cls || '' });
+  }
+  function back(ctx, i, cls) {
+    var a = fOut(), b = sIn(i);
+    return ctx.packet([b, [530, b[1]], [530, a[1]], a], { ms: 500, cls: cls || 'ok' });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Checkout touches five subsystems', say: 'Three callers need the same checkout flow: the HTTP controller, a retry job, and an admin tool. First watch what happens with no facade.' },
+    setup: function (ctx) {
+      hl([]);
+      ctx.state.mess = ctx.group();
+      ctx.state.clean = ctx.group();
+      ctx.state.callers = CALLERS.map(function (n, i) { return box(ctx, null, 20, cy(i), 130, 50, n, ''); });
+      ctx.state.subs = SUBS.map(function (n, i) { return box(ctx, null, 590, sy(i), 150, 54, n, 'idle'); });
+      var f = ctx.group({ opacity: 0 });
+      ctx.state.facade = f;
+      ctx.el('rect', { x: FX, y: FY, width: FW, height: FH, rx: 9, class: 'box' }, f);
+      ctx.el('rect', { x: FX, y: FY, width: FW, height: FH, rx: 9, class: 'box accent' }, f);
+      ctx.el('text', { x: FX + FW / 2, y: FY + 24, 'text-anchor': 'middle', class: 'title', text: 'CheckoutService' }, f);
+      ctx.el('text', { x: FX + FW / 2, y: FY + 42, 'text-anchor': 'middle', class: 'mono small muted', text: '«facade»' }, f);
+      ctx.el('line', { x1: FX, x2: FX + FW, y1: FY + 52, y2: FY + 52, class: 'sep' }, f);
+      ctx.el('text', { x: FX + 10, y: FY + 72, class: 'mono small', text: '+ checkout(user, items)' }, f);
+      ctx.state.fstat = ctx.el('text', { x: FX + 10, y: FY + 96, class: 'mono small muted', text: '' }, f);
+      ctx.state.fstat2 = ctx.el('text', { x: FX + 10, y: FY + 114, class: 'mono small muted', text: '' }, f);
+      ctx.state.depText = ctx.el('text', { x: 300, y: 430, 'text-anchor': 'middle', class: 'mono small', text: '' });
+    },
+    steps: [
+      {
+        title: 'Before: every caller wires up every subsystem',
+        say: 'Each caller imports all five classes and repeats the six-step sequence. That is 3 × 5 = 15 dependencies, and three copies of the same flow to keep in sync.',
+        run: function (ctx) {
+          var ws = [];
+          CALLERS.forEach(function (c, i) { SUBS.forEach(function (s, j) { ws.push(line(ctx, cIn(i), sIn(j), 'thin', ctx.state.mess)); }); });
+          ctx.state.depText.textContent = '15 dependencies · 3 copies of the flow';
+          ctx.state.depText.setAttribute('class', 'mono small fill-bad');
+          ctx.log('Controller, RetryJob, AdminTool each import 5 classes', 'warn');
+          return Promise.all(ws.map(function (w, k) { return ctx.wait(k * 25).then(function () { return ctx.fade(w, 0.8, 250); }); }));
+        },
+      },
+      {
+        title: 'One copy forgets the rollback',
+        say: 'The retry job reserves stock, then the card is declined. Its copy of the flow has no <code>release()</code>. Two t-shirts stay reserved forever: a silent stock leak.',
+        run: function (ctx) {
+          var r = ctx.state.callers[1];
+          ctx.log('RetryJob: inventory.reserve(2 tshirts)', 'info');
+          return ctx.packet([cIn(1), sIn(0)], { ms: 650, label: 'reserve' }).then(function () {
+            status(ctx, 0, 'held: 2 (leaked)', 'fill-warn');
+            return ctx.packet([cIn(1), sIn(2)], { ms: 650, label: 'charge', cls: 'bad' });
+          }).then(function () {
+            status(ctx, 2, 'CARD_DECLINED', 'fill-bad');
+            ctx.flash(r.r);
+            ctx.log('payments.charge() threw CARD_DECLINED', 'bad');
+            ctx.log('no release(): stock leaked', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Add the facade',
+        say: 'Move the flow into <code>CheckoutService</code>. Callers now know one class. The facade knows the five. Dependencies drop from 15 to 3 + 5 = 8, and the flow exists once.',
+        run: function (ctx) {
+          SUBS.forEach(function (s, i) { status(ctx, i, 'idle', ''); });
+          return ctx.fade(ctx.state.mess, 0, 500).then(function () {
+            ctx.state.mess.remove();
+            return ctx.fade(ctx.state.facade, 1, 400);
+          }).then(function () {
+            var ws = [];
+            CALLERS.forEach(function (c, i) { ws.push(line(ctx, cIn(i), fIn(), 'accent', ctx.state.clean)); });
+            SUBS.forEach(function (s, j) { ws.push(line(ctx, fOut(), sIn(j), 'accent', ctx.state.clean)); });
+            ctx.state.depText.textContent = '8 dependencies · 1 copy of the flow';
+            ctx.state.depText.setAttribute('class', 'mono small fill-ok');
+            ctx.log('callers -> CheckoutService -> subsystems', 'ok');
+            hl([1, 14]);
+            return Promise.all(ws.map(function (w) { return ctx.fade(w, 1, 350); }));
+          });
+        },
+      },
+      {
+        title: 'checkout(): reserve stock first',
+        say: 'The controller makes one call. The facade starts by reserving stock, so nothing is charged for items we cannot ship.',
+        run: function (ctx) {
+          hl([2]);
+          ctx.log("Controller: checkout('pappu', cart)", 'info');
+          return ctx.packet([cIn(0), fIn()], { ms: 600, label: 'checkout()' }).then(function () {
+            ctx.state.fstat.textContent = 'step 1/5 reserve';
+            return call(ctx, 0, 'reserve');
+          }).then(function () {
+            status(ctx, 0, 'held: hold-1', 'fill-warn');
+            ctx.log('inventory.reserve() -> hold-1', 'ok');
+            return back(ctx, 0);
+          });
+        },
+      },
+      {
+        title: 'Price, then charge',
+        say: 'Pricing owns the coupon rule; the facade only asks for the total. Then payments charges the card. These run in order because each needs the last one\'s result.',
+        run: function (ctx) {
+          hl([4]);
+          ctx.state.fstat.textContent = 'step 2/5 price';
+          return call(ctx, 1, 'total').then(function () {
+            status(ctx, 1, 'total = 1197', 'fill-ok');
+            ctx.log('pricing.total() -> 1197 (FLAT100 applied)', 'ok');
+            return back(ctx, 1);
+          }).then(function () {
+            hl([5]);
+            ctx.state.fstat.textContent = 'step 3/5 charge';
+            return call(ctx, 2, 'charge');
+          }).then(function () {
+            status(ctx, 2, 'txn-881', 'fill-ok');
+            ctx.log('payments.charge(1197) -> txn-881', 'ok');
+            return back(ctx, 2);
+          });
+        },
+      },
+      {
+        title: 'Create the order, commit the hold',
+        say: 'The order is saved with the transaction id, and the stock hold becomes a real decrement. Only now is the money and the stock in a final state.',
+        run: function (ctx) {
+          hl([6, 7]);
+          ctx.state.fstat.textContent = 'step 4/5 persist';
+          return Promise.all([call(ctx, 3, 'create'), call(ctx, 0, 'commit')]).then(function () {
+            status(ctx, 3, 'ord-1 saved', 'fill-ok');
+            status(ctx, 0, 'committed', 'fill-ok');
+            ctx.log('orders.create() -> ord-1; inventory.commit(hold-1)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Email is fire-and-forget; reply goes out now',
+        say: 'The facade starts the email but does not wait for it. The order goes back to the controller at once. Even if SMTP is slow, the paid order is not delayed.',
+        run: function (ctx) {
+          hl([8, 9]);
+          ctx.state.fstat.textContent = 'step 5/5 notify (no await)';
+          ctx.log('notifier.send() started, not awaited', 'warn');
+          return Promise.all([
+            call(ctx, 4, 'send').then(function () { status(ctx, 4, 'sent (async)', 'fill-ok'); }),
+            ctx.packet([fIn(), cIn(0)], { ms: 600, cls: 'ok', label: 'ord-1' }).then(function () {
+              ctx.flash(ctx.state.callers[0].r);
+              ctx.state.callers[0].s.textContent = 'got ord-1';
+              ctx.log('Controller got ord-1', 'ok');
+            }),
+          ]);
+        },
+      },
+      {
+        title: 'Retry job: card declined, facade rolls back',
+        say: 'Same failure as step 2, but now the retry job calls the facade. The charge throws, the single <code>catch</code> releases the hold, and the error goes back to the caller. No leak, because the rollback is written once.',
+        run: function (ctx) {
+          SUBS.forEach(function (s, i) { status(ctx, i, 'idle', ''); });
+          ctx.state.fstat.textContent = '';
+          hl([2]);
+          ctx.log("RetryJob: checkout('broke', cart)", 'info');
+          return ctx.packet([cIn(1), fIn()], { ms: 600, label: 'checkout()' }).then(function () {
+            return call(ctx, 0, 'reserve');
+          }).then(function () {
+            status(ctx, 0, 'held: hold-2', 'fill-warn');
+            hl([5], 'err');
+            return call(ctx, 2, 'charge', 'bad');
+          }).then(function () {
+            status(ctx, 2, 'CARD_DECLINED', 'fill-bad');
+            ctx.log('charge() threw CARD_DECLINED', 'bad');
+            hl([10, 11]);
+            ctx.state.fstat.textContent = 'catch: compensate';
+            return call(ctx, 0, 'release', 'warn');
+          }).then(function () {
+            status(ctx, 0, 'released', 'fill-ok');
+            ctx.log('inventory.release(hold-2): stock back', 'ok');
+            hl([12], 'err');
+            return ctx.packet([fIn(), cIn(1)], { ms: 600, cls: 'bad', label: 'error' });
+          }).then(function () {
+            ctx.state.callers[1].s.textContent = 'got CARD_DECLINED';
+            ctx.log('RetryJob got the error; nothing leaked', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A shortcut, not a wall',
+        say: 'The admin tool needs only a price preview, so it calls <code>Pricing</code> directly. That is fine. The facade covers the common flow; subsystems stay public for special cases.',
+        run: function (ctx) {
+          hl([]);
+          var w = line(ctx, cIn(2), sIn(1), 'dashed', ctx.state.clean);
+          ctx.log('AdminTool -> Pricing.total() directly', 'info');
+          return ctx.fade(w, 1, 300).then(function () {
+            return ctx.packet([cIn(2), sIn(1)], { ms: 700, label: 'total' });
+          }).then(function () {
+            status(ctx, 1, 'preview = 998', 'fill-ok');
+            ctx.state.callers[2].s.textContent = 'price preview';
+            ctx.state.fstat.textContent = 'one flow, 3 callers';
+            ctx.state.fstat2.textContent = 'subsystems unchanged';
+            ctx.log('facade = common path; subsystems still usable', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: a plain-JS mirror of the facade, prints the trace instantly ----
+  var out = document.getElementById('t-out');
+  document.getElementById('t-run').addEventListener('click', function () {
+    var stock = document.getElementById('t-stock').value;
+    var card = document.getElementById('t-card').value;
+    var mail = document.getElementById('t-mail').value;
+    var rows = [];
+    function add(t, c) { rows.push([t, c || '']); }
+    add("caller: checkout('pappu', cart)");
+    if (stock === 'out') {
+      add('inventory.reserve() threw OUT_OF_STOCK', 'bad');
+      add('no hold was made, nothing to release; no money moved', 'warn');
+      add('caller gets: OUT_OF_STOCK', 'bad');
+    } else {
+      add('inventory.reserve() -> hold-1', 'ok');
+      add('pricing.total() -> 1197', 'ok');
+      if (card === 'declined') {
+        add('payments.charge() threw CARD_DECLINED', 'bad');
+        add('catch: inventory.release(hold-1)', 'warn');
+        add('caller gets: CARD_DECLINED (stock is back)', 'bad');
+      } else {
+        add('payments.charge() -> txn-881', 'ok');
+        add('orders.create() -> ord-1; inventory.commit(hold-1)', 'ok');
+        add('notifier.send() started, not awaited', 'warn');
+        add('caller gets: ord-1', 'ok');
+        if (mail === 'down') add('later: email failed, logged only; order is still placed', 'warn');
+        else add('later: email delivered', 'ok');
+      }
+    }
+    out.innerHTML = '';
+    rows.forEach(function (r) { var li = document.createElement('li'); li.textContent = r[0]; if (r[1]) li.className = r[1]; out.appendChild(li); });
+  });
+})();
+</script>
+</body>
+</html>

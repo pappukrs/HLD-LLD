@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H39 Deploy and multi-region</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .try label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .try input[type="number"] { font: 13px var(--font-mono); width: 80px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .try output { font: 12.5px var(--font-mono); flex-basis: 100%; color: var(--ink); white-space: pre-wrap; }
+  #stage text.mono { white-space: pre; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H39 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Deployment, autoscaling and multi-region</h1>
+    <p class="lede">Three ways a system survives change and load: a canary that stops a bad release at 10%, an autoscaler that is always a minute late unless you pre-scale, and a warm standby region whose replication lag is your RPO.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 480" role="img" aria-label="Canary rollout, HPA scaling chart, and Mumbai to Hyderabad failover"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <label>Try it: pods <input id="h-pods" type="number" min="1" value="9"></label>
+        <label>CPU % <input id="h-cpu" type="number" min="0" max="100" value="100"></label>
+        <label>target % <input id="h-tgt" type="number" min="10" max="95" value="60"></label>
+        <label>replication lag ms <input id="r-lag" type="number" min="0" step="100" value="3000"></label>
+        <label>writes/s <input id="r-w" type="number" min="0" step="100" value="800"></label>
+        <output id="try-out"></output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>v1 / primary / capacity</span>
+        <span><i style="background: var(--signal)"></i>Canary / booting / traffic</span>
+        <span><i style="background: var(--ok)"></i>Healthy / promoted</span>
+        <span><i style="background: var(--bad)"></i>Bad version / overload / outage</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Deploys are canaries: 1%, 10%, 50%, 100%, with automatic rollback if errors, p99 or payment success get worse than baseline. Pods scale on in-flight requests and queue lag, and we pre-scale before known sale events because pods take a minute to boot. We run 3 AZs in Mumbai with a warm standby in Hyderabad: async replication gives an RPO of a few seconds, and a rehearsed runbook that fences the old primary gives an RTO under 15 minutes. Both regions are in India for RBI data localisation."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code">// HPA
+desired = ceil(current * cpu / target)    // 9 * 100/60 = 15
+scaleDown: max(recs in last 5 min)
+// canary gate
+if (canary.success &lt; base.success - 0.5%) abort()
+// DR
+RPO = replication lag at failure
+RTO = detect + decide + fence + promote + DNS</pre>
+    </div>
+    <div class="note wide">
+      <h3>Pick a strategy</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Rolling</th><th>Blue-green</th><th>Canary</th><th>Warm standby region</th><th>Active-active</th></tr></thead>
+          <tbody>
+            <tr><td>Protects against</td><td>Downtime during deploy</td><td>Slow rollback</td><td>Bad release reaching everyone</td><td>Region outage</td><td>Region outage, latency</td></tr>
+            <tr><td>Rollback / recovery</td><td>Minutes</td><td>Seconds</td><td>Seconds (0% to canary)</td><td>RTO minutes, RPO = lag</td><td>~0, per-home-region writes</td></tr>
+            <tr><td>Cost</td><td>None</td><td>2x during release</td><td>Small + metrics</td><td>Standby infra</td><td>2x+ and conflict handling</td></tr>
+            <tr><td>Catch</td><td>Mixed versions</td><td>Shared DB schema</td><td>Needs traffic + analysis</td><td>Must rehearse, fence primary</td><td>Never LWW for balances</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why did reactive scaling still drop requests?</summary><div>CPU is capped at 100%, so each HPA round can only ask for current × 100/60 pods, and each round waits about a minute for pods to boot. It takes three rounds to catch a 4x spike.</div></details>
+      <details class="qa"><summary>Why scale down slowly?</summary><div>Traffic is bumpy. Scaling down on every dip and back up on every bump (flapping) wastes boots and risks being short when the next bump comes. HPA waits 5 minutes by default.</div></details>
+      <details class="qa"><summary>What is the RPO with 3 s async lag?</summary><div>About 3 seconds of writes. With 800 writes/s that is roughly 2,400 writes that may need recovery from the old region.</div></details>
+      <details class="qa"><summary>Why fence the old primary before promoting?</summary><div>If the old region comes back and still accepts writes, both regions are primary (split brain) and data diverges. Fencing revokes its write access first.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>Rolling defaults: maxSurge 25%, maxUnavailable 25%</li>
+        <li>HPA checks every 15 s; scale-down window 5 min</li>
+        <li>Pod boot 30 to 90 s; new node 1 to 3 min</li>
+        <li>Mumbai to Hyderabad ~15 to 25 ms round trip</li>
+        <li>99.99% = 53 min of downtime a year</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- HPA simulation (same rules as demo.ts) ----------
+  var POD_RPS = 200, TARGET = 0.6, BOOT = 60;
+  function traffic(t) { return t >= 60 && t < 420 ? 4000 : 1000; }
+  function sim(minRep) {
+    var ready = Math.max(9, minRep(0)), starting = [], hist = [], out = [];
+    for (var t = 0; t <= 840; t += 15) {
+      while (starting.length && starting[0] <= t) { starting.shift(); ready++; }
+      var rps = traffic(t), util = Math.min(1, rps / (ready * POD_RPS));
+      if (!starting.length) {
+        var want = Math.min(50, Math.max(minRep(t), Math.ceil(ready * util / TARGET)));
+        hist.push({ t: t, want: want });
+        if (want < ready) hist.forEach(function (h) { if (t - h.t <= 300) want = Math.max(want, h.want); });
+        if (want > ready) { for (var i = ready; i < want; i++) starting.push(t + BOOT); } else ready = want;
+      }
+      out.push({ t: t, rps: rps, cap: ready * POD_RPS, ready: ready, booting: starting.length, util: util });
+    }
+    return out;
+  }
+  var REACTIVE = sim(function () { return 2; });
+  var PRESCALED = sim(function (t) { return t < 420 ? 34 : 2; });
+  var CX = 404, CW = 336, CY = 178, CH = 100;
+  function px(t) { return CX + t / 840 * CW; }
+  function py(rps) { return CY + CH - rps / 7000 * CH; }
+  function pts(series, key, upTo) {
+    var a = [];
+    series.forEach(function (d, i) {
+      if (d.t > upTo) return;
+      if (i > 0) a.push(px(d.t) + ',' + py(series[i - 1][key]));
+      a.push(px(d.t) + ',' + py(d[key]));
+    });
+    return a;
+  }
+  function at(series, t) { for (var i = series.length - 1; i >= 0; i--) if (series[i].t <= t) return series[i]; return series[0]; }
+
+  function banner(ctx, text, kind) { ctx.state.banner.textContent = text; ctx.state.banner.setAttribute('class', 'title' + (kind ? ' fill-' + kind : '')); }
+  function box(ctx, x, y, w, h, title, sub) {
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box' });
+    ctx.el('text', { x: x + 8, y: y + 16, class: 'small', text: title, style: 'font-weight:600' });
+    var s = ctx.el('text', { x: x + 8, y: y + 32, class: 'mono small muted', text: sub || '' });
+    return { r: r, s: s };
+  }
+  function split(ctx, pct, cls) {
+    var s = ctx.state, w = 300;
+    s.splitText.textContent = 'v1 ' + (100 - pct) + '%  |  v2 ' + pct + '%';
+    s.v2bar.setAttribute('class', cls || 'fill-signal');
+    return Promise.all([ctx.animate(s.v1bar, { width: w * (100 - pct) / 100 }, 400), ctx.animate(s.v2bar, { x: 230 + w * (100 - pct) / 100, width: w * pct / 100 }, 400)]);
+  }
+  function metrics(ctx, canaryLine, verdict, kind) {
+    ctx.state.mCan.textContent = canaryLine;
+    ctx.state.mVerdict.textContent = verdict;
+    ctx.state.mVerdict.setAttribute('class', 'mono small fill-' + kind);
+  }
+  function drawPods(ctx, d) {
+    var s = ctx.state;
+    s.podSq.forEach(function (sq, i) {
+      var n = i * 2; // one square = 2 pods
+      var cls = n < d.ready ? 'box accent' : n < d.ready + d.booting ? 'box signal' : 'box dim';
+      sq.setAttribute('class', cls);
+      sq.setAttribute('opacity', n < d.ready + d.booting ? 1 : 0.25);
+    });
+    s.podText.textContent = 't=' + d.t + 's  rps ' + d.rps + '  ready ' + d.ready + '  booting ' + d.booting + '  cpu ' + Math.round(d.util * 100) + '%';
+    s.podText.setAttribute('class', 'mono small ' + (d.cap < d.rps ? 'fill-bad' : 'fill-ok'));
+  }
+  function grow(ctx, poly, series, key, from, to, ms) {
+    return ctx.tween(ms, function (p) {
+      var upTo = from + (to - from) * p;
+      poly.setAttribute('points', pts(series, key, upTo).join(' '));
+      drawPods(ctx, at(series, upTo));
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Release, spike, outage',
+      say: 'Top: a payments API on version v1, about to ship v2 by canary. Middle: the same API facing a 4x sale spike, with the HPA. Bottom: Mumbai is the primary region, Hyderabad a warm standby.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      // band 1: canary
+      ctx.el('text', { x: 16, y: 20, class: 'title', text: 'Canary rollout' });
+      s.users = box(ctx, 16, 34, 80, 44, 'Users', '');
+      s.lb = box(ctx, 112, 34, 100, 44, 'LB / mesh', 'weights');
+      ctx.el('line', { x1: 96, y1: 56, x2: 112, y2: 56, class: 'wire' });
+      s.pods = [];
+      for (var i = 0; i < 5; i++) {
+        var r = ctx.el('rect', { x: 230 + i * 62, y: 34, width: 54, height: 34, rx: 6, class: i < 4 ? 'box accent' : 'box', opacity: i < 4 ? 1 : 0.2 });
+        var t = ctx.el('text', { x: 257 + i * 62, y: 56, 'text-anchor': 'middle', class: 'mono small', text: i < 4 ? 'v1' : 'v2' });
+        s.pods.push({ r: r, t: t });
+      }
+      ctx.el('rect', { x: 230, y: 76, width: 300, height: 10, rx: 3, class: 'box' });
+      s.v1bar = ctx.el('rect', { x: 230, y: 76, width: 300, height: 10, rx: 3, class: 'fill-accent' });
+      s.v2bar = ctx.el('rect', { x: 530, y: 76, width: 0, height: 10, rx: 3, class: 'fill-signal' });
+      s.splitText = ctx.el('text', { x: 230, y: 104, class: 'mono small muted', text: 'v1 100%  |  v2 0%' });
+      ctx.el('rect', { x: 548, y: 28, width: 196, height: 94, rx: 8, class: 'box' });
+      ctx.el('text', { x: 558, y: 44, class: 'small', text: 'canary analysis', style: 'font-weight:600' });
+      ctx.el('text', { x: 558, y: 62, class: 'mono small muted', text: '        err   p99   success' });
+      ctx.el('text', { x: 558, y: 76, class: 'mono small muted', text: 'base    .20%  180   96.2%' });
+      s.mCan = ctx.el('text', { x: 558, y: 90, class: 'mono small muted', text: 'canary -' });
+      s.mVerdict = ctx.el('text', { x: 558, y: 110, class: 'mono small muted', text: '' });
+      ctx.el('line', { x1: 10, y1: 132, x2: 750, y2: 132, class: 'wire dashed' });
+      // band 2: autoscaling
+      ctx.el('text', { x: 16, y: 154, class: 'title', text: 'Autoscaling (HPA, target 60% CPU)' });
+      s.podSq = [];
+      for (var k = 0; k < 25; k++) {
+        s.podSq.push(ctx.el('rect', { x: 16 + (k % 13) * 28, y: 170 + Math.floor(k / 13) * 28, width: 22, height: 22, rx: 4, class: 'box dim', opacity: 0.25 }));
+      }
+      ctx.el('text', { x: 16, y: 240, class: 'mono small muted', text: '1 square = 2 pods; pod = 200 rps at 100% CPU' });
+      s.podText = ctx.el('text', { x: 16, y: 258, class: 'mono small', text: '' });
+      s.hpaText = ctx.el('text', { x: 16, y: 276, class: 'mono small muted', text: '' });
+      ctx.el('rect', { x: CX - 4, y: CY - 10, width: CW + 8, height: CH + 26, rx: 6, class: 'box' });
+      ctx.el('text', { x: CX, y: CY + CH + 12, class: 'mono small muted', text: '0s' });
+      ctx.el('text', { x: CX + CW, y: CY + CH + 12, 'text-anchor': 'end', class: 'mono small muted', text: '840s' });
+      ctx.el('text', { x: CX + CW, y: CY + 2, 'text-anchor': 'end', class: 'mono small muted', text: 'rps' });
+      s.failArea = ctx.el('rect', { x: px(60), y: py(4000), width: px(180) - px(60), height: py(1800) - py(4000), class: 'fill-bad', opacity: 0 });
+      s.trafficLine = ctx.el('polyline', { points: '', class: 'wire', style: 'stroke: var(--signal)' });
+      s.capLine = ctx.el('polyline', { points: '', class: 'wire accent' });
+      s.preLine = ctx.el('polyline', { points: '', class: 'wire dashed', style: 'stroke: var(--ok)' });
+      drawPods(ctx, REACTIVE[0]);
+      ctx.el('line', { x1: 10, y1: 300, x2: 750, y2: 300, class: 'wire dashed' });
+      // band 3: multi-region
+      ctx.el('text', { x: 16, y: 322, class: 'title', text: 'Multi-region DR (both regions in India)' });
+      s.dns = box(ctx, 16, 336, 100, 44, 'GeoDNS', 'TTL 60 s -> BOM');
+      s.bom = box(ctx, 150, 330, 270, 100, 'Mumbai (primary)', '3 AZs, primary DB');
+      s.hyd = box(ctx, 480, 330, 264, 100, 'Hyderabad (warm standby)', 'small compute, replica DB');
+      s.az = [0, 1, 2].map(function (j) { return ctx.el('rect', { x: 160 + j * 62, y: 372, width: 54, height: 22, rx: 4, class: 'box ok' }); });
+      [0, 1, 2].forEach(function (j) { ctx.el('text', { x: 187 + j * 62, y: 387, 'text-anchor': 'middle', class: 'mono small', text: 'AZ-' + (j + 1) }); });
+      s.pdb = ctx.el('rect', { x: 352, y: 372, width: 58, height: 22, rx: 4, class: 'box accent' });
+      s.pdbT = ctx.el('text', { x: 381, y: 387, 'text-anchor': 'middle', class: 'mono small', text: 'DB rw' });
+      s.rdb = ctx.el('rect', { x: 490, y: 372, width: 70, height: 22, rx: 4, class: 'box' });
+      s.rdbT = ctx.el('text', { x: 525, y: 387, 'text-anchor': 'middle', class: 'mono small', text: 'DB ro' });
+      s.hydPods = ctx.el('text', { x: 572, y: 387, class: 'mono small muted', text: 'pods: 3 of 30' });
+      s.repl = ctx.el('line', { x1: 410, y1: 383, x2: 490, y2: 383, class: 'wire dashed' });
+      s.lagText = ctx.el('text', { x: 425, y: 372, class: 'mono small muted', text: '' });
+      ctx.el('line', { x1: 116, y1: 358, x2: 150, y2: 358, class: 'wire' });
+      s.drText = ctx.el('text', { x: 16, y: 450, class: 'mono small', text: '' });
+      s.banner = ctx.el('text', { x: 380, y: 472, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'Steady state: v1 on four pods',
+        say: 'All traffic goes through the load balancer (or service mesh) to four v1 pods. The canary analyser already records the baseline: error rate, p99 latency and the business KPI, payment success rate.',
+        run: function (ctx) {
+          var s = ctx.state;
+          var ps = [0, 1, 2, 3].map(function (i) { return ctx.packet([[96, 56], [212, 56], [257 + i * 62, 51]], { ms: 600, cls: 'accent', r: 5 }); });
+          return Promise.all(ps).then(function () { ctx.log('baseline: errors 0.20%, p99 180 ms, success 96.2%', 'info'); });
+        },
+      },
+      {
+        title: 'Canary v43 at 1%',
+        say: 'One v43 pod joins and gets 1% of traffic. At 1% the numbers look like the baseline, so the gate says promote to the next step.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.pods[4].r.setAttribute('class', 'box signal'); s.pods[4].r.setAttribute('opacity', 1);
+          s.pods[4].t.textContent = 'v43';
+          return split(ctx, 1).then(function () {
+            return ctx.packet([[96, 56], [212, 56], [505, 51]], { ms: 600, r: 5 });
+          }).then(function () {
+            metrics(ctx, 'canary  .22%  190   95.8%', '1%: PROMOTE', 'ok');
+            ctx.log('canary 1%: within limits -> next step', 'ok');
+          });
+        },
+      },
+      {
+        title: '10%: payment success drops, auto-abort',
+        say: 'At 10% the canary\'s payment success rate is 91% vs 96.2% for the baseline. Errors and latency look fine, which is why you gate on a <b>business</b> metric too. The rollout aborts: canary weight goes to 0% in seconds.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return split(ctx, 10).then(function () {
+            metrics(ctx, 'canary  .22%  190   91.0%', '10%: ABORT (success -5.2 pts)', 'bad');
+            s.pods[4].r.setAttribute('class', 'box bad'); ctx.flash(s.pods[4].r);
+            return ctx.wait(500);
+          }).then(function () { return split(ctx, 0, 'fill-bad'); }).then(function () {
+            ctx.log('canary 10%: success 91% < 96.2% -> rollback to 0%', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Fixed v44: 10%, 50%, 100%',
+        say: 'The fix ships as v44 and passes every step. Pods are replaced a few at a time. The schema change behind it used expand-contract, so v1 and v44 could run side by side the whole time.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.pods[4].r.setAttribute('class', 'box ok'); s.pods[4].t.textContent = 'v44';
+          return split(ctx, 10, 'fill-ok').then(function () {
+            metrics(ctx, 'canary  .21%  182   96.3%', '10%, 50%: PROMOTE', 'ok');
+            return split(ctx, 50, 'fill-ok');
+          }).then(function () {
+            return [0, 1, 2, 3].reduce(function (p, i) {
+              return p.then(function () { s.pods[i].r.setAttribute('class', 'box ok'); s.pods[i].t.textContent = 'v44'; return ctx.wait(120); });
+            }, Promise.resolve());
+          }).then(function () { return split(ctx, 100, 'fill-ok'); }).then(function () {
+            metrics(ctx, 'canary  .21%  182   96.3%', '100%: DONE', 'ok');
+            ctx.log('v44 promoted to 100%', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Sale starts: traffic jumps 4x',
+        say: 'At t=60 s traffic goes from 1,000 to 4,000 rps. Nine pods can serve 1,800 rps at 100% CPU. CPU cannot read above 100%, so the HPA asks for only <code>ceil(9 × 100 / 60) = 15</code> pods, and those take 60 s to boot.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return grow(ctx, s.trafficLine, REACTIVE, 'rps', 0, 90, 500).then(function () {
+            s.capLine.setAttribute('points', pts(REACTIVE, 'cap', 90).join(' '));
+            s.hpaText.textContent = 'HPA: ceil(9 x 100% / 60%) = 15 pods';
+            s.hpaText.setAttribute('class', 'mono small fill-signal');
+            ctx.log('t=60s: 4000 rps vs 1800 capacity -> 2200 rps failing', 'bad');
+          });
+        },
+      },
+      {
+        title: 'Three rounds of scaling, a minute each',
+        say: 'Pods arrive in waves: 15, then 25, then 34. Only then is CPU back near 60%. For about two minutes users get errors (the red area). This is the normal lag of reactive scaling.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return Promise.all([grow(ctx, s.trafficLine, REACTIVE, 'rps', 90, 400, 1400), grow(ctx, s.capLine, REACTIVE, 'cap', 90, 400, 1400)]).then(function () {
+            s.failArea.setAttribute('opacity', 0.25);
+            s.hpaText.textContent = 'rounds: 9 -> 15 -> 25 -> 34 pods; ~192k requests failed';
+            s.hpaText.setAttribute('class', 'mono small fill-bad');
+            ctx.log('reactive: 192,000 failed requests before capacity caught up', 'bad');
+          });
+        },
+      },
+      {
+        title: 'The fix for known events: pre-scale',
+        say: 'The sale time was known. A scheduled job sets minReplicas to 34 ten minutes before it starts (green dashed line). Capacity is already there at t=60 s: zero failures. Also raise DB pool and PSP limits ahead of time.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.tween(800, function (p) { s.preLine.setAttribute('points', pts(PRESCALED, 'cap', 840 * p).join(' ')); }).then(function () {
+            s.hpaText.textContent = 'pre-scaled to 34 before the sale: 0 failed requests';
+            s.hpaText.setAttribute('class', 'mono small fill-ok');
+            ctx.log('scheduled pre-scale: 0 failed requests', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Scale down slowly',
+        say: 'Traffic falls at t=420 s, but the HPA keeps 34 pods for 5 minutes (the stabilisation window) before dropping to 9. That stops flapping when traffic bounces.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return Promise.all([grow(ctx, s.trafficLine, REACTIVE, 'rps', 400, 840, 1000), grow(ctx, s.capLine, REACTIVE, 'cap', 400, 840, 1000)]).then(function () {
+            ctx.log('t=420s traffic drops; t=720s pods 34 -> 9 after the 5-min window', 'info');
+          });
+        },
+      },
+      {
+        title: 'Mumbai primary, Hyderabad warm standby',
+        say: 'Mumbai runs across 3 AZs and holds the primary DB. Writes replicate <b>asynchronously</b> to Hyderabad, about 3 s behind under load. That lag is the RPO: what you lose if Mumbai vanishes now.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.bom.r.setAttribute('class', 'box accent');
+          var ps = [0, 1, 2].map(function (k) { return ctx.wait(k * 200).then(function () { return ctx.packet([[410, 383], [490, 383]], { ms: 600, cls: 'accent', r: 5 }); }); });
+          return Promise.all(ps).then(function () {
+            s.lagText.textContent = 'lag 3 s';
+            ctx.log('replication BOM -> HYD, lag ~3 s (RPO)', 'info');
+          });
+        },
+      },
+      {
+        title: 'Mumbai goes down',
+        say: 'A region-wide outage: all three AZs fail. Health checks fail 3 times in a row (90 s). The on-call decides to fail over (a human "go" for a money system). First step: <b>fence</b> the old primary so it can never accept writes again.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.bom.r.setAttribute('class', 'box bad');
+          s.az.forEach(function (a) { a.setAttribute('class', 'box bad'); ctx.flash(a); });
+          s.pdb.setAttribute('class', 'box bad'); s.pdbT.textContent = 'fenced';
+          s.repl.setAttribute('class', 'wire bad');
+          s.drText.textContent = 'detect 90 s + decide 5 min + fence 30 s';
+          s.drText.setAttribute('class', 'mono small fill-bad');
+          banner(ctx, 'Region down: ~2,400 un-replicated writes at risk', 'bad');
+          ctx.log('BOM down; health checks failed x3 (90 s)', 'bad');
+          ctx.log('old primary fenced (epoch++)', 'warn');
+          return ctx.wait(400);
+        },
+      },
+      {
+        title: 'Promote Hyderabad, flip DNS',
+        say: 'Promote the replica to primary, flip GeoDNS (TTL 60 s), and scale the standby compute from 3 to 30 pods. Users come back in about 12 minutes (RTO). The 3 s of writes that never replicated are recovered later from Mumbai\'s logs or the outbox.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.rdb.setAttribute('class', 'box ok'); s.rdbT.textContent = 'DB rw';
+          s.hyd.r.setAttribute('class', 'box ok');
+          s.dns.s.textContent = 'TTL 60 s -> HYD';
+          return ctx.packet([[116, 358], [130, 358], [130, 440], [612, 440], [612, 430]], { ms: 900, cls: 'ok', label: 'users' }).then(function () {
+            s.hydPods.textContent = 'pods: 30 of 30';
+            s.drText.textContent = 'RPO ≈ 3 s (lag)   RTO ≈ 12 min (detect+decide+fence+promote+DNS+scale)';
+            s.drText.setAttribute('class', 'mono small fill-ok');
+            banner(ctx, 'Serving from Hyderabad: data never left India', 'ok');
+            ctx.log('HYD promoted, DNS flipped, compute scaled: RTO ~12 min', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // Try it: HPA formula + RPO estimate (pure calculation, outside the SVG).
+  function v(id, d) { var x = parseFloat(document.getElementById(id).value); return isFinite(x) ? x : d; }
+  function calc() {
+    var pods = Math.max(1, v('h-pods', 9)), cpu = Math.min(100, Math.max(0, v('h-cpu', 100))), tgt = Math.min(95, Math.max(10, v('h-tgt', 60)));
+    var lag = Math.max(0, v('r-lag', 3000)), w = Math.max(0, v('r-w', 800));
+    var want = Math.ceil(pods * cpu / tgt);
+    document.getElementById('try-out').textContent =
+      'HPA: ceil(' + pods + ' x ' + cpu + ' / ' + tgt + ') = ' + want + ' pods' + (want > pods ? ' (scale up now)' : want < pods ? ' (scale down after the 5-min window)' : ' (no change)') +
+      (cpu >= 100 ? '\n  CPU is pinned at 100%, so the real need may be higher: expect more rounds.' : '') +
+      '\nDR: RPO ≈ ' + (lag / 1000) + ' s ≈ ' + Math.round(lag / 1000 * w).toLocaleString('en-US') + ' writes at risk' + (lag === 0 ? ' (needs synchronous replication: +1 cross-region RTT on every write)' : '');
+  }
+  ['h-pods', 'h-cpu', 'h-tgt', 'r-lag', 'r-w'].forEach(function (id) { document.getElementById(id).addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

@@ -110,7 +110,7 @@ Relationships: ATM ◆— CashDispenser ◆— NoteHandler. ATM ⟶ BankService 
 
 ## Concepts used
 
-- [State pattern](../../concepts/patterns/p12-state.md) · [Chain of Responsibility](../../concepts/patterns/p14-chain-of-responsibility.md) · [Repository and DI](../../concepts/patterns/p18-repository-di.md)
-- Related problem: [Vending Machine](../06-vending-machine/) (the same State pattern, smaller)
-- HLD link: [Idempotency and delivery semantics](../../../hld/concepts/19-idempotency-delivery-semantics.md) · [Payments domain](../../../hld/concepts/35-payments-domain.md)
-- Visuals: [State machine](../../../visuals/v25-state-machine.html) · [Decorator and Chain of Responsibility](../../../visuals/v26-decorator-chain.html)
+- [State pattern](../../4-behavioral/L22-state/README.md) · [Chain of Responsibility](../../4-behavioral/L25-chain-of-responsibility/README.md) · [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md)
+- Related problem: [Vending Machine](../06-vending-machine) (the same State pattern, smaller)
+- HLD link: [Idempotency and delivery semantics](../../../hld/4-async/H22-delivery-semantics/README.md) · [Payments domain](../../../hld/6-building-blocks/H38-payments-domain/README.md)
+- Visuals: [State machine](../../4-behavioral/L22-state/visual.html) · [Decorator and Chain of Responsibility](../../3-structural/L14-decorator/visual.html)

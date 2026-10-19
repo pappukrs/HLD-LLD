@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H04 API Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .try-out { font: 12.5px/1.5 var(--font-mono); color: var(--muted); min-height: 3em; }
+  .try-out b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H04 · Basics</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>API design: idempotent writes and cursor pagination</h1>
+    <p class="lede">A phone retries <code>POST /payments</code> after a lost response. Watch the idempotency key stop the second charge. Then watch offset pagination repeat posts while a cursor stays stable.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Client, API server, idempotency store, bank, and a feed being paginated"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--ok)"></i>Response</span>
+        <span><i style="background: var(--bad)"></i>Lost / duplicate</span>
+        <span><i style="background: var(--accent)"></i>Stored state</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The handler (highlighted with the steps)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">const hash = sha256(body);</span><span class="ln" data-l="2">const won = store.insertIfAbsent(key, {IN_PROGRESS, hash});</span><span class="ln" data-l="3">if (!won) {</span><span class="ln" data-l="4">  const s = store.get(key);</span><span class="ln" data-l="5">  if (s.hash !== hash) return 422;</span><span class="ln" data-l="6">  if (s.status === 'IN_PROGRESS') return 409;</span><span class="ln" data-l="7">  return s.response;      // replay, no charge</span><span class="ln" data-l="8">}</span><span class="ln" data-l="9">const res = await psp.charge(body);</span><span class="ln" data-l="10">store.set(key, {DONE, hash, response: res});</span><span class="ln" data-l="11">return res;</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: tap Pay on a bad network</h3>
+      <div class="try">
+        <button class="btn primary" type="button" id="t-pay">Tap Pay (new key)</button>
+        <button class="btn" type="button" id="t-retry">Retry, same key</button>
+        <label><input type="checkbox" id="t-nokey"> server ignores keys</label>
+        <button class="btn" type="button" id="t-clear">Clear</button>
+      </div>
+      <div class="try-out" id="t-out">Tap Pay, then Retry a few times. Then tick "server ignores keys" and retry again.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Every write a client may retry takes an Idempotency-Key header. The server inserts the key with a unique constraint in the same transaction as the payment row, so a retry replays the first response instead of charging twice. Lists use keyset pagination on (created_at, id), which is one index seek at any depth and does not repeat rows when new ones arrive."</p>
+    </div>
+    <div class="note wide">
+      <h3>REST vs gRPC vs GraphQL</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>REST + JSON</th><th>gRPC</th><th>GraphQL</th></tr></thead>
+          <tbody>
+            <tr><td>Wire</td><td>JSON text, HTTP/1.1 or 2</td><td>Protobuf binary, HTTP/2</td><td>JSON, usually POST /graphql</td></tr>
+            <tr><td>HTTP / CDN caching</td><td>Yes, by URL</td><td>No</td><td>Hard (persisted queries)</td></tr>
+            <tr><td>Streaming</td><td>No (add SSE/WS)</td><td>Yes, both directions</td><td>Subscriptions over WS</td></tr>
+            <tr><td>Browser</td><td>Native</td><td>grpc-web + proxy</td><td>Native</td></tr>
+            <tr><td>Best caller</td><td>Public and partner apps</td><td>Internal services</td><td>Many screens, different fields</td></tr>
+            <tr><td>Main pain</td><td>Over/under-fetching</td><td>Debugging, browsers</td><td>N+1, query cost, caching</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why not "SELECT key, then INSERT if missing"?</summary><div>Two retries arriving together both see "missing" and both charge. The insert itself must be the check: a unique constraint or Redis SET NX.</div></details>
+      <details class="qa"><summary>Who generates the key, and when?</summary><div>The client, once per logical action (one "Pay" tap). Every retry of that action reuses it. A new key per HTTP attempt defeats the point.</div></details>
+      <details class="qa"><summary>Why did offset page 2 repeat posts 8 and 7?</summary><div>Two new posts landed at the top, pushing every row two places down. Offset 4 now points at what used to be offset 2. A cursor says "older than post 7", which does not move.</div></details>
+      <details class="qa"><summary>When is offset pagination fine?</summary><div>Small admin tables where "go to page 7" matters and data changes slowly. Not for feeds or deep history.</div></details>
+    </div>
+    <div class="note">
+      <h3>Where it shows up</h3>
+      <ul>
+        <li>Stripe and Razorpay accept <code>Idempotency-Key</code> on POST and keep it ~24 h.</li>
+        <li>Slack, X and Stripe list endpoints use cursors.</li>
+        <li>Google, Netflix and Uber run gRPC between services.</li>
+        <li>GitHub and Shopify offer GraphQL next to REST.</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CLIENT = [80, 100], API = [330, 100], PSP = [660, 60], STORE = [650, 165];
+
+  function box(ctx, x, y, w, h, label, sub, cls) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box ' + (cls || '') }, g);
+    var t = ctx.el('text', { x: x + w / 2, y: y + (sub ? h / 2 - 3 : h / 2 + 5), 'text-anchor': 'middle', text: label }, g);
+    var s = sub ? ctx.el('text', { x: x + w / 2, y: y + h / 2 + 13, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g) : null;
+    return { g: g, r: r, t: t, s: s };
+  }
+
+  function code(lines) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', lines.indexOf(+n.getAttribute('data-l')) >= 0);
+    });
+  }
+
+  function setRow(ctx, status, resp, cls) {
+    ctx.state.rowStatus.textContent = status;
+    ctx.state.rowStatus.setAttribute('class', 'mono ' + (cls || ''));
+    ctx.state.rowResp.textContent = resp;
+    ctx.flash(ctx.state.rowStatus);
+  }
+
+  function setCharges(ctx, n) {
+    ctx.state.charges = n;
+    ctx.state.chargeText.textContent = 'charges: ' + n;
+    ctx.state.chargeText.setAttribute('class', 'mono ' + (n > 1 ? 'fill-bad' : 'fill-ok'));
+    ctx.flash(ctx.state.chargeText);
+  }
+
+  // ---------- feed (bottom band) ----------
+  var SLOT_X = 30, SLOT_W = 52, SLOT_GAP = 6, FEED_Y = 330;
+  function slotX(i) { return SLOT_X + i * (SLOT_W + SLOT_GAP); }
+
+  function drawPost(ctx, id, slot, fresh) {
+    var g = ctx.group({ opacity: fresh ? 0 : 1 });
+    var r = ctx.el('rect', { x: 0, y: 0, width: SLOT_W, height: 40, rx: 6, class: 'box' + (fresh ? ' signal' : '') }, g);
+    ctx.el('text', { x: SLOT_W / 2, y: 25, 'text-anchor': 'middle', class: 'mono', text: 'post ' + id }, g);
+    ctx.place(g, slotX(slot), FEED_Y);
+    ctx.state.posts.push({ id: id, g: g, r: r, slot: slot });
+    return g;
+  }
+
+  function bracket(ctx, from, to, label, cls) {
+    var g = ctx.group({ opacity: 0 });
+    var x1 = slotX(from), x2 = slotX(to) + SLOT_W, y = FEED_Y + 52;
+    ctx.el('path', { d: 'M' + x1 + ' ' + (y - 6) + ' V' + y + ' H' + x2 + ' V' + (y - 6), class: 'wire ' + (cls || 'accent') }, g);
+    ctx.el('text', { x: (x1 + x2) / 2, y: y + 18, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    return g;
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A payment on a bad network',
+      say: 'Top half: the phone, the API, the idempotency table and the bank. Bottom half: a feed of 10 posts, newest first. Press Play.',
+    },
+    setup: function (ctx) {
+      code([]);
+      ctx.state.charges = 0;
+      ctx.state.posts = [];
+      ctx.el('text', { x: 20, y: 24, class: 'title', text: 'Idempotent POST' });
+      box(ctx, 20, 70, 120, 60, 'Mobile app', 'Idempotency-Key');
+      ctx.state.api = box(ctx, 260, 70, 140, 60, 'API server', 'POST /v1/payments');
+      box(ctx, 595, 30, 130, 50, 'Bank / PSP', '');
+      ctx.state.chargeText = ctx.el('text', { x: 660, y: 98, 'text-anchor': 'middle', class: 'mono fill-ok', text: 'charges: 0' });
+      var st = box(ctx, 540, 118, 210, 92, '', '', 'accent');
+      ctx.el('text', { x: 550, y: 136, class: 'mono small muted', text: 'idempotency_keys' }, st.g);
+      [['key', 550], ['status', 597], ['response', 683]].forEach(function (h) { ctx.el('text', { x: h[1], y: 158, class: 'mono small muted', text: h[0] }, st.g); });
+      ctx.state.rowKey = ctx.el('text', { x: 550, y: 180, class: 'mono', text: '' }, st.g);
+      ctx.state.rowStatus = ctx.el('text', { x: 597, y: 180, class: 'mono', text: '' }, st.g);
+      ctx.state.rowResp = ctx.el('text', { x: 683, y: 180, class: 'mono small', text: '' }, st.g);
+      ctx.el('line', { x1: 140, y1: 100, x2: 260, y2: 100, class: 'wire' });
+      ctx.el('path', { d: 'M400 92 H520 V55 H595', class: 'wire' });
+      ctx.el('path', { d: 'M400 108 H520 V165 H540', class: 'wire' });
+      ctx.state.lostMark = ctx.el('text', { x: 200, y: 88, 'text-anchor': 'middle', class: 'title fill-bad', text: '', opacity: 0 });
+
+      ctx.el('line', { x1: 20, y1: 250, x2: 740, y2: 250, class: 'wire dashed' });
+      ctx.el('text', { x: 20, y: 280, class: 'title', text: 'Paginating a live feed (limit = 4, newest first)' });
+      ctx.state.feedNote = ctx.el('text', { x: 20, y: 440, class: 'mono small muted', text: '' });
+      for (var i = 0; i < 10; i++) drawPost(ctx, 10 - i, i, false);
+    },
+    steps: [
+      {
+        title: 'The client sends the payment with a key',
+        say: 'The app makes one UUID for this "Pay" tap and sends it in the <code>Idempotency-Key</code> header. Every retry of this tap will reuse it.',
+        run: function (ctx) {
+          code([1]);
+          ctx.log('POST /v1/payments  Idempotency-Key: k-42');
+          return ctx.packet([CLIENT, API], { label: 'k-42', ms: 800 });
+        },
+      },
+      {
+        title: 'Atomic insert-if-absent claims the key',
+        say: 'The server inserts <code>k-42</code> as IN_PROGRESS. The unique constraint makes the insert itself the check, so only one request can ever win it.',
+        run: function (ctx) {
+          code([2]);
+          return ctx.packet([[400, 108], [520, 108], [520, 165], [540, 165]], { cls: 'accent', ms: 600 }).then(function () {
+            ctx.state.rowKey.textContent = 'k-42';
+            setRow(ctx, 'IN_PROGRESS', '', 'fill-warn');
+            ctx.log('INSERT k-42 → ok, new key', 'info');
+          });
+        },
+      },
+      {
+        title: 'Charge the bank, then save the response',
+        say: 'Only the winner calls the bank. The response is stored next to the key, ideally in the same transaction as the payment row.',
+        run: function (ctx) {
+          code([9, 10]);
+          return ctx.packet([[400, 92], [520, 92], [520, 55], [595, 55]], { ms: 700 }).then(function () {
+            setCharges(ctx, 1);
+            ctx.log('Bank charged ₹499 (charge #1)', 'ok');
+            return ctx.packet([[595, 55], [520, 55], [520, 92], [400, 92]], { cls: 'ok', ms: 600 });
+          }).then(function () {
+            setRow(ctx, 'DONE', '201 pay_1', 'fill-ok');
+            ctx.log('k-42 → DONE, response 201 pay_1 saved', 'info');
+          });
+        },
+      },
+      {
+        title: 'The response is lost on the way back',
+        say: 'The phone enters a tunnel. The 201 never arrives. From the app\'s view the payment may or may not have happened, so it must retry.',
+        run: function (ctx) {
+          code([11]);
+          return ctx.packet([API, [190, 100]], { cls: 'ok', ms: 500 }).then(function () {
+            ctx.state.lostMark.textContent = '✕ timeout';
+            ctx.log('Response lost: client times out', 'bad');
+            return ctx.fade(ctx.state.lostMark, 1, 300);
+          });
+        },
+      },
+      {
+        title: 'Retry with the same key',
+        say: 'The app sends the same request with the same key. The insert hits the unique constraint: the key already exists.',
+        run: function (ctx) {
+          code([2, 3]);
+          ctx.fade(ctx.state.lostMark, 0, 300);
+          ctx.log('Retry: POST /v1/payments  Idempotency-Key: k-42');
+          return ctx.packet([CLIENT, API], { label: 'k-42', ms: 700 }).then(function () {
+            return ctx.packet([[400, 108], [520, 108], [520, 165], [540, 165]], { cls: 'accent', ms: 500 });
+          }).then(function () {
+            ctx.flash(ctx.state.rowKey);
+            ctx.log('INSERT k-42 → duplicate key', 'warn');
+          });
+        },
+      },
+      {
+        title: 'Replay the stored response: no second charge',
+        say: 'The status is DONE and the body hash matches, so the server returns the saved <code>201 pay_1</code>. The bank is never called again. The charge count stays at 1.',
+        run: function (ctx) {
+          code([4, 7]);
+          return ctx.packet([[540, 165], [520, 165], [520, 108], [400, 108]], { cls: 'accent', ms: 500 }).then(function () {
+            return ctx.packet([API, CLIENT], { cls: 'ok', label: '201 pay_1', ms: 700 });
+          }).then(function () {
+            ctx.flash(ctx.state.chargeText);
+            ctx.log('Client gets 201 pay_1 (replayed). Charges still 1.', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Two retries race: one wins, one gets 409',
+        say: 'A new tap (key <code>k-43</code>) is double-sent at the same moment. Both try the insert; the database lets exactly one through. The loser sees IN_PROGRESS and gets <code>409</code>.',
+        run: function (ctx) {
+          code([2, 6]);
+          ctx.state.rowKey.textContent = 'k-43';
+          setRow(ctx, '', '', '');
+          ctx.log('Two copies of POST with k-43 sent together');
+          return Promise.all([
+            ctx.packet([[140, 92], [260, 92]], { label: 'A', ms: 600 }),
+            ctx.packet([[140, 112], [260, 112]], { label: 'B', ms: 600 }),
+          ]).then(function () {
+            setRow(ctx, 'IN_PROGRESS', '', 'fill-warn');
+            ctx.log('A: INSERT k-43 → ok (winner)', 'ok');
+            ctx.log('B: INSERT k-43 → duplicate, status IN_PROGRESS → 409', 'warn');
+            return ctx.packet([[260, 112], [140, 112]], { cls: 'warn', label: '409', ms: 600 });
+          }).then(function () {
+            return ctx.packet([[400, 92], [520, 92], [520, 55], [595, 55]], { ms: 500 });
+          }).then(function () {
+            setCharges(ctx, 2);
+            setRow(ctx, 'DONE', '201 pay_2', 'fill-ok');
+            ctx.log('Only A charged the bank (charge #2 overall, 1 per tap)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Offset pagination: page 1, then new posts arrive',
+        say: 'The app loads <code>?offset=0&amp;limit=4</code>: posts 10, 9, 8, 7. While the user reads, posts 11 and 12 are published at the top and push every row two places right.',
+        run: function (ctx) {
+          code([]);
+          var b = bracket(ctx, 0, 3, 'page 1 (offset 0)', 'accent');
+          ctx.state.b1 = b;
+          ctx.log('GET /feed?offset=0&limit=4 → [10, 9, 8, 7]', 'info');
+          return ctx.fade(b, 1, 300).then(function () { return ctx.wait(300); }).then(function () {
+            ctx.state.feedNote.textContent = 'posts 11 and 12 published → everything shifts right by 2';
+            ctx.state.posts.forEach(function (p) { p.slot += 2; });
+            return Promise.all(ctx.state.posts.map(function (p) { return ctx.move(p.g, slotX(p.slot), FEED_Y, 600); }));
+          }).then(function () {
+            var a = drawPost(ctx, 12, 0, true), c = drawPost(ctx, 11, 1, true);
+            ctx.log('New posts 12, 11 inserted at the top', 'warn');
+            return Promise.all([ctx.fade(a, 1, 300), ctx.fade(c, 1, 300), ctx.fade(b, 0, 300)]);
+          });
+        },
+      },
+      {
+        title: 'Offset page 2 repeats posts 8 and 7',
+        say: 'The app asks for <code>?offset=4</code>. Slot 4 now holds post 8, so the user sees 8 and 7 twice. On a big table the database also reads and throws away every skipped row.',
+        run: function (ctx) {
+          var b = bracket(ctx, 4, 7, 'page 2 (offset 4)', 'bad');
+          ctx.state.b2 = b;
+          ctx.state.posts.forEach(function (p) {
+            if (p.slot >= 4 && p.slot <= 7 && (p.id === 8 || p.id === 7)) p.r.setAttribute('class', 'box bad');
+          });
+          ctx.log('GET /feed?offset=4&limit=4 → [8, 7, 6, 5]  duplicates: 8, 7', 'bad');
+          return ctx.fade(b, 1, 400);
+        },
+      },
+      {
+        title: 'Cursor pagination: "older than post 7"',
+        say: 'Instead, page 1 returned <code>nextCursor = {t, id} of post 7</code>. Page 2 is <code>WHERE (t, id) &lt; cursor</code>: posts 6, 5, 4, 3. No repeats, and it is one index seek at any depth.',
+        run: function (ctx) {
+          ctx.fade(ctx.state.b2, 0, 300);
+          ctx.state.posts.forEach(function (p) { p.r.setAttribute('class', p.id >= 11 ? 'box signal' : 'box'); });
+          var seven = ctx.state.posts.filter(function (p) { return p.id === 7; })[0];
+          var mx = slotX(seven.slot) + SLOT_W + SLOT_GAP / 2;
+          var m = ctx.group({ opacity: 0 });
+          ctx.el('line', { x1: mx, y1: FEED_Y - 14, x2: mx, y2: FEED_Y + 50, class: 'wire accent' }, m);
+          ctx.el('text', { x: mx, y: FEED_Y - 18, 'text-anchor': 'middle', class: 'mono small', text: 'cursor: after post 7' }, m);
+          var b = bracket(ctx, seven.slot + 1, seven.slot + 4, 'page 2 (after cursor)', 'accent');
+          ctx.state.feedNote.textContent = 'new posts 12, 11 show up on pull-to-refresh, not mixed into page 2';
+          ctx.log('GET /feed?after=eyJ0Ijo...&limit=4 → [6, 5, 4, 3]', 'ok');
+          return ctx.fade(m, 1, 400).then(function () { return ctx.fade(b, 1, 400); });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it panel (independent of the player) ----------
+  var out = document.getElementById('t-out');
+  var keys = {}, charges = 0, current = null, n = 0, lines = [];
+  function show(msg) {
+    lines.unshift(msg);
+    lines = lines.slice(0, 5);
+    out.innerHTML = '<b>charges: ' + charges + '</b><br>' + lines.join('<br>');
+  }
+  function send(key) {
+    var ignore = document.getElementById('t-nokey').checked;
+    if (!ignore && keys[key]) { show(key + ' → replay "' + keys[key] + '" (no charge)'); return; }
+    charges++;
+    var res = '201 pay_' + charges;
+    if (!ignore) keys[key] = res;
+    show(key + ' → bank charged, ' + res + (ignore ? '  (key ignored!)' : ''));
+  }
+  document.getElementById('t-pay').addEventListener('click', function () { n++; current = 'k-' + (100 + n); send(current); });
+  document.getElementById('t-retry').addEventListener('click', function () {
+    if (!current) { show('Tap Pay first.'); return; }
+    send(current);
+  });
+  document.getElementById('t-clear').addEventListener('click', function () { keys = {}; charges = 0; current = null; lines = []; out.textContent = 'Cleared.'; });
+})();
+</script>
+</body>
+</html>

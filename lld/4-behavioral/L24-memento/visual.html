@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L24 Memento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage text.big { font-family: var(--font-mono); font-size: 18px; }
+  .stage .card { fill: var(--surface); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .card.redo { stroke: var(--signal); }
+  .stage .card.gone { stroke: var(--bad); stroke-dasharray: 5 4; }
+  .stage .seal { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1; }
+  .stage .base { stroke: var(--muted); stroke-width: 2; }
+  .stage .priv { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L24 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Memento: sealed snapshots for undo</h1>
+    <p class="lede">The editor (originator) packs its private state into a sealed memento. The history (caretaker) stacks those mementos for undo and redo, but can never open them. Only the editor can read one back with <code>restore()</code>.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="An editor saving sealed snapshots into undo and redo stacks"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Memento on the undo stack</span>
+        <span><i style="background: var(--signal)"></i>Memento on the redo stack</span>
+        <span><i style="background: var(--bad)"></i>Dropped / blocked</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Try the editor yourself">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 450" role="img" aria-label="Interactive editor with undo and redo stacks"></svg>
+      </div>
+      <div class="controls">
+        <button class="btn primary" type="button" id="t-type">type a word</button>
+        <button class="btn" type="button" id="t-undo">undo()</button>
+        <button class="btn" type="button" id="t-redo">redo()</button>
+        <label for="t-limit">History limit
+          <select id="t-limit"><option>2</option><option selected>3</option><option>4</option><option>6</option></select>
+        </label>
+        <span class="grow"></span>
+        <button class="btn" type="button" id="t-reset">New editor</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Type, undo, redo</h2>
+        <p>Each "type a word" first calls <code>history.checkpoint()</code>, then edits. Undo twice, then type again: watch the redo stack get cleared. Lower the limit to see old snapshots fall off.</p>
+      </section>
+      <section class="log">
+        <h3>History log</h3>
+        <ol id="t-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The editor is the originator: it creates a snapshot of its own state and is the only class that can read it back. The history is the caretaker: it keeps an undo stack and a redo stack of opaque mementos, clears redo on every new change, and caps the stacks so memory stays bounded. If the state is large, I switch to command-based undo or store diffs."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code" id="code"><span class="ln" data-k="mem">class EditorMemento { #state; constructor(s, label) {…} }</span><span class="ln" data-k="save">save()    { return new EditorMemento({ text, cursor }, label); }</span><span class="ln" data-k="restore">restore(m){ ({ text, cursor } = EditorMemento.read(m)); }</span><span class="ln" data-k="check">checkpoint() { undo.push(editor.save()); redo = []; }</span><span class="ln" data-k="cap">  if (undo.length > limit) undo.shift();</span><span class="ln" data-k="undo">undo() { redo.push(editor.save()); editor.restore(undo.pop()); }</span><span class="ln" data-k="redo">redo() { undo.push(editor.save()); editor.restore(redo.pop()); }</span><span class="ln" data-k="peek">history.top.#state  // SyntaxError: private field</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Ways to go back</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Memento (full snapshot)</th><th>Command undo (L23)</th><th>Snapshot + log (hybrid)</th></tr></thead>
+          <tbody>
+            <tr><td>Stores</td><td>The whole state per step</td><td>Each change and its reverse</td><td>A snapshot every K steps + changes</td></tr>
+            <tr><td>Memory for N steps</td><td>N × state size</td><td>N × change size</td><td>N/K × state + N × change</td></tr>
+            <tr><td>Restore cost</td><td>O(1): swap in the state</td><td>Undo one by one</td><td>Load snapshot, replay ≤ K changes</td></tr>
+            <tr><td>Risk</td><td>Shallow copies, memory blow-up</td><td>A wrong <code>undo()</code></td><td>More code</td></tr>
+            <tr><td>Real example</td><td>Redux time-travel, form drafts</td><td>Text editor, DB migrations up/down</td><td>Event sourcing snapshots, DB checkpoint + WAL</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why does undo() save the current state before restoring?</summary><div>So redo has something to return to. Without it, the state you undid is lost.</div></details>
+      <details class="qa"><summary>Why is the redo stack cleared on a new change?</summary><div>Those snapshots describe a future that no longer exists. Redoing them would throw away the new change.</div></details>
+      <details class="qa"><summary>The caretaker wants to show "Undo: typed Pay" in a menu. How, without opening the memento?</summary><div>The originator puts harmless metadata on the memento, like <code>label</code> and <code>at</code>. The caretaker reads only those.</div></details>
+      <details class="qa"><summary>Can a memento undo a sent payment?</summary><div>No. It restores local state only. An external effect needs a compensating action, like a refund.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/22-text-editor/README.md">22 Text Editor</a></li>
+        <li>Nested transactions: <a href="../../problems/14-kv-store/README.md">14 KV Store</a></li>
+        <li>Pairs with: <a href="../L23-command/README.md">L23 Command</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var CARD_W = 160, CARD_H = 34;
+  var COL = { undo: 410, redo: 590 };
+  var BASE_Y = 392;
+  var ED_OUT = [120, 214]; // where a fresh memento appears, just under the editor
+
+  function slotY(i) { return BASE_Y - (i + 1) * (CARD_H + 8); }
+
+  function newModel(limit) { return { text: '', undo: [], redo: [], limit: limit || 3, n: 0 }; }
+  function snap(m) { m.n++; return { id: 'm' + m.n, text: m.text }; }
+  function show(t) { return '"' + t + '|"'; }
+
+  // ---------- static scene ----------
+  function drawStatic(mk, root) {
+    mk('text', { x: 30, y: 34, class: 'title', text: 'Editor  (originator)' }, root);
+    mk('rect', { x: 30, y: 46, width: 320, height: 150, rx: 10, class: 'box accent' }, root);
+    mk('text', { x: 48, y: 76, class: 'mono small muted', text: 'what the user sees' }, root);
+    mk('rect', { x: 48, y: 128, width: 284, height: 56, rx: 6, class: 'priv' }, root);
+    mk('text', { x: 58, y: 148, class: 'mono small muted', text: 'private state' }, root);
+    mk('text', { x: 390, y: 34, class: 'title', text: 'History  (caretaker)' }, root);
+    mk('line', { x1: COL.undo, y1: BASE_Y + 4, x2: COL.undo + CARD_W, y2: BASE_Y + 4, class: 'base' }, root);
+    mk('line', { x1: COL.redo, y1: BASE_Y + 4, x2: COL.redo + CARD_W, y2: BASE_Y + 4, class: 'base' }, root);
+    mk('text', { x: COL.undo + CARD_W / 2, y: BASE_Y + 24, 'text-anchor': 'middle', class: 'mono small', text: 'undoStack' }, root);
+    mk('text', { x: COL.redo + CARD_W / 2, y: BASE_Y + 24, 'text-anchor': 'middle', class: 'mono small', text: 'redoStack' }, root);
+    mk('text', { x: 30, y: 262, class: 'b', text: 'What the caretaker can see in a memento' }, root);
+    mk('rect', { x: 30, y: 274, width: 320, height: 70, rx: 8, class: 'box' }, root);
+    mk('text', { x: 46, y: 298, class: 'mono small', text: '{ label: "m2", at: 2 }   // metadata' }, root);
+    mk('text', { x: 46, y: 322, class: 'mono small muted', text: '#state  -> hidden, frozen, editor-only' }, root);
+  }
+
+  // A sealed card: outer rect + a small "seal" block + label.
+  function card(mk, parent, label, cls) {
+    var g = mk('g', {}, parent);
+    mk('rect', { x: 0, y: 0, width: CARD_W, height: CARD_H, rx: 6, class: 'card ' + (cls || '') }, g);
+    mk('rect', { x: 8, y: 9, width: 16, height: 16, rx: 3, class: 'seal' }, g);
+    mk('text', { x: 32, y: 22, class: 'mono small', text: label }, g);
+    return g;
+  }
+  function setPos(g, x, y) { g._x = x; g._y = y; g.setAttribute('transform', 'translate(' + x + ',' + y + ')'); }
+
+  // ---------- dynamic scene, redrawn from the model ----------
+  function render(mk, dyn, m) {
+    while (dyn.firstChild) dyn.removeChild(dyn.firstChild);
+    var t = mk('text', { x: 48, y: 108, class: 'big', text: show(m.text) }, dyn);
+    mk('text', { x: 58, y: 172, class: 'mono small', text: '#text = ' + JSON.stringify(m.text) + '   #cursor = ' + m.text.length }, dyn);
+    var cards = { undo: [], redo: [] };
+    ['undo', 'redo'].forEach(function (s) {
+      m[s].forEach(function (c, i) {
+        var g = card(mk, dyn, c.id + ' · sealed', s === 'redo' ? 'redo' : '');
+        setPos(g, COL[s], slotY(i));
+        cards[s].push(g);
+      });
+    });
+    mk('text', { x: 30, y: 380, class: 'mono small muted', text: 'snapshots held: ' + (m.undo.length + m.redo.length) + '   limit: ' + m.limit }, dyn);
+    mk('text', { x: 30, y: 400, class: 'mono small muted', text: 'memory ≈ ' + (m.undo.length + m.redo.length) + ' × state size' }, dyn);
+    return { text: t, cards: cards };
+  }
+
+  function hl(keys) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (l) {
+      l.classList.toggle('on', keys.indexOf(l.getAttribute('data-k')) >= 0);
+    });
+  }
+
+  // ---------- guided lab ----------
+  function mkc(ctx) { return function (t, a, p) { return ctx.el(t, a, p); }; }
+  function redraw(ctx) { ctx.state.v = render(mkc(ctx), ctx.state.dyn, ctx.state.m); }
+
+  // Animate a card flying from (x0,y0) to (x1,y1), then drop it.
+  function fly(ctx, label, cls, from, to) {
+    var g = card(mkc(ctx), ctx.svg, label, cls);
+    ctx.place(g, from[0], from[1]);
+    return ctx.move(g, to[0], to[1], 700).then(function () { g.remove(); });
+  }
+
+  function checkpoint(ctx) {
+    var m = ctx.state.m, mm = snap(m);
+    ctx.log('checkpoint(): editor.save() -> ' + mm.id + ' (state ' + JSON.stringify(mm.text) + ')', 'info');
+    return fly(ctx, mm.id + ' · sealed', '', ED_OUT, [COL.undo, slotY(m.undo.length)]).then(function () {
+      m.undo.push(mm);
+      var dropped = null;
+      if (m.undo.length > m.limit) dropped = m.undo.shift();
+      var hadRedo = m.redo.length;
+      m.redo = [];
+      redraw(ctx);
+      if (dropped) ctx.log('limit ' + m.limit + ': dropped oldest ' + dropped.id, 'warn');
+      if (hadRedo) ctx.log('redo stack cleared (' + hadRedo + ' snapshot' + (hadRedo > 1 ? 's' : '') + ')', 'bad');
+    });
+  }
+
+  function typeText(ctx, s) {
+    var m = ctx.state.m, chars = s.split(''), chain = Promise.resolve();
+    chars.forEach(function (ch) {
+      chain = chain.then(function () { m.text += ch; ctx.state.v.text.textContent = show(m.text); return ctx.wait(90); });
+    });
+    return chain.then(function () { redraw(ctx); ctx.log('type ' + JSON.stringify(s) + ' -> ' + show(m.text)); });
+  }
+
+  function swap(ctx, fromStack, toStack, name) {
+    var m = ctx.state.m;
+    if (!m[fromStack].length) { ctx.log(name + '(): nothing to ' + name, 'bad'); return Promise.resolve(); }
+    var cur = snap(m), top = m[fromStack][m[fromStack].length - 1];
+    ctx.log(name + '(): save current as ' + cur.id + ' onto ' + toStack + 'Stack', 'info');
+    return fly(ctx, cur.id + ' · sealed', toStack === 'redo' ? 'redo' : '', ED_OUT, [COL[toStack], slotY(m[toStack].length)]).then(function () {
+      m[toStack].push(cur);
+      m[fromStack].pop();
+      redraw(ctx);
+      return fly(ctx, top.id + ' · sealed', fromStack === 'redo' ? 'redo' : '', [COL[fromStack], slotY(m[fromStack].length)], ED_OUT);
+    }).then(function () {
+      m.text = top.text;
+      redraw(ctx);
+      ctx.flash(ctx.state.v.text);
+      ctx.log('editor.restore(' + top.id + ') -> ' + show(m.text), 'ok');
+    });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'An editor with private state', say: 'The editor keeps <code>#text</code> and <code>#cursor</code> private. We will save and restore them without making them public.' },
+    setup: function (ctx) {
+      ctx.state.m = newModel(3);
+      drawStatic(mkc(ctx), ctx.svg);
+      ctx.state.dyn = ctx.group({});
+      redraw(ctx);
+      hl([]);
+    },
+    steps: [
+      {
+        title: 'The originator owns the state',
+        say: 'Only the editor can read or write <code>#text</code>. The history must not touch it, or every new field becomes a change in two classes.',
+        run: function (ctx) { hl(['mem']); ctx.flash(ctx.state.v.text); ctx.log('editor = new Editor()  #text="" #cursor=0', 'info'); return ctx.wait(500); },
+      },
+      {
+        title: 'checkpoint(), then type "Pay"',
+        say: 'Before a change, the history asks the editor for a memento. The editor packs its state into a sealed card <code>m1</code>; the history only stacks it.',
+        run: function (ctx) { hl(['save', 'check']); return checkpoint(ctx).then(function () { return typeText(ctx, 'Pay'); }); },
+      },
+      {
+        title: 'checkpoint(), then type " 500"',
+        say: 'Same again. <code>m2</code> holds <code>"Pay"</code>. The stack grows from the bottom; the newest snapshot is on top.',
+        run: function (ctx) { hl(['save', 'check']); return checkpoint(ctx).then(function () { return typeText(ctx, ' 500'); }); },
+      },
+      {
+        title: 'checkpoint(), then a bad edit',
+        say: 'The user changes the amount to 5000 by mistake. <code>m3</code> still holds the good state <code>"Pay 500"</code>.',
+        run: function (ctx) { hl(['check']); return checkpoint(ctx).then(function () { return typeText(ctx, '0'); }); },
+      },
+      {
+        title: 'undo(): current state goes to redo first',
+        say: 'Undo saves the current state onto the redo stack, pops <code>m3</code>, and hands it back. Only the editor opens it in <code>restore()</code>.',
+        run: function (ctx) { hl(['undo', 'restore']); return swap(ctx, 'undo', 'redo', 'undo'); },
+      },
+      {
+        title: 'undo() again',
+        say: 'Back to <code>"Pay"</code>. Each undo moves one snapshot from the undo stack to the editor and one fresh snapshot to the redo stack.',
+        run: function (ctx) { hl(['undo', 'restore']); return swap(ctx, 'undo', 'redo', 'undo'); },
+      },
+      {
+        title: 'redo(): the mirror image',
+        say: 'Redo saves the current state onto the undo stack and restores the top of the redo stack. We are at <code>"Pay 500"</code> again.',
+        run: function (ctx) { hl(['redo', 'restore']); return swap(ctx, 'redo', 'undo', 'redo'); },
+      },
+      {
+        title: 'A new change clears redo',
+        say: 'The user types " INR". The future in the redo stack no longer exists, so <code>checkpoint()</code> empties it.',
+        run: function (ctx) {
+          hl(['check']);
+          var v = ctx.state.v;
+          v.cards.redo.forEach(function (g) { g.firstChild.setAttribute('class', 'card gone'); });
+          return ctx.wait(500).then(function () { return checkpoint(ctx); }).then(function () { return typeText(ctx, ' INR'); });
+        },
+      },
+      {
+        title: 'The caretaker cannot peek',
+        say: 'If the history tries to read the snapshot, TypeScript stops it: <code>#state</code> is a private field. It may read only the label and time.',
+        run: function (ctx) {
+          hl(['peek']);
+          var v = ctx.state.v, top = v.cards.undo[v.cards.undo.length - 1];
+          return ctx.packet([[COL.undo + CARD_W / 2, 60], [COL.undo + CARD_W / 2, top._y]], { cls: 'bad', ms: 700 }).then(function () {
+            top.firstChild.setAttribute('class', 'card gone');
+            ctx.flash(top);
+            ctx.log('history reads memento.#state -> blocked (private field)', 'bad');
+            ctx.log('history reads memento.label -> "' + ctx.state.m.undo[ctx.state.m.undo.length - 1].id + '" (allowed)', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Cap the history',
+        say: 'With a limit of 3, the next checkpoint drops the oldest snapshot. Unbounded history is a memory leak in a long session.',
+        run: function (ctx) { hl(['check', 'cap']); return checkpoint(ctx).then(function () { return typeText(ctx, '.'); }); },
+      },
+    ],
+  });
+
+  // ---------- try-it panel (independent of the guided steps) ----------
+  var svg = document.getElementById('try'), logList = document.getElementById('t-log');
+  var limitSel = document.getElementById('t-limit');
+  var words = [' pay', ' 500', ' INR', ' to', ' Ankit', ' now'];
+  var tm, dyn, wi;
+  var mk = function (t, a, p) { return Kit.el(t, a, p); };
+  function tlog(msg, kind) { var li = document.createElement('li'); li.className = kind || ''; li.textContent = msg; logList.appendChild(li); logList.parentNode.scrollTop = logList.parentNode.scrollHeight; }
+  function draw() { render(mk, dyn, tm); }
+  function fresh() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    tm = newModel(parseInt(limitSel.value, 10)); wi = 0;
+    drawStatic(mk, svg);
+    dyn = Kit.el('g', {}, svg);
+    draw();
+    logList.innerHTML = '';
+    tlog('new Editor(), limit ' + tm.limit, 'info');
+  }
+  document.getElementById('t-type').addEventListener('click', function () {
+    var mm = snap(tm); tm.undo.push(mm);
+    if (tm.undo.length > tm.limit) tlog('dropped oldest ' + tm.undo.shift().id, 'warn');
+    if (tm.redo.length) tlog('redo cleared (' + tm.redo.length + ')', 'bad');
+    tm.redo = [];
+    var w = words[wi++ % words.length];
+    tm.text += w;
+    tlog('checkpoint ' + mm.id + ', type ' + JSON.stringify(w), 'ok');
+    draw();
+  });
+  function trySwap(from, to, name) {
+    if (!tm[from].length) { tlog(name + '(): stack empty', 'bad'); return; }
+    var cur = snap(tm); tm[to].push(cur);
+    var top = tm[from].pop(); tm.text = top.text;
+    tlog(name + '(): saved ' + cur.id + ', restored ' + top.id + ' -> ' + show(tm.text), 'ok');
+    draw();
+  }
+  document.getElementById('t-undo').addEventListener('click', function () { trySwap('undo', 'redo', 'undo'); });
+  document.getElementById('t-redo').addEventListener('click', function () { trySwap('redo', 'undo', 'redo'); });
+  limitSel.addEventListener('change', function () {
+    tm.limit = parseInt(limitSel.value, 10);
+    while (tm.undo.length > tm.limit) tlog('dropped oldest ' + tm.undo.shift().id, 'warn');
+    draw();
+  });
+  document.getElementById('t-reset').addEventListener('click', fresh);
+  fresh();
+})();
+</script>
+</body>
+</html>

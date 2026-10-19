@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L23 Command undo redo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage text.doc { font-family: var(--font-mono); font-size: 18px; }
+  .stage .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .stage .item { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+  .stage .item.redo { fill: var(--surface); stroke: var(--signal); }
+  .stage .caret { fill: var(--accent); }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 3px; }
+  pre.code .ln.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  #ed-text { width: 9em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L23 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Command: Undo and Redo</h1>
+    <p class="lede">Every edit is an object with <code>execute()</code> and <code>undo()</code>. The editor keeps two stacks. Undo pops a command and reverses it; redo replays it. Any new edit clears the redo stack, because that future no longer exists.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Text editor with undo and redo stacks of command objects"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Undo stack (done)</span>
+        <span><i style="background: var(--signal)"></i>Redo stack (undone)</span>
+        <span><i style="background: var(--bad)"></i>Dropped</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Interactive mini editor">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 440" role="img" aria-label="Interactive editor with undo and redo stacks"></svg>
+      </div>
+      <div class="controls">
+        <input type="text" id="ed-text" value=" again" maxlength="12" aria-label="Text to type">
+        <button class="btn primary" type="button" id="ed-type">Type</button>
+        <button class="btn" type="button" id="ed-del">Delete last char</button>
+        <button class="btn" type="button" id="ed-undo">Undo</button>
+        <button class="btn" type="button" id="ed-redo">Redo</button>
+        <span class="grow"></span>
+        <button class="btn" type="button" id="ed-clear">Clear</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Your own mini editor</h2>
+        <p>Type, delete, undo and redo. Watch commands move between the stacks. Undo twice, then type something: the redo stack is cleared.</p>
+      </section>
+      <section class="log">
+        <h3>Editor log</h3>
+        <ol id="ed-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each edit is a command object that knows how to execute and undo itself, and stores what it needs to undo, like the deleted text. The editor pushes executed commands on an undo stack. Undo moves a command to the redo stack; any new command clears redo. I cap the history size and merge fast typing into one command."</p>
+    </div>
+    <div class="note">
+      <h3>The code</h3>
+<pre class="code" id="code"><span class="ln" data-k="iface">interface Command { execute(d: Doc): void; undo(d: Doc): void; }</span><span class="ln" data-k="ins">class InsertText implements Command {
+  constructor(private pos: number, private text: string) {}
+  execute(d: Doc) { d.insert(this.pos, this.text); }
+  undo(d: Doc) { d.remove(this.pos, this.text.length); }
+}</span><span class="ln" data-k="del">class DeleteText implements Command {
+  private removed = '';
+  constructor(private pos: number, private len: number) {}
+  execute(d: Doc) { this.removed = d.remove(this.pos, this.len); }
+  undo(d: Doc) { d.insert(this.pos, this.removed); }
+}</span><span class="ln" data-k="macro">class Macro implements Command {
+  constructor(private steps: Command[]) {}
+  execute(d: Doc) { this.steps.forEach((c) =&gt; c.execute(d)); }
+  undo(d: Doc) { [...this.steps].reverse().forEach((c) =&gt; c.undo(d)); }
+}</span><span class="ln">class History {
+  private undoStack: Command[] = [];
+  private redoStack: Command[] = [];</span><span class="ln" data-k="run">  run(cmd: Command) {
+    cmd.execute(this.doc);
+    this.undoStack.push(cmd);
+    this.redoStack = [];          // a new edit kills the old future
+  }</span><span class="ln" data-k="undo">  undo() {
+    const cmd = this.undoStack.pop(); if (!cmd) return;
+    cmd.undo(this.doc); this.redoStack.push(cmd);
+  }</span><span class="ln" data-k="redo">  redo() {
+    const cmd = this.redoStack.pop(); if (!cmd) return;
+    cmd.execute(this.doc); this.undoStack.push(cmd);
+  }
+}</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Command vs Memento for undo</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Command (store the change)</th><th>Memento (store a snapshot)</th></tr></thead>
+          <tbody>
+            <tr><td>What is saved</td><td>The operation plus the data to reverse it</td><td>The whole state before the change</td></tr>
+            <tr><td>Memory</td><td>Small, grows with the size of the edits</td><td>Large for big documents (copy per step)</td></tr>
+            <tr><td>Undo logic</td><td>You write <code>undo()</code> for each command</td><td>Free: restore the snapshot</td></tr>
+            <tr><td>Risk</td><td>A buggy <code>undo()</code> corrupts state</td><td>Memory blow-up; use a cap or structural sharing</td></tr>
+            <tr><td>Good for</td><td>Text editors, drawing tools, KV store transactions</td><td>Forms, small game state, config editors</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why must DeleteText store the removed text?</summary><div>Undo has to put it back, and after the delete the text is gone from the document. The command keeps the only copy.</div></details>
+      <details class="qa"><summary>Why clear redo on a new command?</summary><div>Redo commands were built for the old document. After a new edit the positions no longer match, so replaying them would corrupt the text.</div></details>
+      <details class="qa"><summary>How do you stop every keystroke from being its own undo step?</summary><div>Merge: if the new insert continues the last one (next position, within about a second), extend the last command instead of pushing a new one.</div></details>
+      <details class="qa"><summary>How would you add a "macro" of several edits?</summary><div>A <code>CompositeCommand</code> that holds a list: execute runs them in order, undo runs their <code>undo()</code> in reverse order.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/22-text-editor/README.md">22 Text Editor (undo/redo)</a></li>
+        <li>Same idea: <a href="../../problems/14-kv-store/README.md">14 KV Store (transactions)</a>, <a href="../../problems/16-task-scheduler/README.md">16 Task Scheduler (jobs)</a></li>
+        <li>Next: <a href="../L24-memento/visual.html">L24 Memento</a> (undo by snapshot)</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code: editor, macro, job queue)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- model ----------
+  function show(t) { return '"' + t + '"'; }
+  function Insert(pos, text) { this.pos = pos; this.text = text; this.label = 'Insert(' + pos + ', ' + show(text) + ')'; }
+  Insert.prototype.execute = function (ed) { ed.doc = ed.doc.slice(0, this.pos) + this.text + ed.doc.slice(this.pos); };
+  Insert.prototype.undo = function (ed) { ed.doc = ed.doc.slice(0, this.pos) + ed.doc.slice(this.pos + this.text.length); };
+  Insert.prototype.describe = function () {
+    return ['execute: insert ' + show(this.text) + ' at ' + this.pos, 'undo:    remove ' + this.text.length + ' chars at ' + this.pos, ''];
+  };
+  function Delete(pos, len) { this.pos = pos; this.len = len; this.removed = null; this.label = 'Delete(' + pos + ', ' + len + ')'; }
+  Delete.prototype.execute = function (ed) {
+    this.removed = ed.doc.slice(this.pos, this.pos + this.len);
+    ed.doc = ed.doc.slice(0, this.pos) + ed.doc.slice(this.pos + this.len);
+    this.label = 'Delete(' + this.pos + ', ' + this.len + ') ' + show(this.removed);
+  };
+  Delete.prototype.undo = function (ed) { ed.doc = ed.doc.slice(0, this.pos) + this.removed + ed.doc.slice(this.pos); };
+  Delete.prototype.describe = function () {
+    return ['execute: remove ' + this.len + ' chars at ' + this.pos, 'undo:    insert saved text at ' + this.pos, 'saved:   removed = ' + show(this.removed)];
+  };
+  // Macro: a Composite of commands. Undo runs the parts in reverse order.
+  function Macro(name, steps) { this.steps = steps; this.kind = 'macro'; this.label = 'Macro ' + show(name) + ' ×' + steps.length; }
+  Macro.prototype.execute = function (ed) { this.steps.forEach(function (c) { c.execute(ed); }); };
+  Macro.prototype.undo = function (ed) { this.steps.slice().reverse().forEach(function (c) { c.undo(ed); }); };
+  Macro.prototype.describe = function () {
+    return ['execute: ' + this.steps.length + ' commands in order', 'undo:    reverse order', 'one entry on the undo stack'];
+  };
+  Insert.prototype.kind = 'ins'; Delete.prototype.kind = 'del';
+  function Editor() { this.doc = ''; this.undo = []; this.redo = []; }
+  Editor.prototype.run = function (cmd) {
+    cmd.execute(this); this.undo.push(cmd);
+    var dropped = this.redo.length; this.redo = [];
+    return { op: 'run', cmd: cmd, dropped: dropped };
+  };
+  Editor.prototype.undoOp = function () { var c = this.undo.pop(); if (!c) return null; c.undo(this); this.redo.push(c); return { op: 'undo', cmd: c }; };
+  Editor.prototype.redoOp = function () { var c = this.redo.pop(); if (!c) return null; c.execute(this); this.undo.push(c); return { op: 'redo', cmd: c }; };
+
+  // ---------- view ----------
+  var SX = { undo: 40, redo: 280 }, MAXV = 6;
+  function itemY(i) { return 392 - i * 36; }
+  var CODE = {
+    run: ['cmd.execute(doc)', 'undoStack.push(cmd)', 'redoStack = []'],
+    undo: ['cmd = undoStack.pop()', 'cmd.undo(doc)', 'redoStack.push(cmd)'],
+    redo: ['cmd = redoStack.pop()', 'cmd.execute(doc)', 'undoStack.push(cmd)'],
+  };
+  function clip(s, n) { return s.length > n ? '…' + s.slice(s.length - n + 1) : s; }
+
+  function buildView(mk, root) {
+    var v = {};
+    mk('rect', { x: 20, y: 40, width: 460, height: 76, rx: 8, class: 'box' }, root);
+    mk('text', { x: 34, y: 60, class: 'mono small muted', text: 'document' }, root);
+    v.doc = mk('text', { x: 34, y: 96, class: 'doc', text: '' }, root);
+    v.caret = mk('rect', { x: 34, y: 80, width: 2, height: 22, class: 'caret' }, root);
+    ['undo', 'redo'].forEach(function (k) {
+      mk('rect', { x: SX[k] - 10, y: 140, width: 220, height: 290, rx: 8, class: 'frame' }, root);
+      mk('text', { x: SX[k], y: 162, class: 'b', text: k === 'undo' ? 'undo stack' : 'redo stack' }, root);
+      mk('text', { x: SX[k] + 200, y: 162, 'text-anchor': 'end', class: 'mono small muted', text: 'top ↑' }, root);
+    });
+    v.items = mk('g', {}, root);
+    mk('rect', { x: 500, y: 40, width: 240, height: 150, rx: 8, class: 'box' }, root);
+    mk('text', { x: 514, y: 60, class: 'mono small muted', text: 'last command object' }, root);
+    v.cmdName = mk('text', { x: 514, y: 86, class: 'b', text: '' }, root);
+    v.cmdLines = [108, 128, 148].map(function (y) { return mk('text', { x: 514, y: y, class: 'mono small', text: '' }, root); });
+    mk('rect', { x: 500, y: 210, width: 240, height: 120, rx: 8, class: 'box' }, root);
+    mk('text', { x: 514, y: 230, class: 'mono small muted', text: 'what the editor did' }, root);
+    v.code = [256, 276, 296].map(function (y) { return mk('text', { x: 514, y: y, class: 'mono', text: '' }, root); });
+    v.note = mk('text', { x: 500, y: 360, class: 'mono small', text: '' }, root);
+    v.note2 = mk('text', { x: 500, y: 380, class: 'mono small', text: '' }, root);
+    v.mk = mk;
+    return v;
+  }
+
+  function drawItem(mk, parent, kind, i, label) {
+    var g = mk('g', {}, parent);
+    mk('rect', { x: 0, y: 0, width: 200, height: 30, rx: 5, class: 'item' + (kind === 'redo' ? ' redo' : '') }, g);
+    mk('text', { x: 10, y: 19, class: 'mono small', text: label }, g);
+    g.setAttribute('transform', 'translate(' + SX[kind] + ',' + itemY(i) + ')');
+    return g;
+  }
+
+  function render(v, ed, info) {
+    var mk = v.mk;
+    var shown = clip(ed.doc, 38);
+    v.doc.textContent = shown;
+    var w = 0;
+    try { w = v.doc.getComputedTextLength(); } catch (e) { w = shown.length * 10.8; }
+    v.caret.setAttribute('x', 36 + w);
+    while (v.items.firstChild) v.items.removeChild(v.items.firstChild);
+    ['undo', 'redo'].forEach(function (k) {
+      var list = ed[k], start = Math.max(0, list.length - MAXV);
+      for (var i = start; i < list.length; i++) drawItem(mk, v.items, k, i - start, list[i].label);
+      if (start > 0) mk('text', { x: SX[k] + 100, y: 182, 'text-anchor': 'middle', class: 'mono small muted', text: '+' + start + ' older' }, v.items);
+      if (!list.length) mk('text', { x: SX[k] + 100, y: 410, 'text-anchor': 'middle', class: 'mono small muted', text: 'empty' }, v.items);
+    });
+    var cmd = info && info.cmd;
+    v.cmdName.textContent = cmd ? cmd.label : '—';
+    var lines = cmd ? cmd.describe() : ['', '', ''];
+    v.cmdLines.forEach(function (t, i) { t.textContent = lines[i]; });
+    var code = info ? CODE[info.op] : ['', '', ''];
+    v.code.forEach(function (t, i) { t.textContent = code[i]; });
+    if (info && info.op === 'run' && info.dropped) {
+      v.note.textContent = 'redo cleared: ' + info.dropped + ' command' + (info.dropped > 1 ? 's' : '') + ' dropped';
+      v.note.setAttribute('class', 'mono small fill-bad');
+      v.note2.textContent = 'that future no longer exists';
+      v.note2.setAttribute('class', 'mono small fill-bad');
+    } else {
+      v.note.textContent = ''; v.note2.textContent = '';
+    }
+  }
+
+  function hl(keys) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', keys.indexOf(n.getAttribute('data-k')) >= 0);
+    });
+  }
+  // ---------- guided lab ----------
+  // Fly one stack item from a to b, then redraw everything.
+  function fly(ctx, label, kindFrom, iFrom, kindTo, iTo, cls) {
+    var g = ctx.group();
+    ctx.el('rect', { x: 0, y: 0, width: 200, height: 30, rx: 5, class: cls || 'item' }, g);
+    ctx.el('text', { x: 10, y: 19, class: 'mono small', text: label }, g);
+    ctx.place(g, kindFrom === 'cmd' ? 520 : SX[kindFrom], kindFrom === 'cmd' ? 70 : itemY(iFrom));
+    var tx = kindTo === 'void' ? SX.redo : SX[kindTo];
+    var ty = kindTo === 'void' ? 440 : itemY(iTo);
+    var p = kindTo === 'void' ? ctx.move(g, tx, ty, 700).then(function () { return ctx.fade(g, 0, 200); }) : ctx.move(g, tx, ty, 650);
+    return p.then(function () { g.remove(); });
+  }
+
+  function doRun(ctx, cmd) {
+    var ed = ctx.state.ed, v = ctx.state.v;
+    hl(['run', cmd.kind]);
+    var redoBefore = ed.redo.slice();
+    var info = ed.run(cmd);
+    ctx.log('run ' + cmd.label + ' → ' + show(ed.doc), 'ok');
+    var drops = redoBefore.map(function (c, i) { return fly(ctx, c.label, 'redo', i, 'void', 0, 'item redo'); });
+    if (info.dropped) ctx.log('redo stack cleared (' + info.dropped + ' dropped)', 'bad');
+    var tmp = { op: 'run', cmd: cmd, dropped: 0 };
+    ed.undo.pop(); render(v, ed, tmp); // draw without the new item; flying copies stand in for it
+    ed.undo.push(cmd);
+    var stackTop = ed.undo.length - 1;
+    return Promise.all(drops.concat([fly(ctx, cmd.label, 'cmd', 0, 'undo', stackTop)])).then(function () {
+      render(v, ed, info);
+    });
+  }
+  function doUndo(ctx) {
+    var ed = ctx.state.ed, v = ctx.state.v;
+    var from = ed.undo.length - 1;
+    hl(['undo', ed.undo[from].kind]);
+    var info = ed.undoOp();
+    ctx.log('undo ' + info.cmd.label + ' → ' + show(ed.doc), 'warn');
+    ed.redo.pop(); render(v, ed, info); ed.redo.push(info.cmd);
+    return fly(ctx, info.cmd.label, 'undo', from, 'redo', ed.redo.length - 1, 'item redo').then(function () { render(v, ed, info); });
+  }
+  function doRedo(ctx) {
+    var ed = ctx.state.ed, v = ctx.state.v;
+    var from = ed.redo.length - 1;
+    hl(['redo', ed.redo[from].kind]);
+    var info = ed.redoOp();
+    ctx.log('redo ' + info.cmd.label + ' → ' + show(ed.doc), 'info');
+    ed.undo.pop(); render(v, ed, info); ed.undo.push(info.cmd);
+    return fly(ctx, info.cmd.label, 'redo', from, 'undo', ed.undo.length - 1).then(function () { render(v, ed, info); });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'An empty document and two empty stacks',
+      say: 'We type, delete, undo and redo. Watch each command object: where it is created, which stack it sits on, and what it remembers.',
+    },
+    setup: function (ctx) {
+      ctx.state.ed = new Editor();
+      ctx.state.v = buildView(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg);
+      render(ctx.state.v, ctx.state.ed, null);
+      hl(['iface']);
+    },
+    steps: [
+      {
+        title: 'Type "Hello": an Insert command',
+        say: 'Typing creates <code>Insert(0, "Hello")</code>. The editor calls <code>execute()</code>, then pushes the command on the undo stack. The command holds all it needs to reverse itself.',
+        run: function (ctx) { return doRun(ctx, new Insert(0, 'Hello')); },
+      },
+      {
+        title: 'Type " world"',
+        say: 'A second command, <code>Insert(5, " world")</code>, goes on top. The undo stack is the history, newest on top.',
+        run: function (ctx) { return doRun(ctx, new Insert(5, ' world')); },
+      },
+      {
+        title: 'Delete 6 characters: the command saves them',
+        say: '<code>Delete(5, 6)</code> removes " world". Before removing, <code>execute()</code> saves the text in the command. Without that copy, undo could not bring it back.',
+        run: function (ctx) { return doRun(ctx, new Delete(5, 6)); },
+      },
+      {
+        title: 'Undo: pop, reverse, move to redo',
+        say: 'Undo pops the top command and calls its <code>undo()</code>, which inserts the saved " world" again. The command moves to the redo stack, so we can replay it.',
+        run: function (ctx) { return doUndo(ctx); },
+      },
+      {
+        title: 'Undo again',
+        say: 'Now <code>Insert(5, " world").undo()</code> removes the text. The document is "Hello". The redo stack holds two commands, newest undo on top.',
+        run: function (ctx) { return doUndo(ctx); },
+      },
+      {
+        title: 'Redo: execute it again',
+        say: 'Redo pops the top of the redo stack and calls <code>execute()</code> again. The command goes back to the undo stack. Same object, same data: no new command is needed.',
+        run: function (ctx) { return doRedo(ctx); },
+      },
+      {
+        title: 'A new edit clears the redo stack',
+        say: 'Type "!". The editor runs <code>Insert(11, "!")</code> and empties the redo stack. The old <code>Delete</code> was built for a document that no longer exists; replaying it now would delete the wrong text.',
+        run: function (ctx) { return doRun(ctx, new Insert(11, '!')); },
+      },
+      {
+        title: 'A macro: two edits, one command',
+        say: 'A "sign off" button runs <code>Macro([Insert(12, " Thanks"), Insert(19, ",")])</code>. It is a Composite: one object on the undo stack that runs its parts in order.',
+        run: function (ctx) { return doRun(ctx, new Macro('sign off', [new Insert(12, ' Thanks'), new Insert(19, ',')])); },
+      },
+      {
+        title: 'Undo the macro: parts in reverse',
+        say: 'One undo reverses both inserts, last one first. The history did not change at all to support this: it only sees a <code>Command</code>.',
+        run: function (ctx) { return doUndo(ctx); },
+      },
+    ],
+  });
+
+  // ---------- try-it panel ----------
+  var svg = document.getElementById('try');
+  var logList = document.getElementById('ed-log');
+  var input = document.getElementById('ed-text');
+  var bUndo = document.getElementById('ed-undo'), bRedo = document.getElementById('ed-redo'), bDel = document.getElementById('ed-del');
+  var ed, view;
+  function tlog(msg, kind) {
+    var li = document.createElement('li');
+    li.className = kind || '';
+    li.textContent = msg;
+    logList.appendChild(li);
+    logList.parentNode.scrollTop = logList.parentNode.scrollHeight;
+  }
+  function sync(info) {
+    render(view, ed, info);
+    bUndo.disabled = !ed.undo.length;
+    bRedo.disabled = !ed.redo.length;
+    bDel.disabled = !ed.doc.length;
+  }
+  function fresh() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    ed = new Editor();
+    view = buildView(function (t, a, p) { return Kit.el(t, a, p); }, svg);
+    logList.innerHTML = '';
+    tlog('Empty document', 'info');
+    sync(null);
+  }
+  function run(cmd) {
+    var info = ed.run(cmd);
+    tlog('run ' + cmd.label + ' → ' + show(clip(ed.doc, 30)), 'ok');
+    if (info.dropped) tlog('redo cleared: ' + info.dropped + ' dropped', 'bad');
+    sync(info);
+  }
+  document.getElementById('ed-type').addEventListener('click', function () {
+    var t = input.value;
+    if (!t) { tlog('nothing to type', 'warn'); return; }
+    run(new Insert(ed.doc.length, t));
+  });
+  bDel.addEventListener('click', function () { if (ed.doc.length) run(new Delete(ed.doc.length - 1, 1)); });
+  bUndo.addEventListener('click', function () {
+    var info = ed.undoOp();
+    if (info) { tlog('undo ' + info.cmd.label + ' → ' + show(clip(ed.doc, 30)), 'warn'); sync(info); }
+  });
+  bRedo.addEventListener('click', function () {
+    var info = ed.redoOp();
+    if (info) { tlog('redo ' + info.cmd.label + ' → ' + show(clip(ed.doc, 30)), 'info'); sync(info); }
+  });
+  document.getElementById('ed-clear').addEventListener('click', fresh);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') document.getElementById('ed-type').click(); });
+  fresh();
+})();
+</script>
+</body>
+</html>

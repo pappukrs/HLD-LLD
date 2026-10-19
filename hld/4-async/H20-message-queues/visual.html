@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H20 Message queues</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage .chip { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  .stage .chip.bad { fill: var(--surface); stroke: var(--bad); }
+  .stage .chip.warn { fill: var(--surface); stroke: var(--warn); }
+  .try { display: grid; gap: 10px; }
+  .try label { display: grid; grid-template-columns: 190px 1fr 80px; gap: 8px; align-items: center; font-size: 14px; }
+  .try input { width: 100%; }
+  .try .out { font-family: var(--font-mono); font-size: 14px; padding: 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); line-height: 1.6; }
+  .try .out b.ok { color: var(--ok); } .try .out b.bad { color: var(--bad); }
+  @media (max-width: 560px) { .try label { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H20 · Async</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Message queues and pub-sub</h1>
+    <p class="lede">A queue is a durable buffer between the service that creates work and the service that does it. Watch competing workers, fan-out to one queue per service, ack-after-work, redelivery after a crash, a traffic spike, and a poison message landing in the DLQ.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="A producer, an exchange, three queues with workers, and a dead-letter queue"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Message</span>
+        <span><i style="background: var(--ok)"></i>Ack</span>
+        <span><i style="background: var(--warn)"></i>Retry / redelivery</span>
+        <span><i style="background: var(--bad)"></i>Failure / DLQ</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note wide">
+      <h3>Try it: will the queue keep up?</h3>
+      <div class="try">
+        <label>Arrival rate (msg/s) <input type="range" id="t-rate" min="50" max="5000" step="50" value="2000"><span id="t-rate-v"></span></label>
+        <label>Processing time (ms) <input type="range" id="t-ms" min="5" max="500" step="5" value="50"><span id="t-ms-v"></span></label>
+        <label>Workers (concurrency) <input type="range" id="t-w" min="1" max="300" step="1" value="80"><span id="t-w-v"></span></label>
+        <label>Spike length (s) at 3× rate <input type="range" id="t-sp" min="0" max="600" step="10" value="60"><span id="t-sp-v"></span></label>
+        <div class="out" id="t-out"></div>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The API writes the order and an outbox row in one transaction and returns. A relay publishes <code>order.placed</code> to a topic exchange; email, inventory and analytics each have their own durable queue, and several workers compete on each. Workers ack after the side effect commits, so delivery is at-least-once and every consumer is idempotent on the message id. Failures back off with jitter, and after 5 attempts go to a DLQ we alert on and redrive. Workers autoscale on queue depth."</p>
+    </div>
+    <div class="note">
+      <h3>Rules of thumb</h3>
+      <ul>
+        <li>One queue <b>per consuming service</b>; many workers per queue.</li>
+        <li>Ack <b>after</b> work. Auto-ack = at-most-once.</li>
+        <li>Backoff + jitter, a max attempt count, and a DLQ with an alert.</li>
+        <li>Little's law: workers = rate × processing time.</li>
+        <li>Redis Pub/Sub stores nothing: only for live signals.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Which broker?</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>RabbitMQ</th><th>SQS (+SNS)</th><th>Redis Pub/Sub</th><th>Redis Streams</th><th>Kafka</th></tr></thead>
+          <tbody>
+            <tr><td>After consume</td><td>Deleted on ack</td><td>Deleted on delete call</td><td>Never stored</td><td>Kept (trimmed)</td><td>Kept until retention</td></tr>
+            <tr><td>Offline consumer</td><td>Waits in queue</td><td>Waits in queue</td><td>Lost</td><td>Resumes from last ID</td><td>Resumes from offset</td></tr>
+            <tr><td>Replay</td><td>No</td><td>No</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td>Per-message retry</td><td>Yes (nack, DLX)</td><td>Yes (visibility timeout, redrive)</td><td>No</td><td>Yes (pending list, XAUTOCLAIM)</td><td>No (offset; retry topics)</td></tr>
+            <tr><td>Best for</td><td>Jobs, routing, priorities</td><td>Zero-ops AWS jobs</td><td>Presence, WS fan-out, cache invalidation</td><td>Small Node systems</td><td>Event streams, many consumers</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Three services need every <code>order.placed</code>. One shared queue?</summary><div>No: with one queue each message reaches only one consumer. Bind three queues (one per service) to a fanout or topic exchange, or SNS → three SQS queues.</div></details>
+      <details class="qa"><summary>A worker crashes after charging but before ack. What happens?</summary><div>The broker redelivers the message to another worker. Without an idempotency key the side effect runs twice. Record the message id in the same transaction as the side effect.</div></details>
+      <details class="qa"><summary>Why backoff with jitter instead of instant retry?</summary><div>Instant retries hammer a downstream that is already failing, and many workers retrying in lockstep create a retry storm. Exponential backoff spreads them over time; jitter de-synchronises them.</div></details>
+      <details class="qa"><summary>SQS visibility timeout is 30 s, job takes 2 min?</summary><div>The message reappears and a second worker starts the same job. Raise the timeout above the job's p99 or extend it as a heartbeat with ChangeMessageVisibility.</div></details>
+    </div>
+    <div class="note">
+      <h3>Files</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a></li>
+        <li>Code: <a href="demo.ts">demo.ts</a> (broker sim: fan-out, ack, redelivery, backoff, DLQ, idempotency)</li>
+        <li>Hands-on: <a href="hands-on/README.md">hands-on/README.md</a> (RabbitMQ + Kafka in Docker)</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var PR = { x: 16, y: 196, w: 100, h: 56 };
+  var EX = { x: 146, y: 196, w: 118, h: 56 };
+  var QX = 300, QW = 200, QH = 40;
+  var Q = { email: { y: 70, label: 'q.email' }, ledger: { y: 200, label: 'q.ledger' }, analytics: { y: 330, label: 'q.analytics' } };
+  var WK = {
+    w1: { x: 570, y: 40, q: 'email', name: 'email worker 1' },
+    w2: { x: 570, y: 104, q: 'email', name: 'email worker 2' },
+    led: { x: 570, y: 197, q: 'ledger', name: 'ledger worker' },
+    ana: { x: 570, y: 327, q: 'analytics', name: 'analytics worker' },
+  };
+  var WW = 160, WH = 46;
+  var DLQ = { x: 300, y: 394, w: 200, h: 36 };
+  var PS = { x: 570, y: 394, w: 160, h: 36 };
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) { return p.then(function () { if (ctx.state !== s) return; return f(); }); }, Promise.resolve());
+  }
+  function qMid(q) { return Q[q].y + QH / 2; }
+  function pToEx() { return [[PR.x + PR.w, 224], [EX.x, 224]]; }
+  function pExToQ(q) { return [[EX.x + EX.w, 224], [280, 224], [280, qMid(q)], [QX, qMid(q)]]; }
+  function pQToW(id) { var w = WK[id], q = w.q; return [[QX + QW, qMid(q)], [538, qMid(q)], [538, w.y + WH / 2], [w.x, w.y + WH / 2]]; }
+  function pWToQ(id) { return pQToW(id).slice().reverse(); }
+  function pWToDlq(id) { var w = WK[id]; return [[w.x, w.y + WH / 2 + 8], [548, w.y + WH / 2 + 8], [548, DLQ.y + DLQ.h / 2], [DLQ.x + DLQ.w, DLQ.y + DLQ.h / 2]]; }
+
+  function renderQ(ctx, q) {
+    var S = ctx.state, g = S.qg[q];
+    while (g.firstChild) g.removeChild(g.firstChild);
+    S.q[q].forEach(function (m, i) {
+      var x = QX + QW - 30 - i * 26;
+      if (x < QX + 4) return;
+      ctx.el('rect', { x: x, y: Q[q].y + 8, width: 22, height: 24, rx: 4, class: 'chip ' + (m.cls || '') }, g);
+      ctx.el('text', { x: x + 11, y: Q[q].y + 24, 'text-anchor': 'middle', class: 'mono small', text: m.id }, g);
+    });
+    S.qlab[q].textContent = Q[q].label + ' · depth ' + S.q[q].length;
+  }
+  function setW(ctx, id, text, cls) {
+    var v = ctx.state.wk[id];
+    v.st.textContent = text;
+    v.st.setAttribute('class', 'mono small ' + (cls || 'muted'));
+    v.rect.setAttribute('class', 'box ' + (cls === 'fill-bad' ? 'bad' : cls === 'fill-accent' ? 'accent' : ''));
+  }
+  // Producer → exchange → listed queues
+  function publish(ctx, id, queues, o) {
+    o = o || {};
+    var S = ctx.state;
+    return seq(ctx, [
+      function () { return ctx.packet(pToEx(), { ms: o.ms || 380, cls: 'accent', label: id }); },
+      function () {
+        return Promise.all(queues.map(function (q) {
+          return ctx.packet(pExToQ(q), { ms: o.ms || 450, cls: 'accent', r: 6 }).then(function () {
+            if (ctx.state !== S) return;
+            S.q[q].push({ id: id, cls: o.cls || '' }); renderQ(ctx, q);
+          });
+        }));
+      },
+    ]);
+  }
+  // Queue head → worker
+  function deliver(ctx, wid) {
+    var S = ctx.state, q = WK[wid].q, m = S.q[q].shift();
+    renderQ(ctx, q);
+    S.inflight[wid] = m;
+    return ctx.packet(pQToW(wid), { ms: 420, cls: m.cls === 'bad' ? 'bad' : 'accent', label: m.id }).then(function () {
+      if (ctx.state !== S) return;
+      setW(ctx, wid, 'processing ' + m.id + ' (unacked)', 'fill-accent');
+      return m;
+    });
+  }
+  function ack(ctx, wid) {
+    var S = ctx.state, m = S.inflight[wid];
+    S.inflight[wid] = null;
+    setW(ctx, wid, 'idle · last ack ' + m.id, 'fill-ok');
+    S.acked++;
+    S.stat.textContent = 'acked ' + S.acked + ' · redelivered ' + S.redel + ' · DLQ ' + S.dlq.length;
+    return ctx.packet(pWToQ(wid), { ms: 360, cls: 'ok', r: 5, label: 'ack' });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A producer, an exchange, three queues',
+      say: 'The order service publishes to an <b>exchange</b>. Three services each own a durable queue: email (two competing workers), ledger and analytics. Below sit a dead-letter queue and, for contrast, a Redis Pub/Sub subscriber.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.q = { email: [], ledger: [], analytics: [] }; S.qg = {}; S.qlab = {}; S.wk = {}; S.inflight = {}; S.dlq = []; S.acked = 0; S.redel = 0;
+      S.title = ctx.el('text', { x: 16, y: 24, class: 'title', text: 'Producer → exchange → queue per service → workers' });
+      ctx.el('polyline', { points: pToEx().join(' '), class: 'wire' });
+      Object.keys(Q).forEach(function (q) { ctx.el('polyline', { points: pExToQ(q).join(' '), class: 'wire' }); });
+      Object.keys(WK).forEach(function (id) { ctx.el('polyline', { points: pQToW(id).join(' '), class: 'wire' }); });
+      ctx.el('rect', { x: PR.x, y: PR.y, width: PR.w, height: PR.h, rx: 8, class: 'box' });
+      ctx.el('text', { x: PR.x + PR.w / 2, y: PR.y + 24, 'text-anchor': 'middle', class: 'title', text: 'Order API' });
+      ctx.el('text', { x: PR.x + PR.w / 2, y: PR.y + 42, 'text-anchor': 'middle', class: 'mono small muted', text: 'producer' });
+      S.exRect = ctx.el('rect', { x: EX.x, y: EX.y, width: EX.w, height: EX.h, rx: 8, class: 'box accent' });
+      ctx.el('text', { x: EX.x + EX.w / 2, y: EX.y + 24, 'text-anchor': 'middle', class: 'title', text: 'Exchange' });
+      S.exMode = ctx.el('text', { x: EX.x + EX.w / 2, y: EX.y + 42, 'text-anchor': 'middle', class: 'mono small muted', text: 'direct' });
+      Object.keys(Q).forEach(function (q) {
+        ctx.el('rect', { x: QX, y: Q[q].y, width: QW, height: QH, rx: 6, class: 'box' });
+        S.qlab[q] = ctx.el('text', { x: QX, y: Q[q].y - 6, class: 'mono small', text: '' });
+        S.qg[q] = ctx.group();
+        renderQ(ctx, q);
+      });
+      ctx.el('text', { x: QX + QW, y: Q.email.y + QH + 14, 'text-anchor': 'end', class: 'mono small muted', text: 'head →' });
+      Object.keys(WK).forEach(function (id) {
+        var w = WK[id], g = ctx.group();
+        var rect = ctx.el('rect', { x: w.x, y: w.y, width: WW, height: WH, rx: 8, class: 'box' }, g);
+        ctx.el('text', { x: w.x + 10, y: w.y + 18, class: 'mono small', text: w.name }, g);
+        var st = ctx.el('text', { x: w.x + 10, y: w.y + 36, class: 'mono small muted', text: 'idle' }, g);
+        S.wk[id] = { g: g, rect: rect, st: st };
+      });
+      S.dlqRect = ctx.el('rect', { x: DLQ.x, y: DLQ.y, width: DLQ.w, height: DLQ.h, rx: 6, class: 'box' });
+      S.dlqText = ctx.el('text', { x: DLQ.x + 10, y: DLQ.y + 23, class: 'mono small', text: 'DLQ (email) · empty' });
+      S.psG = ctx.group({ opacity: 0.55 });
+      S.psRect = ctx.el('rect', { x: PS.x, y: PS.y, width: PS.w, height: PS.h, rx: 6, class: 'box dashed' }, S.psG);
+      S.psText = ctx.el('text', { x: PS.x + 8, y: PS.y + 23, class: 'mono small muted', text: 'Redis Pub/Sub subscriber' }, S.psG);
+      S.stat = ctx.el('text', { x: 16, y: 404, class: 'mono small muted', text: 'acked 0 · redelivered 0 · DLQ 0' });
+      S.note = ctx.el('text', { x: 16, y: 424, class: 'mono small', text: '' });
+    },
+    steps: [
+      {
+        title: 'Work queue: competing consumers',
+        say: 'The exchange is <b>direct</b>: <code>send_email</code> jobs go only to q.email. Two workers share that queue, so <b>each message goes to exactly one worker</b>. Add workers to go faster; nobody else is told.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return publish(ctx, 'e1', ['email']); },
+            function () { return publish(ctx, 'e2', ['email']); },
+            function () { return publish(ctx, 'e3', ['email']); },
+            function () { ctx.log('3 jobs queued on q.email', 'info'); return Promise.all([deliver(ctx, 'w1'), deliver(ctx, 'w2')]); },
+            function () { return Promise.all([ack(ctx, 'w1'), ack(ctx, 'w2')]); },
+            function () { ctx.log('e1 → worker 1, e2 → worker 2 (never both)', 'ok'); return deliver(ctx, 'w1'); },
+            function () { return ack(ctx, 'w1'); },
+            function () { S.note.textContent = 'point-to-point: 1 msg → 1 worker'; },
+          ]);
+        },
+      },
+      {
+        title: 'Pub-sub: one event, one copy per service',
+        say: 'Switch the exchange to <b>fanout/topic</b>. <code>order.placed #42</code> is copied into <b>every bound queue</b>: email, ledger and analytics each get their own copy and consume at their own pace. The Order API does not know who listens.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.exMode.textContent = 'topic: order.*'; ctx.flash(S.exRect);
+          S.note.textContent = 'pub-sub: 1 event → every bound queue';
+          return seq(ctx, [
+            function () { return publish(ctx, '42', ['email', 'ledger', 'analytics'], { ms: 520 }); },
+            function () { ctx.log('order.placed #42 copied to 3 queues', 'ok'); return Promise.all([deliver(ctx, 'led'), deliver(ctx, 'ana')]); },
+            function () { return Promise.all([ack(ctx, 'led'), ack(ctx, 'ana')]); },
+            function () { ctx.log('ledger and analytics acked their own copies', 'ok'); },
+          ]);
+        },
+      },
+      {
+        title: 'Ack after work, not before',
+        say: 'Worker 1 takes #42 from q.email. The message stays <b>unacked</b> (invisible to others, not deleted) while it sends the email. Only after the side effect succeeds does it ack, and only then does the broker delete it.',
+        run: function (ctx) {
+          return seq(ctx, [
+            function () { return deliver(ctx, 'w1'); },
+            function () { ctx.log('worker 1: #42 unacked, sending email…', 'info'); return ctx.wait(500); },
+            function () { ctx.log('email sent → ack → broker deletes #42', 'ok'); return ack(ctx, 'w1'); },
+          ]);
+        },
+      },
+      {
+        title: 'Crash before ack: the broker redelivers',
+        say: 'Worker 2 takes #43, sends the email, then <b>crashes before acking</b>. The broker sees the connection drop and puts #43 back on the queue. Worker 1 gets it and sends the email again. No loss, but a <b>duplicate</b>: this is at-least-once, so consumers must be idempotent.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { return publish(ctx, '43', ['email']); },
+            function () { return deliver(ctx, 'w2'); },
+            function () { setW(ctx, 'w2', 'CRASHED (no ack)', 'fill-bad'); ctx.flash(S.wk.w2.g); ctx.log('worker 2 crashed after sending, before ack', 'bad'); return ctx.wait(400); },
+            function () { var m = S.inflight.w2; S.inflight.w2 = null; m.cls = 'warn'; return ctx.packet(pWToQ('w2'), { ms: 450, cls: 'warn', label: 'requeue' }).then(function () { if (ctx.state !== S) return; S.q.email.unshift(m); renderQ(ctx, 'email'); S.redel++; }); },
+            function () { ctx.log('broker: connection lost → #43 back to queue', 'warn'); return deliver(ctx, 'w1'); },
+            function () { ctx.log('worker 1 sends #43 again → duplicate email unless deduped by id', 'warn'); return ack(ctx, 'w1'); },
+            function () { setW(ctx, 'w2', 'restarted · idle', 'muted'); },
+          ]);
+        },
+      },
+      {
+        title: 'A spike: the queue absorbs it',
+        say: 'Sale starts: 7 emails arrive in a burst, faster than two workers can send. Instead of timing out the Order API, the queue <b>grows</b> (depth 7) and the workers drain it at their steady rate. This is load levelling. Autoscale workers on depth and age of the oldest message.',
+        run: function (ctx) {
+          var S = ctx.state, ids = ['s1', 's2', 's3', 's4', 's5', 's6', 's7'];
+          S.exMode.textContent = 'direct'; S.note.textContent = 'load levelling: queue absorbs spike';
+          var fns = [function () { return Promise.all(ids.map(function (id, i) { return ctx.wait(i * 120).then(function () { return publish(ctx, id, ['email'], { ms: 300 }); }); })); },
+            function () { ctx.log('burst: 7 messages, depth = ' + S.q.email.length, 'warn'); }];
+          for (var k = 0; k < 3; k++) {
+            fns.push(function () { return Promise.all([deliver(ctx, 'w1'), deliver(ctx, 'w2')]); });
+            fns.push(function () { return Promise.all([ack(ctx, 'w1'), ack(ctx, 'w2')]); });
+            fns.push(function () { ctx.log('drained 2 → depth ' + S.q.email.length, 'info'); });
+          }
+          fns.push(function () { return deliver(ctx, 'w1'); }, function () { return ack(ctx, 'w1'); }, function () { ctx.log('queue empty: spike absorbed, nothing dropped', 'ok'); });
+          return seq(ctx, fns);
+        },
+      },
+      {
+        title: 'Poison message: backoff, then DLQ',
+        say: 'Message <code>p1</code> has a bad email address and fails every time. The worker nacks it and it comes back with <b>exponential backoff + jitter</b> (≈1 s, 2 s, 4 s). After the 3rd failure (maxReceiveCount = 3) it moves to the <b>dead-letter queue</b>, so the rest of the queue keeps flowing. Alert on DLQ depth, fix, redrive.',
+        run: function (ctx) {
+          var S = ctx.state, delays = ['~1 s', '~2 s', '~4 s'];
+          var fns = [function () { return publish(ctx, 'p1', ['email'], { cls: 'bad' }); }];
+          [0, 1, 2].forEach(function (a) {
+            fns.push(function () { return deliver(ctx, 'w1'); });
+            fns.push(function () {
+              setW(ctx, 'w1', 'p1 failed (attempt ' + (a + 1) + '/3)', 'fill-bad');
+              if (a < 2) {
+                ctx.log('attempt ' + (a + 1) + ' failed → nack, retry in ' + delays[a], 'warn');
+                var m = S.inflight.w1; S.inflight.w1 = null;
+                return ctx.packet(pWToQ('w1'), { ms: 450, cls: 'warn', label: 'retry ' + delays[a] }).then(function () { if (ctx.state !== S) return; S.q.email.unshift(m); renderQ(ctx, 'email'); S.redel++; });
+              }
+              ctx.log('attempt 3 failed → max reached → DLQ', 'bad');
+              S.inflight.w1 = null;
+              return ctx.packet(pWToDlq('w1'), { ms: 650, cls: 'bad', label: 'p1' }).then(function () {
+                if (ctx.state !== S) return;
+                S.dlq.push('p1'); S.dlqRect.setAttribute('class', 'box bad'); S.dlqText.textContent = 'DLQ (email) · p1 · ALERT'; ctx.flash(S.dlqRect);
+                setW(ctx, 'w1', 'idle', 'muted');
+                S.stat.textContent = 'acked ' + S.acked + ' · redelivered ' + S.redel + ' · DLQ ' + S.dlq.length;
+              });
+            });
+          });
+          return seq(ctx, fns);
+        },
+      },
+      {
+        title: 'Offline consumer: durable queue vs Redis Pub/Sub',
+        say: 'The analytics worker is down for a deploy. <code>order.placed #44</code> waits safely in q.analytics. The same event sent over <b>Redis Pub/Sub</b> to a subscriber that is offline is simply <b>dropped</b>: Pub/Sub stores nothing. When analytics comes back, it reads #44 from its queue.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.exMode.textContent = 'topic: order.*';
+          S.note.textContent = 'queue keeps it; Pub/Sub drops it';
+          setW(ctx, 'ana', 'OFFLINE (deploy)', 'fill-bad');
+          S.psText.textContent = 'Pub/Sub sub: OFFLINE';
+          return seq(ctx, [
+            function () { return Promise.all([publish(ctx, '44', ['email', 'ledger', 'analytics']), ctx.packet([[66, 252], [66, 384], [650, 384], [650, PS.y]], { ms: 900, cls: 'accent', label: 'PUBLISH 44' })]); },
+            function () { S.psRect.setAttribute('class', 'box bad'); ctx.flash(S.psG); ctx.log('Redis Pub/Sub: nobody listening → #44 lost', 'bad'); ctx.log('q.analytics holds #44 (depth 1)', 'ok'); return Promise.all([deliver(ctx, 'w1'), deliver(ctx, 'led')]); },
+            function () { return Promise.all([ack(ctx, 'w1'), ack(ctx, 'led')]); },
+            function () { setW(ctx, 'ana', 'back online', 'muted'); ctx.log('analytics back → reads #44 from its queue', 'ok'); return deliver(ctx, 'ana'); },
+            function () { return ack(ctx, 'ana'); },
+            function () { S.note.textContent = 'Pub/Sub: only for live signals'; },
+          ]);
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: Little's law and spike drain time (independent of the player) ----
+  function $(id) { return document.getElementById(id); }
+  function calc() {
+    var rate = +$('t-rate').value, ms = +$('t-ms').value, w = +$('t-w').value, sp = +$('t-sp').value;
+    $('t-rate-v').textContent = rate; $('t-ms-v').textContent = ms + ' ms'; $('t-w-v').textContent = w; $('t-sp-v').textContent = sp + ' s';
+    var cap = w * 1000 / ms;               // msg/s the workers can do
+    var need = Math.ceil(rate * ms / 1000); // Little's law
+    var util = rate / cap;
+    var html = 'Capacity: <b>' + Math.round(cap) + ' msg/s</b> · needed workers (rate × time): <b>' + need + '</b> · utilisation: <b class="' + (util < 0.8 ? 'ok' : 'bad') + '">' + Math.round(util * 100) + '%</b><br>';
+    if (util >= 1) {
+      html += '<b class="bad">Backlog grows by ' + Math.round(rate - cap) + ' msg/s forever.</b> Add workers or shed load at the edge.';
+    } else {
+      var backlog = Math.max(0, (rate * 3 - cap) * sp);
+      var drain = backlog / (cap - rate);
+      html += 'A ' + sp + ' s spike at 3× leaves a backlog of <b>' + Math.round(backlog).toLocaleString() + '</b> msgs; drains in <b>' + (backlog ? Math.round(drain) + ' s' : '0 s') + '</b>.';
+      if (util > 0.8) html += ' Running above 80% leaves little headroom: drains are slow.';
+    }
+    $('t-out').innerHTML = html;
+  }
+  ['t-rate', 't-ms', 't-w', 't-sp'].forEach(function (id) { $(id).addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

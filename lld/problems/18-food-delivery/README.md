@@ -125,7 +125,7 @@ Relationships: Service ◆— Order, Service ◆— DriverRecord (composition). 
 
 ## Concepts used
 
-- [State pattern](../../concepts/patterns/p12-state.md) · [Strategy pattern](../../concepts/patterns/p10-strategy.md) · [Observer pattern](../../concepts/patterns/p11-observer.md) · [Singleton (and why to avoid it here)](../../concepts/patterns/p01-singleton.md)
-- [Repository and DI](../../concepts/patterns/p18-repository-di.md) · [Concurrency in Node LLD](../../concepts/06-concurrency-in-node.md)
-- Related HLD: [Food Delivery (Swiggy/Zomato)](../../../hld/problems/11-food-delivery/) · [Geospatial indexing](../../../hld/concepts/28-geospatial.md)
-- Visuals: [State machine](../../../visuals/v25-state-machine.html) · [Observer and pub-sub](../../../visuals/v24-observer-pubsub.html) · [Strategy + Factory](../../../visuals/v23-strategy-factory.html)
+- [State pattern](../../4-behavioral/L22-state/README.md) · [Strategy pattern](../../4-behavioral/L20-strategy/README.md) · [Observer pattern](../../4-behavioral/L21-observer/README.md) · [Singleton (and why to avoid it here)](../../2-creational/L08-singleton/README.md)
+- [Repository and DI](../../5-machine-coding/L31-repository-and-di/README.md) · [Concurrency in Node LLD](../../5-machine-coding/L32-concurrency-in-node/README.md)
+- Related HLD: [Food Delivery (Swiggy/Zomato)](../../../hld/case-studies/11-food-delivery) · [Geospatial indexing](../../../hld/6-building-blocks/H34-geospatial/README.md)
+- Visuals: [State machine](../../4-behavioral/L22-state/visual.html) · [Observer and pub-sub](../../4-behavioral/L21-observer/visual.html) · [Strategy + Factory](../../4-behavioral/L20-strategy/visual.html)

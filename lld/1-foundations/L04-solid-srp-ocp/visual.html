@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L04 SRP and OCP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .uml { fill: none; stroke: var(--muted); stroke-width: 1.6; }
+  .stage .uml.dash { stroke-dasharray: 6 4; }
+  .stage .uml.red { stroke: var(--bad); }
+  .stage .uml.ok { stroke: var(--ok); }
+  .stage .gate { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+  .stage .strike { stroke: var(--bad); stroke-width: 2; }
+  pre.code .ln { display: block; padding: 0 6px; border-left: 3px solid transparent; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+  .try-out { font-family: var(--font-mono); font-size: 13px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); min-height: 3em; white-space: pre-wrap; }
+  .try-out .ok { color: var(--ok); } .try-out .bad { color: var(--bad); }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 8px; }
+
+  .stage .reason { stroke: var(--bad); stroke-width: 1.4; stroke-dasharray: 3 3; fill: none; }
+  .stage .seam { fill: none; stroke: var(--ok); stroke-width: 2.5; stroke-dasharray: 2 4; }
+  .try-out table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .try-out td, .try-out th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L04 · Foundations</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>SOLID part 1: SRP and OCP</h1>
+    <p class="lede">One <code>OrderService</code> validates, applies coupons, charges, saves and emails. Five teams edit it. We split it by reason to change (SRP), then make coupons pluggable so a new one is a new class, not an edit (OCP).</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Order service refactored by single responsibility and open closed principles"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Concrete class</span>
+        <span><i style="background: var(--accent)"></i>Interface / coordinator</span>
+        <span><i style="background: var(--bad)"></i>Smell / conflict</span>
+        <span><i style="background: var(--ok)"></i>Fixed / added</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The code behind the scene</h3>
+<pre class="code" id="code"><span class="ln" data-l="0">class OrderService {</span><span class="ln" data-l="1">  constructor(private validator: OrderValidator, private pricing: PricingService,</span><span class="ln" data-l="2">    private gateway: PaymentGateway, private repo: OrderRepository, private notifier: Notifier) {}</span><span class="ln" data-l="3">  async placeOrder(o: OrderInput) {</span><span class="ln" data-l="4">    this.validator.validate(o);</span><span class="ln" data-l="5">    const total = this.pricing.price(o.amount, o.coupon);</span><span class="ln" data-l="6">    const txnId = await this.gateway.charge(total);</span><span class="ln" data-l="7">    await this.repo.save({ id: o.id, total, txnId });</span><span class="ln" data-l="8">    await this.notifier.notify(o.email, `Paid ${total}`); } }</span><span class="ln" data-l="9">interface Discount { code: string; apply(total: number): number; }</span><span class="ln" data-l="10">class PricingService {</span><span class="ln" data-l="11">  register(d: Discount) { this.byCode.set(d.code, d); }</span><span class="ln" data-l="12">  price(amt: number, code?: string) { return this.byCode.get(code)?.apply(amt) ?? amt; } }</span><span class="ln" data-l="13">pricing.register(new BuyOneGetOne());   // the only new line</span></pre>
+    </div>
+    <div class="note">
+      <h3>Try it: who edits what?</h3>
+      <p>Pick a change request. Compare the files you touch and re-test before and after the refactor.</p>
+      <div class="try" id="try"></div>
+      <div class="try-out" id="try-out">Pick a change request above.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"<code>OrderService</code> changes for five teams, so I split it by reason to change and keep it as the coordinator. Coupons are what you'll extend, so pricing depends on a <code>Discount</code> interface with one class per coupon, registered in the composition root. A new coupon is a new class and one line; nothing that works gets edited."</p>
+    </div>
+    <div class="note wide">
+      <h3>SRP and OCP at a glance</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Principle</th><th>Rule</th><th>Smell you can see</th><th>Fix</th><th>In this refactor</th></tr></thead>
+          <tbody>
+            <tr><td>S: Single responsibility</td><td>One actor, one reason to change</td><td>Many teams edit one file; tests need 5 fakes; name has "And"/"Manager"</td><td>Split by who asks for changes</td><td>Validator, Pricing, Gateway, Repository, Notifier leave <code>OrderService</code></td></tr>
+            <tr><td>O: Open/closed</td><td>Extend by adding code, not editing it</td><td><code>switch (type)</code> that grows with each feature</td><td>Interface + class per variant, registered from outside</td><td><code>Discount</code>; <code>BuyOneGetOne</code> is a new file, 0 edits</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Is SRP "one method per class"?</summary><div>No. It is one actor, one reason to change. A class may have many methods if the same team changes all of them for the same reason.</div></details>
+      <details class="qa"><summary>The coupon map lives inside <code>PricingService</code>. Is that OCP?</summary><div>Not fully: adding a coupon still edits <code>PricingService</code>. Register discounts from the composition root, or pass them into the constructor.</div></details>
+      <details class="qa"><summary>Should <code>Order</code> (the entity) get an interface too?</summary><div>No. It does not vary. Put seams where change is likely (coupons, payment, notifications) and around I/O. Extra interfaces cost reading time.</div></details>
+      <details class="qa"><summary>After the split, why does <code>OrderService</code> still exist?</summary><div>It owns the flow: validate, price, charge, save, notify. That sequence is its one reason to change.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  // ---------- drawing helpers ----------
+  function defs(ctx) {
+    var d = ctx.el('defs');
+    var tri = ctx.el('marker', { id: 'm-tri', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 14, markerHeight: 14, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13 Z', style: 'fill: var(--surface); stroke: var(--muted); stroke-width: 1.5' }, tri);
+    var open = ctx.el('marker', { id: 'm-open', viewBox: '0 0 14 14', refX: 13, refY: 7, markerWidth: 12, markerHeight: 12, orient: 'auto', markerUnits: 'userSpaceOnUse' }, d);
+    ctx.el('path', { d: 'M1,1 L13,7 L1,13', style: 'fill: none; stroke: var(--muted); stroke-width: 1.6' }, open);
+  }
+  function cls(ctx, parent, x, y, w, name, members, o) {
+    o = o || {};
+    var g = ctx.group({}, parent);
+    var head = o.stereo ? 38 : 26;
+    var h = members.length ? head + 8 + members.length * 17 : head;
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (o.cls || '') }, g);
+    if (o.dash) r.setAttribute('stroke-dasharray', '6 4');
+    if (o.stereo) ctx.el('text', { x: x + w / 2, y: y + 15, 'text-anchor': 'middle', class: 'mono small muted', text: '«' + o.stereo + '»' }, g);
+    ctx.el('text', { x: x + w / 2, y: y + head - 9, 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (members.length) ctx.el('line', { x1: x, x2: x + w, y1: y + head, y2: y + head, class: 'sep' }, g);
+    var lines = members.map(function (m, i) {
+      var t = typeof m === 'string' ? { t: m } : m;
+      return ctx.el('text', { x: x + 10, y: y + head + 14 + i * 17, class: 'mono small' + (t.cls ? ' ' + t.cls : ''), text: t.t }, g);
+    });
+    g.r = r; g.lines = lines;
+    g.b = { x: x, y: y, w: w, h: h, cx: x + w / 2, cy: y + h / 2, bottom: y + h, right: x + w };
+    return g;
+  }
+  function arrow(ctx, parent, d, kind) {
+    var k = { assoc: ['uml', 'm-open'], real: ['uml dash', 'm-tri'], inh: ['uml', 'm-tri'], dep: ['uml dash', 'm-open'] }[kind];
+    return ctx.el('path', { d: d, class: k[0], 'marker-end': 'url(#' + k[1] + ')' }, parent);
+  }
+  function T(ctx, parent, x, y, t, c, anchor) {
+    return ctx.el('text', { x: x, y: y, class: c || '', 'text-anchor': anchor || 'start', text: t }, parent);
+  }
+  function swap(ctx, build) {
+    var old = ctx.state.scene;
+    var g = ctx.group({ opacity: 0 });
+    build(g);
+    ctx.state.scene = g;
+    return (old ? ctx.fade(old, 0, 300) : Promise.resolve()).then(function () {
+      if (old) old.remove();
+      return ctx.fade(g, 1, 400);
+    });
+  }
+  function chip(ctx, parent, x, y, w, label, c) {
+    var g = ctx.group({}, parent);
+    ctx.el('rect', { x: 0, y: -14, width: w, height: 26, rx: 6, class: 'box ' + (c || '') }, g);
+    ctx.el('text', { x: w / 2, y: 4, 'text-anchor': 'middle', class: 'mono small', text: label }, g);
+    ctx.place(g, x, y);
+    return g;
+  }
+  var codeLines = document.querySelectorAll('#code .ln');
+  function hl(ids) {
+    Array.prototype.forEach.call(codeLines, function (ln) {
+      ln.classList.toggle('on', ids.indexOf(parseInt(ln.getAttribute('data-l'), 10)) >= 0);
+    });
+  }
+
+
+
+  var ACTORS = ['Product', 'Marketing', 'Finance', 'DBA', 'CRM'];
+  var REASONS = ['validation rules', 'coupon rules', 'payment provider', 'DB schema', 'email template'];
+
+  // ---------- scenes ----------
+  function sceneGod(ctx, g) {
+    T(ctx, g, 20, 28, 'Before: one class, five reasons to change', 'title');
+    var god = cls(ctx, g, 40, 70, 300, 'OrderService', ['validate(order)', 'applyCoupon(order)  // switch', 'chargeCard(total)', 'saveToDb(order)', 'sendEmail(user)'], { cls: 'signal' });
+    var actors = ctx.group({ opacity: 0 }, g);
+    var pos = [];
+    god.lines.forEach(function (ln, i) {
+      var y = parseFloat(ln.getAttribute('y')) - 4;
+      var ay = 70 + i * 52;
+      ctx.el('path', { d: 'M332,' + y + ' C410,' + y + ' 420,' + ay + ' 490,' + ay, class: 'reason' }, actors);
+      chip(ctx, actors, 490, ay, 100, ACTORS[i], '');
+      T(ctx, actors, 600, ay + 4, REASONS[i], 'mono small fill-bad');
+      pos.push([490, ay]);
+    });
+    ctx.state.god = { god: god, actors: actors, pos: pos, g: g };
+  }
+
+  var PARTS = [['OrderValidator', 'validate(o)'], ['PricingService', 'price(amt, code)'], ['PaymentGateway', 'charge(total)'], ['OrderRepository', 'save(row)'], ['Notifier', 'notify(to, msg)']];
+  function sceneSRP(ctx, g) {
+    T(ctx, g, 20, 28, 'S: split by who asks for changes', 'title');
+    var svc = cls(ctx, g, 250, 50, 260, 'OrderService', ['placeOrder(o)   the flow only'], { cls: 'accent' });
+    var parts = PARTS.map(function (p, i) {
+      var c = cls(ctx, g, 10 + i * 150, 220, 140, p[0], [p[1]], { cls: 'signal' });
+      arrow(ctx, g, 'M' + svc.b.cx + ',' + svc.b.bottom + ' L' + c.b.cx + ',' + c.b.y, 'assoc');
+      T(ctx, g, c.b.cx, c.b.bottom + 20, ACTORS[i], 'mono small fill-ok', 'middle');
+      return c;
+    });
+    var actorChips = ACTORS.map(function (a, i) { return chip(ctx, g, 10 + i * 150 + 20, 380, 100, a, ''); });
+    ctx.state.srp = { svc: svc, parts: parts, actorChips: actorChips, g: g };
+  }
+
+  var SWITCH = ['price(amount: number, coupon?: string) {', '  switch (coupon) {', "    case 'FLAT100': return amount - 100;", "    case 'TENPCT':  return amount * 0.9;", '    default:        return amount;', '  }', '}'];
+  function sceneOCPBad(ctx, g) {
+    T(ctx, g, 20, 28, 'O: the coupon switch grows with every campaign', 'title');
+    cls(ctx, g, 20, 70, 260, 'PricingService', [{ t: 'price(amount, coupon)', cls: 'fill-bad' }], { cls: 'bad' });
+    ctx.el('rect', { x: 320, y: 60, width: 420, height: 210, rx: 8, class: 'box' }, g);
+    T(ctx, g, 336, 82, 'inside price()', 'mono small muted');
+    var lines = SWITCH.map(function (s, i) { return T(ctx, g, 336, 110 + i * 20, s, 'mono small'); });
+    T(ctx, g, 20, 320, 'Marketing launches "buy one get one". We open a tested class,', 'small');
+    T(ctx, g, 20, 342, 'add a case, and re-test FLAT100 and TENPCT too.', 'small');
+    ctx.state.sw = { lines: lines, g: g };
+  }
+
+  function sceneOCPGood(ctx, g) {
+    T(ctx, g, 20, 28, 'O: one interface, one class per coupon', 'title');
+    var ps = cls(ctx, g, 20, 60, 250, 'PricingService', ['- byCode: Map<string, Discount>', '+ register(d: Discount)', '+ price(amount, code?)'], { cls: 'accent' });
+    var itf = cls(ctx, g, 360, 60, 200, 'Discount', ['code', 'apply(total): number'], { stereo: 'interface', cls: 'accent' });
+    arrow(ctx, g, 'M270,100 H360', 'assoc');
+    T(ctx, g, 315, 92, 'holds', 'mono small muted', 'middle');
+    var specs = [['FlatDiscount', 'FLAT100: -100'], ['PercentDiscount', 'TENPCT: -10%'], ['BuyOneGetOne', 'BOGO: half']];
+    var impls = specs.map(function (s, i) {
+      var sub = ctx.group(i === 2 ? { opacity: 0 } : {}, g);
+      var c = cls(ctx, sub, 200 + i * 185, 250, 170, s[0], [s[1]], { cls: i === 2 ? 'ok' : 'signal' });
+      arrow(ctx, sub, 'M' + c.b.cx + ',250 V210 H460 V' + itf.b.bottom, 'real');
+      sub.c = c;
+      return sub;
+    });
+    var tally = ctx.group({ opacity: 0 }, g);
+    T(ctx, tally, 20, 370, 'files edited: 0   files added: 1   registration: 1 line', 'mono fill-ok');
+    T(ctx, tally, 20, 395, 'PricingService, FlatDiscount and PercentDiscount were not opened.', 'small muted');
+    var result = T(ctx, g, 20, 200, '', 'mono b fill-ok');
+    ctx.state.ocp = { ps: ps, itf: itf, impls: impls, tally: tally, result: result, g: g };
+  }
+
+  function sceneSeams(ctx, g) {
+    T(ctx, g, 20, 28, 'Put seams only where change is likely', 'title');
+    var specs = [
+      ['Discount', 'varies: new campaigns', true, 20, 70],
+      ['PaymentGateway', 'I/O: provider may change', true, 270, 70],
+      ['Notifier', 'I/O: email, SMS, push', true, 520, 70],
+      ['Order (entity)', 'stable data', false, 20, 250],
+      ['OrderValidator', 'one rule set, concrete', false, 270, 250],
+      ['OrderService', 'the flow, concrete', false, 520, 250],
+    ];
+    var boxes = specs.map(function (s) {
+      var b = cls(ctx, g, s[3], s[4], 220, s[0], [s[1]], { cls: s[2] ? 'accent' : 'signal', stereo: s[2] ? 'interface' : undefined });
+      b.setAttribute('opacity', 0);
+      b.seam = s[2];
+      return b;
+    });
+    T(ctx, g, 20, 200, 'interface + implementations', 'mono small fill-ok');
+    T(ctx, g, 20, 380, 'plain classes: no interface until a second variant appears', 'mono small muted');
+    ctx.state.seams = { boxes: boxes };
+  }
+
+  // ---------- lab ----------
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'The god class', say: 'One method does five jobs. Step through to see who changes it, how changes collide, and how SRP and OCP fix that.' },
+    setup: function (ctx) {
+      defs(ctx);
+      hl([]);
+      var g = ctx.group();
+      sceneGod(ctx, g);
+      ctx.state.scene = g;
+    },
+    steps: [
+      {
+        title: 'Five actors, one class',
+        say: 'Ask of each line: <b>who would ask me to change this?</b> Product, marketing, finance, the DBA and CRM. Five actors means five reasons to change.',
+        run: function (ctx) {
+          ctx.flash(ctx.state.god.god.r);
+          ACTORS.forEach(function (a, i) { ctx.log(a + ' changes ' + REASONS[i], 'bad'); });
+          return ctx.fade(ctx.state.god.actors, 1, 600);
+        },
+      },
+      {
+        title: 'Two changes collide',
+        say: 'In the same sprint, marketing adds a coupon and CRM changes the email. Both edit <code>OrderService.ts</code>. Merge conflict, and a typo in the email change breaks checkout for everyone.',
+        run: function (ctx) {
+          var s = ctx.state.god;
+          return Promise.all([
+            ctx.packet([[490, s.pos[1][1]], [330, 125]], { cls: 'bad', label: 'add BOGO', ms: 900 }),
+            ctx.packet([[490, s.pos[4][1]], [330, 140]], { cls: 'bad', label: 'new template', ms: 900 }),
+          ]).then(function () {
+            s.god.r.setAttribute('class', 'box bad');
+            ctx.flash(s.god.r);
+            T(ctx, s.g, 40, 230, 'merge conflict in OrderService.ts', 'mono fill-bad');
+            T(ctx, s.g, 40, 252, 're-test: validation, coupons, payment, DB, email', 'mono small fill-bad');
+            T(ctx, s.g, 40, 274, 'unit test needs: payment API + DB + SendGrid', 'mono small fill-bad');
+            ctx.log('Marketing + CRM edit the same file → conflict + regression risk', 'bad');
+          });
+        },
+      },
+      {
+        title: 'S: split by reason to change',
+        say: 'Each concern moves to its own class. <code>OrderService</code> keeps only the flow and calls the helpers. Each new class has one actor.',
+        run: function (ctx) {
+          hl([0, 1, 2]);
+          var god = ctx.state.god.god;
+          var moves = god.lines.map(function (ln, i) {
+            var y = parseFloat(ln.getAttribute('y')) - 4;
+            return ctx.packet([[60, y], [80 + i * 150, 250]], { ms: 700, cls: 'accent' });
+          });
+          return Promise.all(moves).then(function () { return swap(ctx, function (g) { sceneSRP(ctx, g); }); }).then(function () {
+            ctx.log('OrderService → coordinator + 5 focused classes', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Each team edits its own file',
+        say: 'The same two requests again. Marketing edits <code>PricingService</code>; CRM edits <code>Notifier</code>. Different files, no conflict, and each runs only its own tests.',
+        run: function (ctx) {
+          var s = ctx.state.srp;
+          return Promise.all([
+            ctx.packet([[s.actorChips[1]._x + 50, 368], [s.parts[1].b.cx, s.parts[1].b.bottom]], { cls: 'ok', label: 'add BOGO', ms: 800 }),
+            ctx.packet([[s.actorChips[4]._x + 50, 368], [s.parts[4].b.cx, s.parts[4].b.bottom]], { cls: 'ok', label: 'template', ms: 800 }),
+          ]).then(function () {
+            ctx.flash(s.parts[1].r); ctx.flash(s.parts[4].r);
+            s.parts[1].r.setAttribute('class', 'box ok'); s.parts[4].r.setAttribute('class', 'box ok');
+            ctx.log('Marketing → PricingService.ts only', 'ok');
+            ctx.log('CRM → Notifier.ts only. No conflict.', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The coordinator runs the flow',
+        say: '<code>placeOrder</code> calls each helper in order: validate, price, charge, save, notify. It knows the sequence, not the details.',
+        run: function (ctx) {
+          hl([3, 4, 5, 6, 7, 8]);
+          var s = ctx.state.srp;
+          var notes = ['validate: amount 1000 ok', "price(1000, 'TENPCT') = 900", 'charge(900) → txn_1', 'save {O1, 900, txn_1}', 'notify a@x.in: Paid 900'];
+          var chain = Promise.resolve();
+          s.parts.forEach(function (p, i) {
+            chain = chain.then(function () {
+              return ctx.packet([[s.svc.b.cx, s.svc.b.bottom], [p.b.cx, p.b.y]], { cls: 'accent', ms: 500 });
+            }).then(function () { ctx.flash(p.r); ctx.log(notes[i], 'info'); });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'O: the switch is still closed to extension',
+        say: 'Look inside <code>PricingService.price()</code>. A <code>switch</code> on the coupon code. "Buy one get one" means editing a tested class and re-testing every other coupon.',
+        run: function (ctx) {
+          return swap(ctx, function (g) { sceneOCPBad(ctx, g); }).then(function () {
+            var sw = ctx.state.sw;
+            sw.lines[4].setAttribute('y', 110 + 5 * 20);
+            sw.lines[5].setAttribute('y', 110 + 6 * 20);
+            sw.lines[6].setAttribute('y', 110 + 7 * 20);
+            var added = T(ctx, sw.g, 336, 110 + 4 * 20, "    case 'BOGO':    return amount / 2;  // edit!", 'mono small fill-bad');
+            ctx.flash(added);
+            ctx.log("New coupon 'BOGO' → edit PricingService", 'bad');
+            ctx.log('Re-test FLAT100 and TENPCT too', 'warn');
+            return ctx.wait(500);
+          });
+        },
+      },
+      {
+        title: 'O: an interface and one class per coupon',
+        say: 'Define <code>Discount</code> with <code>apply(total)</code>. Each coupon is its own class. <code>PricingService</code> keeps a map from code to discount and just calls <code>apply()</code>. This is the Strategy pattern.',
+        run: function (ctx) {
+          hl([9, 10, 11, 12]);
+          return swap(ctx, function (g) { sceneOCPGood(ctx, g); }).then(function () {
+            ctx.log('interface Discount; FlatDiscount, PercentDiscount', 'info');
+            var o = ctx.state.ocp;
+            return ctx.packet([[145, o.ps.b.bottom], [145, 210], [o.impls[1].c.b.cx, 210], [o.impls[1].c.b.cx, 250]], { cls: 'accent', label: "price(1000,'TENPCT')", ms: 1000 });
+          }).then(function () {
+            ctx.state.ocp.result.textContent = 'result: 900';
+            ctx.log("lookup 'TENPCT' → PercentDiscount.apply(1000) = 900", 'ok');
+          });
+        },
+      },
+      {
+        title: 'Add a coupon: a new class, zero edits',
+        say: 'Marketing launches BOGO. We add <code>BuyOneGetOne</code> and register it in the composition root. No existing class is opened.',
+        run: function (ctx) {
+          hl([13]);
+          var o = ctx.state.ocp;
+          return ctx.fade(o.impls[2], 1, 500).then(function () {
+            ctx.log('pricing.register(new BuyOneGetOne())  // 1 new line', 'ok');
+            return ctx.packet([[145, o.ps.b.bottom], [145, 210], [o.impls[2].c.b.cx, 210], [o.impls[2].c.b.cx, 250]], { cls: 'ok', label: "price(1000,'BOGO')", ms: 1100 });
+          }).then(function () {
+            o.result.textContent = 'result: 500';
+            ctx.flash(o.impls[2].c.r);
+            ctx.log("lookup 'BOGO' → BuyOneGetOne.apply(1000) = 500", 'ok');
+            return ctx.fade(o.tally, 1, 400);
+          });
+        },
+      },
+      {
+        title: 'Choose your seams',
+        say: 'No design is closed to every change. Add interfaces where change is likely (coupons) and around I/O (payment, notifications). Keep stable things concrete.',
+        run: function (ctx) {
+          hl([]);
+          return swap(ctx, function (g) { sceneSeams(ctx, g); }).then(function () {
+            var chain = Promise.resolve();
+            ctx.state.seams.boxes.forEach(function (b) {
+              chain = chain.then(function () { return ctx.fade(b, 1, 250); }).then(function () {
+                if (b.seam) ctx.flash(b.r);
+              });
+            });
+            return chain.then(function () {
+              ctx.log('Seams: Discount, PaymentGateway, Notifier', 'ok');
+              ctx.log('Concrete: Order, OrderValidator, OrderService', 'info');
+            });
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var CHANGES = [
+    ['New coupon type', 'PricingService.ts', 'BuyOneGetOne.ts (new) + 1 register line', 'only the new discount'],
+    ['New email template', 'OrderService.ts', 'Notifier.ts', 'notifier tests'],
+    ['Switch to Stripe', 'OrderService.ts', 'StripeGateway.ts (new) + wiring', 'gateway tests'],
+    ['Add a DB column', 'OrderService.ts', 'OrderRepository.ts', 'repository tests'],
+    ['New validation rule', 'OrderService.ts', 'OrderValidator.ts', 'validator tests'],
+  ];
+  var box = document.getElementById('try'), out = document.getElementById('try-out');
+  CHANGES.forEach(function (c) {
+    var b = document.createElement('button');
+    b.className = 'btn'; b.type = 'button'; b.textContent = c[0];
+    b.addEventListener('click', function () {
+      out.innerHTML = '<table><tr><th></th><th>Before (god class)</th><th>After (SRP + OCP)</th></tr>' +
+        '<tr><td>Files touched</td><td class="bad">' + (c[0] === 'New coupon type' ? 'OrderService.ts (coupon switch)' : c[1]) + '</td><td class="ok">' + c[2] + '</td></tr>' +
+        '<tr><td>Re-test</td><td class="bad">everything: validation, coupons, payment, DB, email</td><td class="ok">' + c[3] + '</td></tr>' +
+        '<tr><td>Conflict risk</td><td class="bad">high: 5 teams share the file</td><td class="ok">low: one owner</td></tr></table>';
+    });
+    box.appendChild(b);
+  });
+})();
+</script>
+</body>
+</html>

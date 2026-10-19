@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H38 Payments domain</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .try label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .try input { font: 13px var(--font-mono); width: 100px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .try output { font: 12.5px var(--font-mono); flex-basis: 100%; color: var(--ink); white-space: pre-wrap; }
+  #stage text.mono { white-space: pre; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H38 · Building blocks</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Payments: ledger, PSPs, reconciliation</h1>
+    <p class="lede">One ₹1,000 card payment, with everything that goes wrong in real life: a double click, a PSP timeout, duplicate and late webhooks, a partial refund, and a nightly reconciliation that finds what the online path missed.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Payment state machine, PSP calls, webhooks, double-entry ledger and reconciliation"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <label>Try it: amount ₹ <input id="t-amt" type="number" min="1" step="1" value="1000"></label>
+        <label>MDR % <input id="t-mdr" type="number" min="0" max="10" step="0.1" value="2"></label>
+        <label>split into <input id="t-n" type="number" min="1" max="12" step="1" value="3"></label>
+        <output id="t-out"></output>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request in flight</span>
+        <span><i style="background: var(--accent)"></i>Current state / entry</span>
+        <span><i style="background: var(--ok)"></i>Confirmed / matched</span>
+        <span><i style="background: var(--bad)"></i>Lost / rejected / break</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"A payment is a forward-only state machine. The create API takes an Idempotency-Key and every PSP call carries our attempt id. A timeout means UNKNOWN, not FAILED: a poller and webhooks resolve it. Each transition writes balanced double-entry rows in paise plus an outbox event in one transaction, keyed by event so it posts once. A nightly job reconciles the ledger with the PSP settlement file and the bank statement."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code">if (!NEXT[p.status].includes(to)) return; // forward-only
+if (journal.has(eventKey)) return;         // once per event
+assert(sum(entries) === 0n);               // double entry
+tx(() =&gt; { update status; insert journal;
+           insert entries; insert outbox });
+on timeout: status = 'UNKNOWN'             // never re-charge</pre>
+    </div>
+    <div class="note wide">
+      <h3>Where each failure is caught</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Failure</th><th>Guard</th><th>Key</th></tr></thead>
+          <tbody>
+            <tr><td>Double click / client retry</td><td>Unique Idempotency-Key, return stored result</td><td>Idempotency-Key</td></tr>
+            <tr><td>PSP timeout</td><td>UNKNOWN + status poll by our reference</td><td>attempt id</td></tr>
+            <tr><td>Duplicate webhook</td><td>Inbox table with unique event id</td><td>PSP event id</td></tr>
+            <tr><td>Late / out-of-order webhook</td><td>Forward-only conditional update</td><td>current status</td></tr>
+            <tr><td>Double ledger posting</td><td>Unique journal event key</td><td>payment id + event</td></tr>
+            <tr><td>Anything still missed</td><td>Daily reconciliation vs PSP file and bank statement</td><td>attempt id, RRN/UTR</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why is a timeout not a failure?</summary><div>The PSP may have charged the card and only the response was lost. Retrying with a new reference charges twice. Ask the PSP by your reference instead.</div></details>
+      <details class="qa"><summary>Why do ledger entries always sum to zero?</summary><div>Every rupee that leaves one account enters another. If a transaction does not balance, money was created or lost, so the insert is rejected.</div></details>
+      <details class="qa"><summary>A "failed" webhook arrives after the payment is CAPTURED. What do you do?</summary><div>Log it and ignore it. States only move forward; CAPTURED to FAILED is not a valid transition.</div></details>
+      <details class="qa"><summary>Why keep reconciliation if webhooks and polling work?</summary><div>Webhooks get lost, pollers give up, fees and chargebacks change amounts. The settlement file and bank statement are what actually happened.</div></details>
+    </div>
+    <div class="note">
+      <h3>Numbers</h3>
+      <ul>
+        <li>Card settlement: T+1 to T+2, minus MDR + 18% GST on the fee</li>
+        <li>UPI: ~20 billion transactions a month (2025)</li>
+        <li>Stripe retries webhooks for up to 3 days</li>
+        <li>Store paise as BIGINT; never floats</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var STATES = ['CREATED', 'PENDING', 'UNKNOWN', 'CAPTURED', 'FAILED', 'REFUNDED'];
+  function banner(ctx, text, kind) { ctx.state.banner.textContent = text; ctx.state.banner.setAttribute('class', 'title' + (kind ? ' fill-' + kind : '')); }
+  function box(ctx, x, y, w, h, title, sub) {
+    var r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 8, class: 'box' });
+    ctx.el('text', { x: x + 10, y: y + 18, class: 'small', text: title, style: 'font-weight:600' });
+    var s = ctx.el('text', { x: x + 10, y: y + 35, class: 'mono small muted', text: sub || '' });
+    return { r: r, s: s, x: x, y: y, w: w, h: h };
+  }
+  function setState(ctx, name, bad) {
+    var s = ctx.state;
+    STATES.forEach(function (n) {
+      var c = s.chips[n];
+      c.r.setAttribute('class', 'box' + (n === name ? (bad ? ' bad' : ' accent') : ''));
+    });
+    s.svc.s.textContent = 'status = ' + name;
+    s.svc.s.setAttribute('class', 'mono small ' + (name === 'UNKNOWN' ? 'fill-signal' : 'fill-accent'));
+    ctx.flash(s.chips[name].r);
+  }
+  function addEntry(ctx, txn, acct, dr, cr, cls) {
+    var s = ctx.state, i = s.entryN++;
+    var y = 236 + i * 16;
+    ctx.el('text', { x: 28, y: y, class: 'mono small ' + (cls || ''), text: txn });
+    ctx.el('text', { x: 130, y: y, class: 'mono small', text: acct });
+    ctx.el('text', { x: 300, y: y, 'text-anchor': 'end', class: 'mono small', text: dr || '' });
+    ctx.el('text', { x: 372, y: y, 'text-anchor': 'end', class: 'mono small', text: cr || '' });
+  }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'A ₹1,000 checkout',
+      say: 'The client pays through our payment service, which calls the PSP, which talks to the card issuer. Below: the state machine, the double-entry ledger, the webhook inbox and the nightly reconciliation.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      s.entryN = 0;
+      s.client = box(ctx, 16, 30, 110, 48, 'Client', 'checkout chk_A');
+      s.svc = box(ctx, 176, 30, 170, 48, 'Payment service', 'no payment yet');
+      s.psp = box(ctx, 410, 30, 120, 48, 'PSP', 'Razorpay-like');
+      s.bank = box(ctx, 600, 30, 140, 48, 'Issuer bank', 'via card network');
+      ctx.el('line', { x1: 126, y1: 54, x2: 176, y2: 54, class: 'wire' });
+      ctx.el('line', { x1: 346, y1: 54, x2: 410, y2: 54, class: 'wire' });
+      ctx.el('line', { x1: 530, y1: 54, x2: 600, y2: 54, class: 'wire' });
+      s.idem = ctx.el('text', { x: 176, y: 96, class: 'mono small muted', text: 'idempotency keys: {}' });
+      // state machine
+      ctx.el('text', { x: 16, y: 126, class: 'small muted', text: 'state' });
+      s.chips = {};
+      STATES.forEach(function (n, i) {
+        var x = 60 + i * 114;
+        var r = ctx.el('rect', { x: x, y: 112, width: 100, height: 26, rx: 13, class: 'box' });
+        ctx.el('text', { x: x + 50, y: 129, 'text-anchor': 'middle', class: 'mono small', text: n });
+        if (i > 0 && i < 4) ctx.el('line', { x1: x - 14, y1: 125, x2: x, y2: 125, class: 'wire' });
+        s.chips[n] = { r: r };
+      });
+      s.user = ctx.el('text', { x: 16, y: 166, class: 'mono small', text: '' });
+      // ledger
+      ctx.el('rect', { x: 16, y: 182, width: 370, height: 210, rx: 8, class: 'box' });
+      ctx.el('text', { x: 28, y: 202, class: 'title', text: 'Ledger (paise shown as ₹)' });
+      ctx.el('text', { x: 28, y: 220, class: 'mono small muted', text: 'event' });
+      ctx.el('text', { x: 130, y: 220, class: 'mono small muted', text: 'account' });
+      ctx.el('text', { x: 300, y: 220, 'text-anchor': 'end', class: 'mono small muted', text: 'Dr' });
+      ctx.el('text', { x: 372, y: 220, 'text-anchor': 'end', class: 'mono small muted', text: 'Cr' });
+      s.sum = ctx.el('text', { x: 28, y: 382, class: 'mono small muted', text: 'sum of entries: -' });
+      // inbox
+      s.inbox = box(ctx, 410, 182, 330, 62, 'Webhook inbox', 'processed event keys: -');
+      s.inbox2 = ctx.el('text', { x: 420, y: 234, class: 'mono small muted', text: '' });
+      // recon
+      ctx.el('rect', { x: 410, y: 256, width: 330, height: 136, rx: 8, class: 'box' });
+      ctx.el('text', { x: 420, y: 276, class: 'title', text: 'Nightly reconciliation' });
+      ctx.el('text', { x: 420, y: 294, class: 'mono small muted', text: 'ref     ledger     PSP file   result' });
+      s.recon = [0, 1, 2].map(function (i) { return ctx.el('text', { x: 420, y: 314 + i * 20, class: 'mono small muted', text: '' }); });
+      s.banner = ctx.el('text', { x: 380, y: 432, 'text-anchor': 'middle', class: 'title', text: '' });
+    },
+    steps: [
+      {
+        title: 'Double click, one payment',
+        say: 'The user taps Pay twice, 300 ms apart. Both requests carry the same Idempotency-Key <code>chk_A</code>, made when the checkout page loaded. The first creates pay_1; the second hits the unique key and gets the same answer.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return Promise.all([
+            ctx.packet([[126, 46], [176, 46]], { label: 'chk_A' }),
+            ctx.wait(250).then(function () { return ctx.packet([[126, 62], [176, 62]], { label: 'chk_A', cls: 'warn' }); }),
+          ]).then(function () {
+            setState(ctx, 'CREATED');
+            s.idem.textContent = 'idempotency keys: { chk_A -> pay_1 }';
+            s.idem.setAttribute('class', 'mono small fill-accent');
+            ctx.log('POST /payments chk_A -> pay_1 created', 'info');
+            ctx.log('POST /payments chk_A again -> same pay_1 returned', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Send to the PSP with our attempt id',
+        say: 'The service moves to PENDING and calls the PSP with <b>our</b> reference <code>att_1</code>. The PSP asks the issuer, which approves and charges the card.',
+        run: function (ctx) {
+          var s = ctx.state;
+          setState(ctx, 'PENDING');
+          return ctx.packet([[346, 54], [410, 54]], { label: 'att_1' }).then(function () {
+            return ctx.packet([[530, 54], [600, 54]]);
+          }).then(function () {
+            s.bank.r.setAttribute('class', 'box ok'); s.bank.s.textContent = 'approved, charged';
+            ctx.log('PSP charge ref=att_1 -> issuer approved', 'info');
+            return ctx.packet([[600, 54], [530, 54]], { cls: 'ok' });
+          });
+        },
+      },
+      {
+        title: 'The response is lost: UNKNOWN',
+        say: 'The PSP\'s reply times out on the way back. The card <b>was</b> charged, but we do not know. A timeout is not a failure: mark UNKNOWN, show "processing", and never retry with a new reference.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[410, 54], [378, 54]], { cls: 'bad', ms: 500 }).then(function () {
+            setState(ctx, 'UNKNOWN');
+            s.chips.UNKNOWN.r.setAttribute('class', 'box signal');
+            s.user.textContent = 'user sees: "Payment processing, do not pay again"';
+            s.user.setAttribute('class', 'mono small fill-signal');
+            ctx.log('PSP call timed out after 10 s -> UNKNOWN', 'warn');
+          });
+        },
+      },
+      {
+        title: 'Poller asks: what happened to att_1?',
+        say: 'A poller calls the PSP status API with our attempt id, with backoff (10 s, 30 s, 2 min...). The PSP says CAPTURED. One conditional update moves the payment forward.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[346, 62], [410, 62]], { label: 'GET status att_1', cls: 'accent' }).then(function () {
+            return ctx.packet([[410, 46], [346, 46]], { cls: 'ok', label: 'CAPTURED' });
+          }).then(function () {
+            setState(ctx, 'CAPTURED');
+            s.user.textContent = 'user sees: "Paid"';
+            s.user.setAttribute('class', 'mono small fill-ok');
+            ctx.log('status att_1 = CAPTURED -> UNKNOWN to CAPTURED', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Post balanced ledger entries',
+        say: 'In the same DB transaction as the status change, we post a journal keyed <code>pay_1:captured</code>: ₹1,000 receivable from the acquirer, ₹976.40 owed to the merchant, ₹20 fee, ₹3.60 GST. Debits equal credits.',
+        run: function (ctx) {
+          var s = ctx.state;
+          var rows = [['acquirer_recv', '1000.00', ''], ['merchant_payable', '', '976.40'], ['fee_revenue', '', '20.00'], ['gst_payable', '', '3.60']];
+          return ctx.packet([[260, 78], [260, 182]], { cls: 'accent' }).then(function () {
+            return rows.reduce(function (p, r) {
+              return p.then(function () { addEntry(ctx, 'pay_1:capt', r[0], r[1], r[2]); return ctx.wait(150); });
+            }, Promise.resolve());
+          }).then(function () {
+            s.sum.textContent = 'sum of entries: 0  (Dr 1000.00 = Cr 1000.00)';
+            s.sum.setAttribute('class', 'mono small fill-ok');
+            ctx.log('journal pay_1:captured posted, 4 entries, sum = 0', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Duplicate webhook: ignored',
+        say: 'Now the PSP webhook "payment.captured" arrives, and then the same event again (PSPs retry). We verify the HMAC on the raw body, store it in the inbox, and the event key is already processed. Nothing posts twice.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[470, 78], [470, 182]], { label: 'evt_9 captured' }).then(function () {
+            s.inbox.s.textContent = 'processed event keys: pay_1:captured';
+            s.inbox2.textContent = 'evt_9: HMAC ok, already applied -> no-op';
+            return ctx.packet([[490, 78], [490, 182]], { cls: 'warn', label: 'evt_9 again' });
+          }).then(function () {
+            s.inbox.r.setAttribute('class', 'box ok'); ctx.flash(s.inbox.r);
+            ctx.log('webhook evt_9 x2 -> deduped by event key', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Late "failed" webhook: rejected',
+        say: 'An old event from an earlier attempt says "failed", arriving out of order. CAPTURED to FAILED is not a valid transition. The conditional update matches zero rows. We log it and move on.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[530, 78], [530, 182]], { cls: 'bad', label: 'evt_7 failed' }).then(function () {
+            s.chips.FAILED.r.setAttribute('class', 'box bad');
+            ctx.flash(s.chips.FAILED.r);
+            s.inbox2.textContent = 'evt_7: CAPTURED -> FAILED illegal, ignored';
+            s.inbox2.setAttribute('class', 'mono small fill-bad');
+            ctx.log('late failed webhook ignored (forward-only)', 'bad');
+            return ctx.wait(500);
+          }).then(function () { setState(ctx, 'CAPTURED'); });
+        },
+      },
+      {
+        title: 'Partial refund: a new movement',
+        say: 'The customer returns one item worth ₹300. A refund is not an undo: it is a new journal with reversal entries, its own idempotency key, and a check that refunds never exceed the captured amount.',
+        run: function (ctx) {
+          var s = ctx.state;
+          addEntry(ctx, 'pay_1:rfnd1', 'merchant_payable', '300.00', '', 'fill-signal');
+          addEntry(ctx, 'pay_1:rfnd1', 'acquirer_recv', '', '300.00', 'fill-signal');
+          s.sum.textContent = 'sum of entries: 0  merchant payable = 676.40';
+          s.chips.REFUNDED.r.setAttribute('class', 'box signal');
+          ctx.log('refund ₹300 (≤ captured ₹1000) -> 2 reversal entries', 'info');
+          return ctx.packet([[346, 70], [410, 70]], { label: 'refund rf_1' });
+        },
+      },
+      {
+        title: 'Settlement file arrives (T+1)',
+        say: 'Next day the PSP sends its settlement report. It lists att_1, but also att_2, a ₹499 payment whose webhook never came, and att_x, which we have no record of at all.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.packet([[470, 78], [470, 120], [700, 120], [700, 256]], { ms: 900, label: 'settlement.csv' }).then(function () {
+            s.recon[0].textContent = 'att_1   ₹700.00    ₹700.00';
+            s.recon[1].textContent = 'att_2   UNKNOWN    ₹499.00';
+            s.recon[2].textContent = 'att_x   -          ₹120.00';
+            ctx.log('settlement file: 3 rows', 'info');
+          });
+        },
+      },
+      {
+        title: 'Reconcile: match, fix, escalate',
+        say: 'att_1 matches (₹1,000 minus the ₹300 refund). att_2 was stuck in UNKNOWN: fix the status, post its entries, fulfil the order. att_x has no record: send it to the ops queue. Reconciliation is the final truth.',
+        run: function (ctx) {
+          var s = ctx.state;
+          s.recon[0].textContent = 'att_1   ₹700.00    ₹700.00    match';
+          s.recon[0].setAttribute('class', 'mono small fill-ok');
+          return ctx.wait(400).then(function () {
+            s.recon[1].textContent = 'att_2   UNKNOWN    ₹499.00    fix+fulfil';
+            s.recon[1].setAttribute('class', 'mono small fill-signal');
+            return ctx.wait(400);
+          }).then(function () {
+            s.recon[2].textContent = 'att_x   -          ₹120.00    ops queue';
+            s.recon[2].setAttribute('class', 'mono small fill-bad');
+            banner(ctx, 'Idempotent steps + ledger + recon = no lost rupee', 'ok');
+            ctx.log('recon: 1 match, 1 auto-fixed, 1 escalated', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // Try it: ledger split and paise allocation (pure calculation, outside the SVG).
+  var amt = document.getElementById('t-amt'), mdr = document.getElementById('t-mdr'), nIn = document.getElementById('t-n'), out = document.getElementById('t-out');
+  function rs(p) { return '₹' + (p / 100).toFixed(2); }
+  function calc() {
+    var paise = Math.round((parseFloat(amt.value) || 0) * 100);
+    var bps = Math.round((parseFloat(mdr.value) || 0) * 100);      // basis points, integer math
+    var fee = Math.floor(paise * bps / 10000);
+    var gst = Math.floor(fee * 18 / 100);
+    var merchant = paise - fee - gst;
+    var n = Math.max(1, Math.min(12, parseInt(nIn.value, 10) || 1));
+    var base = Math.floor(paise / n), rem = paise - base * n;
+    var parts = []; for (var i = 0; i < n; i++) parts.push(base + (i < rem ? 1 : 0));
+    out.textContent = 'Dr acquirer ' + rs(paise) + ' = Cr merchant ' + rs(merchant) + ' + fee ' + rs(fee) + ' + GST ' + rs(gst) +
+      '   (sum ' + (paise - merchant - fee - gst) + ')\nSplit ' + n + ' ways in paise: ' + parts.join(' + ') + ' = ' + paise + ' (remainder ' + rem + ' paise given to the first ' + rem + ')';
+  }
+  [amt, mdr, nIn].forEach(function (i) { i.addEventListener('input', calc); });
+  calc();
+})();
+</script>
+</body>
+</html>

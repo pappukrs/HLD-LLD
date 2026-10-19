@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H28 Unique IDs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text.bit { font-family: var(--font-mono); font-size: 10px; }
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .try input[type="number"] { width: 5.5em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H28 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Unique IDs: Snowflake and Base62</h1>
+    <p class="lede">Auto-increment breaks once data is sharded. A Snowflake id packs time, a worker id and a counter into 64 bits, so every pod can make unique, roughly time-sorted ids with no network call. Watch the bits fill, the sequence overflow, the clock go backwards, and a short code come out of base62.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 540" role="img" aria-label="A Snowflake generator, the 64-bit layout with its bits, generated ids, and a base62 conversion"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="worker">Worker id <input type="number" id="worker" min="0" max="1023" value="7"></label>
+        <button class="btn" type="button" id="gen">Generate id</button>
+        <button class="btn" type="button" id="tickms">+1 ms</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Time bits</span>
+        <span><i style="background: var(--signal)"></i>Worker bits</span>
+        <span><i style="background: var(--ok)"></i>Sequence bits</span>
+        <span><i style="background: var(--bad)"></i>Collision / error</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Each pod generates 64-bit Snowflake ids in memory: 41 bits of milliseconds since our epoch, 10 bits of worker id leased from etcd, 12 bits of sequence. That is 4,096 ids per ms per pod, no network call, and ids sort roughly by time. If the clock goes back, the generator waits. Ids go out as strings in JSON. Short links use a range allocator plus base62 instead, for 7-character codes."</p>
+    </div>
+    <div class="note">
+      <h3>The four rules of the generator</h3>
+      <ul>
+        <li>Same ms as last id: <code>seq++</code>. New ms: <code>seq = 0</code>.</li>
+        <li><code>seq</code> passes 4,095: wait for the next ms.</li>
+        <li>Clock behind <code>lastMs</code>: refuse or wait. Never reuse an old time.</li>
+        <li>Worker id must be unique among live pods: lease it, never guess it.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>ID schemes compared</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Scheme</th><th>Size</th><th>Sorted by time</th><th>Coordination</th><th>Good for</th></tr></thead>
+          <tbody>
+            <tr><td>Auto-increment</td><td>64 bit</td><td>Yes</td><td>One DB</td><td>Single database</td></tr>
+            <tr><td>Range allocator + base62</td><td>~7 chars</td><td>No</td><td>One call per block of 1,000</td><td>URL shortener, referral codes</td></tr>
+            <tr><td>UUIDv4</td><td>128 bit</td><td>No</td><td>None</td><td>Client-made ids, low write volume</td></tr>
+            <tr><td>UUIDv7 / ULID</td><td>128 bit</td><td>Yes (ms)</td><td>None</td><td>Sortable ids with zero setup</td></tr>
+            <tr><td>Snowflake</td><td>64 bit</td><td>Yes (ms, rough)</td><td>Worker id lease at boot</td><td>Tweets, messages, orders at high rate</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>6,000 requests arrive in one millisecond on one worker. What happens?</summary><div>The first 4,096 get sequence 0–4,095. Then the generator waits for the next ms and continues from sequence 0.</div></details>
+      <details class="qa"><summary>Why must the generator refuse when the clock goes backwards?</summary><div>With the same worker id and an earlier time, it could build a (time, seq) pair it already used. That is a duplicate id.</div></details>
+      <details class="qa"><summary>Why send the id as a string in JSON?</summary><div>A JS <code>Number</code> is exact only up to 2^53 − 1. A 64-bit id gets rounded by <code>JSON.parse</code>, silently changing it.</div></details>
+      <details class="qa"><summary>Why not use Snowflake for short links?</summary><div>A 64-bit number is 10–11 base62 characters. A counter from a range allocator stays small, so codes are 6–7 characters.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+    <a href="lab-snowflake/README.md">lab-snowflake</a>
+    <a href="lab-base62/README.md">lab-base62</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var EPOCH = 1704067200000n;                      // 2024-01-01 UTC
+  var START = BigInt(Date.UTC(2026, 9, 19, 10, 0, 0));
+  var BX = 32, BPX = 10.9, BY = 206;                // bit bar
+  var SEG = [
+    { name: 'sign', from: 0, to: 1, cls: 'muted', label: '0' },
+    { name: 'time', from: 1, to: 42, cls: 'fill-accent', label: '41 bits · ms since 2024-01-01' },
+    { name: 'worker', from: 42, to: 52, cls: 'fill-signal', label: '10 bits · worker' },
+    { name: 'seq', from: 52, to: 64, cls: 'fill-ok', label: '12 bits · seq' },
+  ];
+  var ALPHA = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  function segOf(i) { for (var k = 0; k < SEG.length; k++) if (i >= SEG[k].from && i < SEG[k].to) return SEG[k]; }
+
+  function setGen(ctx) {
+    var S = ctx.state;
+    S.genClock.textContent = 'clock: +' + (S.now - START) + ' ms';
+    S.genLast.textContent = 'lastMs: ' + (S.lastMs < 0n ? 'none' : '+' + (S.lastMs - START) + ' ms');
+    S.genSeq.textContent = 'seq: ' + S.seq + ' / 4095';
+    S.genWorker.textContent = 'worker: ' + (S.worker === null ? '?' : S.worker);
+  }
+
+  function showBits(ctx, id, parts) {
+    var S = ctx.state;
+    var bin = id.toString(2).padStart(64, '0');
+    S.bits.forEach(function (t, i) {
+      var seg = segOf(i);
+      var on = !parts || parts.indexOf(seg.name) >= 0;
+      t.textContent = on ? bin[i] : '·';
+      t.setAttribute('class', 'bit ' + (on && bin[i] === '1' ? seg.cls : 'muted'));
+    });
+  }
+
+  function makeId(ctx) {
+    var S = ctx.state;
+    return ((S.now - EPOCH) << 22n) | (BigInt(S.worker) << 12n) | BigInt(S.seq);
+  }
+
+  // One call to next(): returns {id} or {wait:true} or {error}
+  function next(ctx) {
+    var S = ctx.state;
+    if (S.now < S.lastMs) return { error: 'clock is ' + (S.lastMs - S.now) + ' ms behind lastMs' };
+    if (S.now === S.lastMs) {
+      if (S.seq === 4095) return { wait: true };
+      S.seq += 1;
+    } else S.seq = 0;
+    S.lastMs = S.now;
+    return { id: makeId(ctx) };
+  }
+
+  function pushId(ctx, id) {
+    var S = ctx.state;
+    S.ids.push({ id: id, ms: S.now - START, w: S.worker, seq: S.seq });
+    var g = S.listG;
+    while (g.firstChild) g.removeChild(g.firstChild);
+    S.ids.slice(-5).forEach(function (r, i) {
+      var y = 316 + i * 20;
+      ctx.el('text', { x: 24, y: y, class: 'mono small', text: r.id.toString() }, g);
+      ctx.el('text', { x: 200, y: y, class: 'mono small muted', text: '= t+' + r.ms + ' · w' + r.w + ' · s' + r.seq }, g);
+    });
+    ctx.flash(S.genBox);
+  }
+
+  function generate(ctx, quiet) {
+    var S = ctx.state;
+    var r = next(ctx);
+    setGen(ctx);
+    if (r.error) { ctx.log('Refused: ' + r.error, 'bad'); return r; }
+    if (r.wait) { if (!quiet) ctx.log('seq is 4095: wait for next ms', 'warn'); return r; }
+    showBits(ctx, r.id);
+    pushId(ctx, r.id);
+    if (!quiet) ctx.log('id ' + r.id + ' (t+' + (S.now - START) + ' ms, worker ' + S.worker + ', seq ' + S.seq + ')', 'ok');
+    return r;
+  }
+
+  function out(ctx, i) { return [[300, 86], [BX + 20 + i * 2, BY - 34]]; }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One order service, two shards',
+      say: 'Orders are sharded across two MySQL databases. Each shard has its own AUTO_INCREMENT. On the left is the order service pod that will become a Snowflake generator.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.now = START; S.lastMs = -1n; S.seq = 0; S.worker = null; S.ids = [];
+      // generator box
+      S.genBox = ctx.el('rect', { x: 20, y: 36, width: 280, height: 108, rx: 10, class: 'box accent' });
+      S.genTitle = ctx.el('text', { x: 34, y: 60, class: 'title', text: 'Order service pod' });
+      S.genClock = ctx.el('text', { x: 34, y: 82, class: 'mono small', text: '' });
+      S.genLast = ctx.el('text', { x: 34, y: 100, class: 'mono small muted', text: '' });
+      S.genSeq = ctx.el('text', { x: 34, y: 118, class: 'mono small', text: '' });
+      S.genWorker = ctx.el('text', { x: 180, y: 82, class: 'mono small fill-signal', text: '' });
+      setGen(ctx);
+      // shards
+      S.shards = [];
+      [0, 1].forEach(function (i) {
+        var x = 430 + i * 170;
+        var r = ctx.el('rect', { x: x, y: 36, width: 150, height: 60, rx: 8, class: 'box' });
+        ctx.el('text', { x: x + 12, y: 58, class: 'title', text: 'Shard ' + (i + 1) });
+        var t = ctx.el('text', { x: x + 12, y: 80, class: 'mono small muted', text: 'AUTO_INCREMENT = 1000' });
+        S.shards.push({ r: r, t: t, x: x });
+        ctx.el('line', { x1: 300, y1: 66, x2: x, y2: 66, class: 'wire dashed', opacity: 0.5 });
+      });
+      S.etcd = ctx.group({ opacity: 0 });
+      ctx.el('rect', { x: 430, y: 106, width: 150, height: 40, rx: 8, class: 'box' }, S.etcd);
+      ctx.el('text', { x: 444, y: 131, class: 'mono small', text: 'etcd: worker leases' }, S.etcd);
+      // bit bar
+      ctx.el('text', { x: 20, y: 172, class: 'title', text: 'The 64-bit id' });
+      S.bits = [];
+      for (var i = 0; i < 64; i++) {
+        var seg = segOf(i);
+        ctx.el('rect', { x: BX + i * BPX, y: BY - 14, width: BPX - 1, height: 22, rx: 2, class: 'box', opacity: 0.6 });
+        S.bits.push(ctx.el('text', { x: BX + i * BPX + BPX / 2 - 0.5, y: BY + 2, 'text-anchor': 'middle', class: 'bit muted', text: '·' }));
+      }
+      S.segG = ctx.group({ opacity: 0 });
+      SEG.forEach(function (s) {
+        var x1 = BX + s.from * BPX, x2 = BX + s.to * BPX - 1;
+        ctx.el('line', { x1: x1, y1: BY + 16, x2: x2, y2: BY + 16, class: 'wire', style: 'stroke: var(--' + (s.name === 'time' ? 'accent' : s.name === 'worker' ? 'signal' : s.name === 'seq' ? 'ok' : 'line') + '); stroke-width: 3' }, S.segG);
+        if (s.name !== 'sign') ctx.el('text', { x: (x1 + x2) / 2, y: BY + 34, 'text-anchor': 'middle', class: 'mono small', text: s.label }, S.segG);
+      });
+      S.formula = ctx.el('text', { x: 20, y: 268, class: 'mono small muted', text: 'id = (now − EPOCH) << 22 | worker << 12 | seq' });
+      // id list
+      ctx.el('text', { x: 20, y: 296, class: 'title', text: 'Ids issued' });
+      S.listG = ctx.group();
+      // JS number box
+      S.jsG = ctx.group({ opacity: 0 });
+      ctx.el('rect', { x: 430, y: 280, width: 310, height: 112, rx: 8, class: 'box' }, S.jsG);
+      ctx.el('text', { x: 444, y: 302, class: 'title', text: 'JSON.parse in a browser' }, S.jsG);
+      S.jsA = ctx.el('text', { x: 444, y: 326, class: 'mono small', text: '' }, S.jsG);
+      S.jsB = ctx.el('text', { x: 444, y: 346, class: 'mono small', text: '' }, S.jsG);
+      S.jsC = ctx.el('text', { x: 444, y: 372, class: 'mono small', text: '' }, S.jsG);
+      // base62 strip
+      ctx.el('line', { x1: 0, y1: 418, x2: 760, y2: 418, class: 'wire' });
+      ctx.el('text', { x: 20, y: 442, class: 'title', text: 'Short codes: counter → base62' });
+      S.b62G = ctx.group();
+    },
+    steps: [
+      {
+        title: 'Auto-increment breaks after sharding',
+        say: 'The service inserts one order into each shard. Each shard counts on its own, so both hand out <b>1001</b>. Two different orders now share an id, and any cache, URL or foreign key that uses it is wrong.',
+        run: function (ctx) {
+          var S = ctx.state;
+          ctx.log('INSERT order into shard 1 and shard 2', 'info');
+          return Promise.all(S.shards.map(function (s) { return ctx.packet([[300, 66], [s.x, 66]], { ms: 700, label: 'INSERT' }); }))
+            .then(function () {
+              S.shards.forEach(function (s) { s.t.textContent = 'new id = 1001'; s.r.setAttribute('class', 'box bad'); ctx.flash(s.r); });
+              ctx.log('Both shards return id 1001: collision', 'bad');
+              return Promise.all(S.shards.map(function (s) { return ctx.packet([[s.x, 72], [300, 72]], { ms: 600, cls: 'bad', label: '1001' }); }));
+            });
+        },
+      },
+      {
+        title: 'Snowflake: make the id in the app, from 3 parts',
+        say: 'Instead of asking a database, each pod builds a 64-bit number itself: 1 unused sign bit, <b>41 bits of time</b>, <b>10 bits of worker id</b> and <b>12 bits of sequence</b>. No network call per id.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.shards.forEach(function (s) { s.r.setAttribute('class', 'box dim'); s.t.textContent = 'just stores the row'; });
+          S.genTitle.textContent = 'Snowflake generator';
+          ctx.log('Layout: 1 + 41 + 10 + 12 = 64 bits', 'info');
+          return ctx.fade(S.segG, 1, 600);
+        },
+      },
+      {
+        title: 'Time: milliseconds since our own epoch',
+        say: 'Now is 2026-10-19 10:00:00.000 UTC. Minus our epoch (2024-01-01) that is about 88.9 billion ms, which fits easily in 41 bits (2^41 ms ≈ 69 years). Time goes in the <b>high</b> bits, so bigger time means bigger id.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var ms = S.now - EPOCH;
+          return ctx.packet(out(ctx, 10), { ms: 600, cls: 'accent', label: String(ms) }).then(function () {
+            showBits(ctx, ms << 22n, ['time']);
+            ctx.log('now − epoch = ' + ms + ' ms → bits 62..22', 'info');
+          });
+        },
+      },
+      {
+        title: 'Worker id: leased, never guessed',
+        say: 'At boot the pod takes a lease on a worker id from etcd (or uses its StatefulSet ordinal). It gets <b>7</b>. Two live pods must never share a worker id, or they will create the same ids.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return ctx.fade(S.etcd, 1, 300)
+            .then(function () { return ctx.packet([[430, 126], [300, 110]], { ms: 700, cls: 'warn', label: 'worker 7' }); })
+            .then(function () {
+              S.worker = 7; setGen(ctx);
+              showBits(ctx, ((S.now - EPOCH) << 22n) | (7n << 12n), ['time', 'worker']);
+              ctx.log('Lease granted: worker 7 (renewed every few seconds)', 'ok');
+            });
+        },
+      },
+      {
+        title: 'Sequence: three ids in the same millisecond',
+        say: 'Three orders arrive within one millisecond. Time and worker are equal, so the sequence counts 0, 1, 2. That keeps them unique. One worker can issue <b>4,096 ids per ms</b>.',
+        run: function (ctx) {
+          var chain = Promise.resolve();
+          [0, 1, 2].forEach(function () {
+            chain = chain.then(function () { return ctx.packet([[160, 144], [160, 296]], { ms: 400, cls: 'ok' }); })
+              .then(function () { generate(ctx); return ctx.wait(150); });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Next millisecond: sequence resets, ids keep growing',
+        say: 'The clock moves to the next ms, so the sequence starts again at 0. The new id is still bigger than all earlier ones, because time sits in the high bits. Ids sort by creation time: great for <code>ORDER BY id</code> and B-tree inserts.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.now += 1n; setGen(ctx);
+          ctx.log('Clock → +1 ms', 'info');
+          return ctx.packet([[160, 144], [160, 296]], { ms: 400, cls: 'ok' }).then(function () { generate(ctx); });
+        },
+      },
+      {
+        title: 'Sequence overflow: wait for the next millisecond',
+        say: 'Under a burst, 4,096 ids were already issued in this ms (seq = 4095). The next call cannot add 1 without wrapping into a duplicate, so the generator <b>spins until the clock ticks</b>, then uses seq 0.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.now += 1n; S.seq = 4095; S.lastMs = S.now; setGen(ctx);
+          ctx.log('Burst: 4,096 ids issued at t+' + (S.now - START) + ' ms', 'warn');
+          generate(ctx);
+          S.genSeq.setAttribute('class', 'mono small fill-bad');
+          return ctx.wait(500).then(function () {
+            S.now += 1n; setGen(ctx);
+            S.genSeq.setAttribute('class', 'mono small');
+            ctx.log('Clock ticked → continue', 'info');
+            generate(ctx);
+          });
+        },
+      },
+      {
+        title: 'The clock jumps backwards',
+        say: 'NTP steps the clock back 5 ms. If the generator trusted it, it could rebuild a (time, seq) pair it already used: a duplicate. So it <b>refuses</b> (or waits) until the clock passes <code>lastMs</code> again.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.now -= 5n; setGen(ctx);
+          S.genClock.setAttribute('class', 'mono small fill-bad');
+          ctx.log('NTP: clock stepped back 5 ms', 'warn');
+          generate(ctx);
+          ctx.flash(S.genBox);
+          return ctx.wait(600).then(function () {
+            S.now += 6n; setGen(ctx);
+            S.genClock.setAttribute('class', 'mono small');
+            ctx.log('Clock passed lastMs again → safe to continue', 'info');
+            generate(ctx);
+          });
+        },
+      },
+      {
+        title: 'Send it as a string, not a number',
+        say: 'A JavaScript <code>Number</code> is exact only up to 2^53 − 1. The id is bigger, so <code>JSON.parse</code> rounds it and the last digits change. Use <code>BigInt</code> in code and send ids as <b>strings</b> in JSON.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var id = S.ids[S.ids.length - 1].id;
+          for (var k = S.ids.length - 1; k >= 0; k--) { if (BigInt(Number(S.ids[k].id)) !== S.ids[k].id) { id = S.ids[k].id; break; } }
+          var asNum = BigInt(Number(id));
+          S.jsA.textContent = 'sent:     ' + id;
+          S.jsB.textContent = 'as Number: ' + asNum;
+          S.jsB.setAttribute('class', 'mono small ' + (asNum === id ? 'fill-ok' : 'fill-bad'));
+          S.jsC.textContent = 'fix: {"id": "' + id + '"}';
+          S.jsC.setAttribute('class', 'mono small fill-ok');
+          ctx.log('Number(id) is off by ' + (asNum - id) + ': a different order!', 'bad');
+          return ctx.fade(S.jsG, 1, 400);
+        },
+      },
+      {
+        title: 'Short links: a small counter in base62',
+        say: 'A short link needs ~7 characters, and a 64-bit id gives 10–11. So a URL shortener takes a counter from a <b>range allocator</b> (this pod leased 2,000,000,001–2,000,001,000) and writes it in base62 by dividing by 62 again and again.',
+        run: function (ctx) {
+          var S = ctx.state, g = S.b62G;
+          var n = 2000000123n, digits = [], chain = Promise.resolve();
+          ctx.el('text', { x: 20, y: 466, class: 'mono small', text: 'n = ' + n }, g);
+          var m = n;
+          while (m > 0n) { digits.push({ q: m / 62n, r: Number(m % 62n) }); m = m / 62n; }
+          digits.forEach(function (d, i) {
+            chain = chain.then(function () {
+              var x = 180 + i * 90;
+              ctx.el('text', { x: x, y: 466, class: 'mono small muted', text: '÷62 r ' + d.r }, g);
+              var cx = 650 - i * 16;
+              var t = ctx.el('text', { x: cx, y: 500, 'text-anchor': 'middle', class: 'title', text: ALPHA[d.r] }, g);
+              ctx.flash(t);
+              return ctx.wait(220);
+            });
+          });
+          return chain.then(function () {
+            var code = digits.map(function (d) { return ALPHA[d.r]; }).reverse().join('');
+            ctx.el('text', { x: 20, y: 500, class: 'mono', text: 'short.ly/' + code }, g);
+            ctx.el('text', { x: 20, y: 524, class: 'mono small muted', text: digits.length + ' chars. 62^7 ≈ 3.5 trillion codes. A Snowflake id would be 10–11 chars.' }, g);
+            ctx.log(n + ' → base62 "' + code + '"', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var wIn = document.getElementById('worker');
+  document.getElementById('gen').addEventListener('click', function () {
+    var ctx = lab.ctx, S = ctx.state;
+    var w = Math.max(0, Math.min(1023, parseInt(wIn.value, 10) || 0));
+    wIn.value = w;
+    if (S.worker !== w) { S.worker = w; ctx.log('You: worker id set to ' + w, 'info'); }
+    var r = generate(ctx);
+    if (r.wait) { S.now += 1n; generate(ctx); }
+  });
+  document.getElementById('tickms').addEventListener('click', function () {
+    var ctx = lab.ctx, S = ctx.state;
+    S.now += 1n; setGen(ctx);
+    ctx.log('You: clock +1 ms', 'info');
+  });
+})();
+</script>
+</body>
+</html>

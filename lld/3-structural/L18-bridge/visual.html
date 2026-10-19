@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L18 Bridge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .inh { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .stage .bridge { stroke: var(--accent); stroke-width: 4; }
+  .stage .link { stroke: var(--signal); stroke-width: 2.5; fill: none; }
+  .stage .link.dim { stroke: var(--line); stroke-width: 1.4; stroke-dasharray: 4 4; }
+  .try { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+  .try label { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .try output { font: 12.5px var(--font-mono); color: var(--ink); min-width: 1.5em; }
+  .count { font: 13px var(--font-mono); margin: 4px 0 10px; }
+  .count b.bad { color: var(--bad); } .count b.ok { color: var(--ok); }
+  .out { font: 12.5px/1.5 var(--font-mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-height: 2.6em; overflow-wrap: anywhere; }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L18 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Bridge: split two axes into two hierarchies</h1>
+    <p class="lede">Message kind and delivery channel change independently. Inheritance on both gives one class per pair (M × N). Bridge gives the kind a <code>channel</code> field, so each side grows on its own (M + N) and the channel can be switched at runtime.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="A grid of subclasses collapses into two hierarchies joined by a bridge"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--accent)"></i>Bridge reference</span>
+        <span><i style="background: var(--signal)"></i>Message in flight</span>
+        <span><i style="background: var(--bad)"></i>Duplicated / failing</span>
+        <span><i style="background: var(--ok)"></i>Delivered</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The bridge in code</h3>
+<pre class="code">interface Channel {                    // implementor
+  maxLength: number;
+  deliver(to: string, body: string): Promise&lt;void&gt;;
+}
+
+abstract class Notification {          // abstraction
+  constructor(protected channel: Channel) {}   // the bridge
+  setChannel(c: Channel) { this.channel = c; }
+  protected abstract body(): string;
+  send(to: string) {
+    const text = this.body().slice(0, this.channel.maxLength);
+    return this.channel.deliver(to, text);
+  }
+}
+
+class OtpNotification extends Notification {
+  protected body() { return `OTP ${this.code}. Valid 5 min.`; }
+}
+new OtpNotification(new SmsChannel(), '482913').send(user);</pre>
+    </div>
+    <div class="note">
+      <h3>Try it: count the classes, send a message</h3>
+      <div class="try">
+        <label>Kinds (M) <input id="t-m" type="range" min="1" max="10" value="3"><output id="t-mv">3</output></label>
+        <label>Channels (N) <input id="t-n" type="range" min="1" max="10" value="4"><output id="t-nv">4</output></label>
+      </div>
+      <div class="count" id="t-count"></div>
+      <div class="try">
+        <label>Kind <select id="t-kind"><option value="otp">OtpNotification</option><option value="alert">OrderAlert</option><option value="mkt">Marketing</option><option value="rem">Reminder</option></select></label>
+        <label>Channel <select id="t-ch"><option value="email">EmailChannel</option><option value="sms">SmsChannel</option><option value="push">PushChannel</option><option value="wa">WhatsAppChannel</option></select></label>
+        <button class="btn primary" id="t-send" type="button">send()</button>
+      </div>
+      <div class="out" id="t-out">Pick any kind with any channel. No class like OtpSms is needed.</div>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"Notifications vary on two axes: what we send and how we deliver it. Inheritance on both gives M × N classes like OtpSms, with SMS code copied in each. So I use Bridge: Notification holds a Channel. Kinds own the content and rules; channels own delivery. A new channel or a new kind is one class, and I can switch channels at runtime for fallback."</p>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>5 report types × 4 export formats: classes with inheritance vs Bridge?</summary><div>20 vs 9.</div></details>
+      <details class="qa"><summary>Bridge vs Adapter?</summary><div>Bridge is chosen up front so two hierarchies can grow independently. Adapter is a retrofit that makes one existing class fit an interface you already have. Concrete channels are often adapters over vendor SDKs.</div></details>
+      <details class="qa"><summary>Bridge vs Strategy?</summary><div>Strategy swaps one algorithm and usually only the strategy side grows. Bridge splits a whole class into two hierarchies, and both sides grow.</div></details>
+      <details class="qa"><summary>SMS has a 160-character limit. Where does that knowledge live?</summary><div>In the channel (maxLength). The abstraction reads it. Never write instanceof SmsChannel inside Notification.</div></details>
+    </div>
+    <div class="note wide">
+      <h3>Bridge vs look-alikes</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Bridge</th><th>Adapter</th><th>Strategy</th></tr></thead>
+          <tbody>
+            <tr><td>Applied</td><td>Up front, at design time</td><td>After the fact</td><td>Up front</td></tr>
+            <tr><td>Problem</td><td>Two axes that grow independently</td><td>Interface mismatch</td><td>One swappable algorithm</td></tr>
+            <tr><td>Both sides extended?</td><td>Yes</td><td>No (one adaptee)</td><td>Usually only strategies</td></tr>
+            <tr><td>Smell that calls for it</td><td>Class names glued from two words: OtpSms, PdfInvoice</td><td>A vendor SDK with a different shape</td><td>A switch on a "type" inside one method</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var KINDS = ['Otp', 'Alert', 'Mkt'];
+  var CH = ['Email', 'Sms', 'Push', 'WhatsApp'];
+  var GX = 120, GY = 92, GW = 112, GH = 34;
+  function gx(c) { return GX + c * 130; }
+  function gy(r) { return GY + r * 58; }
+  // after-split layout
+  var LX = 50, RX = 470, BW = 190, BH = 34;
+  function ky(i) { return 150 + i * 56; }
+  function cyy(i) { return 150 + i * 56; }
+
+  function box(ctx, parent, x, y, w, h, name, sub, cls) {
+    var g = ctx.group({ opacity: 0 }, parent);
+    ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box' }, g);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 6, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: x + w / 2, y: y + (sub ? 15 : 21), 'text-anchor': 'middle', class: 'b', text: name }, g);
+    if (sub) g.s = ctx.el('text', { x: x + w / 2, y: y + 28, 'text-anchor': 'middle', class: 'mono small muted', text: sub }, g);
+    return g;
+  }
+  function counter(ctx, t, c) { ctx.state.cnt.textContent = t; ctx.state.cnt.setAttribute('class', 'title ' + (c || '')); }
+  function link(ctx, ki, ci, cls) {
+    var x1 = LX + BW, y1 = ky(ki) + BH / 2, x2 = RX, y2 = cyy(ci) + BH / 2;
+    return ctx.el('path', { d: 'M' + x1 + ',' + y1 + ' C' + (x1 + 110) + ',' + y1 + ' ' + (x2 - 110) + ',' + y2 + ' ' + x2 + ',' + y2, class: 'link ' + (cls || '') }, ctx.state.links);
+  }
+  function linkPts(ki, ci) {
+    var x1 = LX + BW, y1 = ky(ki) + BH / 2, x2 = RX, y2 = cyy(ci) + BH / 2, pts = [];
+    for (var t = 0; t <= 1.0001; t += 0.1) {
+      var a = Math.pow(1 - t, 3), b = 3 * Math.pow(1 - t, 2) * t, c = 3 * (1 - t) * t * t, d = t * t * t;
+      pts.push([a * x1 + b * (x1 + 110) + c * (x2 - 110) + d * x2, a * y1 + b * y1 + c * y2 + d * y2]);
+    }
+    return pts;
+  }
+  function out(ctx, t, c) { ctx.state.out.textContent = t; ctx.state.out.setAttribute('class', 'mono small ' + (c || '')); }
+
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Notifications vary on two axes', say: 'Kind: OTP, order alert, marketing. Channel: email, SMS, push. First model both axes with inheritance, then split them with a bridge.' },
+    setup: function (ctx) {
+      ctx.state.cnt = ctx.el('text', { x: 20, y: 34, class: 'title', text: '' });
+      ctx.state.grid = ctx.group();
+      ctx.state.cells = {};
+      ctx.el('text', { x: 20, y: 70, class: 'mono small muted', text: 'Before: class Notification → one subclass per (kind, channel) pair' }, ctx.state.grid);
+      KINDS.forEach(function (k, r) {
+        ctx.el('text', { x: 20, y: gy(r) + 22, class: 'mono small muted', text: k + ' ×' }, ctx.state.grid);
+        CH.forEach(function (c, ci) { ctx.state.cells[r + ':' + ci] = box(ctx, ctx.state.grid, gx(ci), gy(r), GW, GH, k + c, '', ''); });
+      });
+      ctx.state.split = ctx.group({ opacity: 0 });
+      var sp = ctx.state.split;
+      ctx.el('text', { x: LX, y: 70, class: 'mono small muted', text: 'Abstraction: WHAT to send' }, sp);
+      ctx.el('text', { x: RX, y: 70, class: 'mono small muted', text: 'Implementor: HOW to deliver' }, sp);
+      ctx.state.absHead = box(ctx, sp, LX, 80, BW, 40, 'Notification', '# channel: Channel', 'accent');
+      ctx.state.impHead = box(ctx, sp, RX, 80, BW, 40, '«interface» Channel', 'deliver(to, body)', 'accent');
+      ctx.state.absHead.setAttribute('opacity', 1); ctx.state.impHead.setAttribute('opacity', 1);
+      ctx.state.bridge = ctx.el('line', { x1: LX + BW, y1: 100, x2: RX, y2: 100, class: 'bridge' }, sp);
+      ctx.el('text', { x: (LX + BW + RX) / 2, y: 92, 'text-anchor': 'middle', class: 'mono small', text: 'bridge' }, sp);
+      ctx.state.inhL = ctx.el('path', { d: 'M' + (LX - 14) + ',' + 120 + ' V' + (ky(2) + BH / 2), class: 'inh' }, sp);
+      ctx.state.inhR = ctx.el('path', { d: 'M' + (RX - 14) + ',' + 120 + ' V' + (cyy(3) + BH / 2), class: 'inh' }, sp);
+      var kn = ['OtpNotification', 'OrderAlert', 'Marketing'];
+      ctx.state.kinds = kn.map(function (n, i) {
+        var g = box(ctx, sp, LX, ky(i), BW, BH, n, '', ''); g.setAttribute('opacity', 1);
+        ctx.el('line', { x1: LX - 14, y1: ky(i) + BH / 2, x2: LX, y2: ky(i) + BH / 2, class: 'inh' }, sp);
+        return g;
+      });
+      var cn = [['EmailChannel', 'max 100k'], ['SmsChannel', 'max 160'], ['PushChannel', 'max 120'], ['WhatsAppChannel', 'max 4096']];
+      ctx.state.chans = cn.map(function (n, i) {
+        var g = box(ctx, sp, RX, cyy(i), BW, BH, n[0], n[1], ''); g.setAttribute('opacity', 1);
+        ctx.el('line', { x1: RX - 14, y1: cyy(i) + BH / 2, x2: RX, y2: cyy(i) + BH / 2, class: 'inh' }, sp);
+        return g;
+      });
+      ctx.state.links = ctx.group();
+      ctx.state.out = ctx.el('text', { x: 20, y: 432, class: 'mono small', text: '' });
+    },
+    steps: [
+      {
+        title: 'Inheritance on both axes: 3 × 3 = 9 classes',
+        say: 'Each pair gets its own subclass: OtpEmail, OtpSms, AlertPush... The class name is two words glued together. That is the smell.',
+        run: function (ctx) {
+          var ps = [];
+          KINDS.forEach(function (k, r) { [0, 1, 2].forEach(function (ci) { ps.push(ctx.wait((r * 3 + ci) * 60).then(function () { return ctx.fade(ctx.state.cells[r + ':' + ci], 1, 250); })); }); });
+          counter(ctx, 'classes: 3 × 3 = 9', 'fill-warn');
+          ctx.log('9 subclasses for 3 kinds × 3 channels', 'warn');
+          return Promise.all(ps);
+        },
+      },
+      {
+        title: 'The SMS code is copied three times',
+        say: 'OtpSms, AlertSms and MktSms all contain the same gateway call and the same 160-character trimming. Fix a bug in one, the other two keep it.',
+        run: function (ctx) {
+          [0, 1, 2].forEach(function (r) { var c = ctx.state.cells[r + ':1']; c.r.setAttribute('class', 'box bad'); ctx.flash(c.r); });
+          ctx.log('SMS delivery duplicated in 3 classes', 'bad');
+          return ctx.wait(300);
+        },
+      },
+      {
+        title: 'Add WhatsApp: three more classes',
+        say: 'One new channel means one new subclass per kind. Adding a fourth kind later would cost four more. Growth is M × N.',
+        run: function (ctx) {
+          counter(ctx, 'classes: 3 × 4 = 12', 'fill-bad');
+          ctx.log('+WhatsApp -> OtpWhatsApp, AlertWhatsApp, MktWhatsApp', 'bad');
+          return Promise.all([0, 1, 2].map(function (r) {
+            var c = ctx.state.cells[r + ':3']; c.r.setAttribute('class', 'box signal');
+            return ctx.wait(r * 120).then(function () { return ctx.fade(c, 1, 300); });
+          }));
+        },
+      },
+      {
+        title: 'Split into two hierarchies joined by a reference',
+        say: 'Kinds go left (the abstraction). Channels go right (the implementor). <code>Notification</code> holds a <code>channel</code> field: that field is the bridge. 3 + 4 = 7 classes.',
+        run: function (ctx) {
+          return ctx.fade(ctx.state.grid, 0, 450).then(function () {
+            ctx.state.grid.remove();
+            counter(ctx, 'classes: 3 + 4 = 7', 'fill-ok');
+            ctx.log('Notification --channel--> Channel', 'ok');
+            return ctx.fade(ctx.state.split, 1, 500);
+          }).then(function () { ctx.flash(ctx.state.bridge); });
+        },
+      },
+      {
+        title: 'Runtime: an OTP over SMS',
+        say: '<code>new OtpNotification(sms, "482913").send(user)</code>. The kind builds the text, then calls <code>channel.deliver()</code> across the bridge. The SMS class only knows delivery.',
+        run: function (ctx) {
+          var l = link(ctx, 0, 1);
+          l.setAttribute('opacity', 0);
+          ctx.state.l01 = l;
+          ctx.log('otp.channel = SmsChannel', 'info');
+          return ctx.fade(l, 1, 300).then(function () {
+            ctx.flash(ctx.state.kinds[0].r);
+            ctx.log('OtpNotification.body() -> "OTP 482913. Valid 5 min."', 'info');
+            return ctx.packet(linkPts(0, 1), { ms: 800, label: 'body' });
+          }).then(function () {
+            ctx.state.chans[1].r.setAttribute('class', 'box ok');
+            out(ctx, '[sms -> pappu] OTP 482913. Valid 5 min.', 'fill-ok');
+            ctx.log('SmsChannel.deliver() ok', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Same channel, different kind: the limit lives in the channel',
+        say: 'An order alert also goes over SMS. Its text is longer than the channel allows, so <code>send()</code> trims it to <code>channel.maxLength</code>. No <code>instanceof SmsChannel</code> anywhere.',
+        run: function (ctx) {
+          ctx.state.chans[1].r.setAttribute('class', 'box');
+          var l = link(ctx, 1, 1); l.setAttribute('opacity', 0);
+          return ctx.fade(l, 1, 300).then(function () {
+            return ctx.packet(linkPts(1, 1), { ms: 800, label: 'long body' });
+          }).then(function () {
+            ctx.state.chans[1].r.setAttribute('class', 'box ok');
+            out(ctx, '[sms] Order ORD-77 is out for delivery. Arriving by 7:40 pm. Tr... (trimmed to maxLength)', 'fill-warn');
+            ctx.log('trimmed to SmsChannel.maxLength', 'warn');
+            return ctx.fade(l, 0.25, 300);
+          });
+        },
+      },
+      {
+        title: 'Add a Reminder kind: one class, every channel',
+        say: 'A new kind extends <code>Notification</code> and gets all four channels for free. With inheritance it would have cost four classes; here it costs one.',
+        run: function (ctx) {
+          var g = box(ctx, ctx.state.split, LX, ky(3), BW, BH, 'Reminder', '', 'signal');
+          ctx.el('line', { x1: LX - 14, y1: ky(3) + BH / 2, x2: LX, y2: ky(3) + BH / 2, class: 'inh' }, ctx.state.split);
+          ctx.state.inhL.setAttribute('d', 'M' + (LX - 14) + ',120 V' + (ky(3) + BH / 2));
+          ctx.state.kinds.push(g);
+          counter(ctx, 'classes: 4 + 4 = 8   (inheritance: 16)', 'fill-ok');
+          ctx.log('+Reminder: 1 class (inheritance would add 4)', 'ok');
+          return ctx.fade(g, 1, 350).then(function () {
+            var ls = [0, 1, 2, 3].map(function (ci) { var l = link(ctx, 3, ci, 'dim'); l.setAttribute('opacity', 0); return l; });
+            return Promise.all(ls.map(function (l, i) { return ctx.wait(i * 100).then(function () { return ctx.fade(l, 1, 250); }); }));
+          });
+        },
+      },
+      {
+        title: 'SMS gateway is down',
+        say: 'The next OTP goes out over SMS and the provider returns 503. With inheritance, OtpSms is stuck with SMS forever. Here the channel is just a field.',
+        run: function (ctx) {
+          ctx.state.chans[1].r.setAttribute('class', 'box bad');
+          ctx.state.chans[1].s.textContent = '503 DOWN';
+          ctx.state.chans[1].s.setAttribute('class', 'mono small fill-bad');
+          ctx.state.l01.setAttribute('class', 'link');
+          return ctx.packet(linkPts(0, 1), { ms: 800, label: 'OTP 771204', cls: 'bad' }).then(function () {
+            ctx.flash(ctx.state.chans[1].r);
+            out(ctx, 'SmsChannel.deliver() threw: SMS gateway 503', 'fill-bad');
+            ctx.log('sms failed: 503', 'bad');
+          });
+        },
+      },
+      {
+        title: 'setChannel(whatsapp): same OTP, new route',
+        say: 'The fallback loop calls <code>otp.setChannel(whatsApp)</code> and sends again. The OTP rules (text, expiry) did not change; only the delivery side did. Both hierarchies kept growing independently.',
+        run: function (ctx) {
+          return ctx.fade(ctx.state.l01, 0, 300).then(function () {
+            var l = link(ctx, 0, 3); l.setAttribute('opacity', 0);
+            ctx.log('otp.setChannel(WhatsAppChannel)', 'info');
+            return ctx.fade(l, 1, 300);
+          }).then(function () {
+            return ctx.packet(linkPts(0, 3), { ms: 800, label: 'OTP 771204' });
+          }).then(function () {
+            ctx.state.chans[3].r.setAttribute('class', 'box ok');
+            out(ctx, '[whatsapp -> +91-98xxxx] OTP 771204. Valid 5 min.', 'fill-ok');
+            ctx.log('delivered via whatsapp', 'ok');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it ----
+  var m = document.getElementById('t-m'), n = document.getElementById('t-n');
+  function count() {
+    document.getElementById('t-mv').textContent = m.value;
+    document.getElementById('t-nv').textContent = n.value;
+    document.getElementById('t-count').innerHTML = 'inheritance: ' + m.value + ' × ' + n.value + ' = <b class="bad">' + (m.value * n.value) + '</b> classes · bridge: ' + m.value + ' + ' + n.value + ' = <b class="ok">' + (+m.value + +n.value) + '</b> classes';
+  }
+  m.addEventListener('input', count); n.addEventListener('input', count); count();
+  var BODY = { otp: 'OTP 482913. Valid 5 min. Never share it.', alert: 'Order ORD-77 is out for delivery. Arriving by 7:40 pm. Track it live in the app, or call the rider if you are not home.', mkt: 'Weekend sale: flat 20% off on all shoes and sandals this Saturday and Sunday only. Reply STOP to opt out.', rem: 'Reminder: EMI due tomorrow.' };
+  var MAX = { email: 100000, sms: 60, push: 120, wa: 4096 };
+  document.getElementById('t-send').addEventListener('click', function () {
+    var k = document.getElementById('t-kind').value, c = document.getElementById('t-ch').value;
+    var b = BODY[k], text = b.length > MAX[c] ? b.slice(0, MAX[c] - 3) + '...' : b;
+    document.getElementById('t-out').textContent = '[' + c + ' -> pappu] ' + text + (text !== b ? '   (trimmed to maxLength ' + MAX[c] + ')' : '');
+  });
+})();
+</script>
+</body>
+</html>

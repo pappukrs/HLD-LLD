@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>H08 Load Balancing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H08 · Scaling</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Load balancing: algorithms, health checks, draining</h1>
+    <p class="lede">A load balancer spreads requests over many servers and stops sending to the ones that are sick. The algorithm decides who gets the next request: in turn, the least busy, or always the same server for the same client.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 440" role="img" aria-label="Three clients, a load balancer and four servers with in-flight and served counters"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="algo">Algorithm
+          <select id="algo">
+            <option value="rr">Round robin</option>
+            <option value="lc">Least connections</option>
+            <option value="p2">Power of two choices</option>
+            <option value="ip">IP hash (sticky)</option>
+          </select>
+        </label>
+        <button class="btn" type="button" id="send1">Send request</button>
+        <button class="btn" type="button" id="sendSlow">Send slow request</button>
+        <button class="btn" type="button" id="toggleS3">Fail S3</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Request</span>
+        <span><i style="background: var(--accent)"></i>In-flight connection</span>
+        <span><i style="background: var(--ok)"></i>Health check passed</span>
+        <span><i style="background: var(--bad)"></i>Failed / removed</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I'll put an L7 load balancer in front of stateless app servers. Least connections handles uneven request cost better than round robin. Health checks remove bad servers in seconds, and connection draining lets me deploy without dropping requests. I avoid sticky sessions by keeping session state in Redis; if I need affinity, I use consistent hashing so adding a server moves few clients."</p>
+    </div>
+    <div class="note">
+      <h3>L4 vs L7</h3>
+      <ul>
+        <li><b>L4</b> (TCP/UDP): routes by IP and port, very fast, cannot see the URL. Example: AWS NLB.</li>
+        <li><b>L7</b> (HTTP): can route by path, header or cookie, terminate TLS, retry, and rate limit. Example: ALB, Nginx, Envoy.</li>
+        <li>The LB itself must not be a single point of failure: run a pair (active-passive with a floating IP) or use a managed, multi-AZ one.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Which algorithm when</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Algorithm</th><th>How it picks</th><th>Good for</th><th>Weak spot</th></tr></thead>
+          <tbody>
+            <tr><td>Round robin</td><td>Next server in a fixed order</td><td>Similar servers, similar requests</td><td>Ignores load: slow requests pile up on one server</td></tr>
+            <tr><td>Weighted round robin</td><td>Order with more turns for bigger servers</td><td>Mixed server sizes, canary (5% weight)</td><td>Still blind to live load</td></tr>
+            <tr><td>Least connections</td><td>Fewest in-flight connections</td><td>Uneven request cost, long connections (WebSocket)</td><td>LB must track counts; a new empty server gets a burst</td></tr>
+            <tr><td>Power of two choices</td><td>Pick 2 at random, send to the less busy</td><td>Many LBs with partial knowledge</td><td>Slightly less exact than full least-conn</td></tr>
+            <tr><td>IP hash / sticky cookie</td><td>Same client → same server</td><td>In-memory sessions, local caches</td><td>Hot clients, uneven load; with <code>% N</code> most clients move when N changes</td></tr>
+            <tr><td>Consistent hashing</td><td>Hash ring over servers</td><td>Cache affinity with servers joining and leaving</td><td>Needs virtual nodes for even load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why does round robin fail when some requests are slow?</summary><div>It counts turns, not work. A server with three long reports still gets its turn, so its queue grows while others are idle. Least connections looks at in-flight work instead.</div></details>
+      <details class="qa"><summary>What is the difference between liveness and readiness checks?</summary><div>Liveness asks "is the process alive?" (restart it if not). Readiness asks "can it take traffic now?" (DB connected, warm-up done). The LB should use readiness, so a starting server gets no traffic yet.</div></details>
+      <details class="qa"><summary>How do you deploy with zero dropped requests?</summary><div>Mark the server as draining: the LB sends no new requests, waits for in-flight ones to finish (a deregistration delay, often 30 s), then removes it. Deploy, wait for readiness, add it back. Repeat one server at a time.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Notes: <a href="README.md">README.md</a> · simulation: <a href="demo.ts">demo.ts</a></li>
+        <li>Run it: <a href="hands-on/README.md">hands-on/</a> (Nginx upstreams, a Node load balancer, Kubernetes Service)</li>
+        <li>Related: <a href="../H07-scaling-stateless/visual.html">H07 Scaling</a>, <a href="../../3-databases/H17-consistent-hashing/visual.html">H17 Consistent hashing</a></li>
+        <li>Used in: <a href="../../case-studies/06-chat-system/README.md">Chat system</a> (least-conn for WebSockets)</li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var ALGO_NAME = { rr: 'round robin', lc: 'least connections', p2: 'power of two', ip: 'IP hash' };
+  var P2_PAIRS = [[0, 2], [1, 3], [0, 1], [2, 3], [1, 2], [0, 3], [3, 1], [2, 0]];
+  // Fixed demo hashes so IP hash is predictable.
+  var CLIENTS = [
+    { id: 'C1', ip: '10.0.0.7', hash: 7, y: 92 },
+    { id: 'C2', ip: '10.0.0.13', hash: 13, y: 192 },
+    { id: 'C3', ip: '10.0.0.22', hash: 22, y: 292 },
+  ];
+  var LB = { x: 280, y: 180, w: 150, h: 84 };
+  var SX = 560, SW = 184, SH = 72;
+  function sy(i) { return 22 + i * 102; }
+
+  function seq(ctx, fns) {
+    var s = ctx.state;
+    return fns.reduce(function (p, f) {
+      return p.then(function () { if (ctx.state !== s) return; return f(); });
+    }, Promise.resolve());
+  }
+
+  function pathTo(ci, si) {
+    var c = CLIENTS[ci];
+    return [[150, c.y + 28], [LB.x, LB.y + LB.h / 2], [LB.x + LB.w, LB.y + LB.h / 2], [SX, sy(si) + SH / 2]];
+  }
+  function lbToServer(si) { return [[LB.x + LB.w, LB.y + LB.h / 2], [SX, sy(si) + SH / 2]]; }
+
+  function render(ctx, s) {
+    var v = s.v;
+    v.inflight.textContent = 'in flight: ' + s.active;
+    v.served.textContent = 'served: ' + s.total;
+    v.bar.setAttribute('width', Math.min(s.active, 6) * 14);
+    var status = !s.healthy ? 'DOWN' : s.draining ? 'draining' : 'healthy';
+    v.status.textContent = status;
+    v.status.setAttribute('class', 'mono small ' + (!s.healthy ? 'fill-bad' : s.draining ? 'fill-signal' : 'fill-ok'));
+    v.dot.setAttribute('class', 'dot ' + (!s.healthy ? 'bad' : s.draining ? 'signal' : 'ok'));
+    v.rect.setAttribute('class', 'box ' + (!s.healthy ? 'bad dim' : s.draining ? 'signal' : ''));
+    v.wire.setAttribute('class', 'wire ' + (!s.healthy ? 'bad' : s.draining ? 'dashed' : ''));
+  }
+
+  function setAlgo(ctx, algo) {
+    ctx.state.algo = algo;
+    ctx.state.lbSub.textContent = ALGO_NAME[algo];
+    var sel = document.getElementById('algo');
+    if (sel) sel.value = algo;
+  }
+
+  function pool(S) { return S.servers.filter(function (s) { return s.healthy && !s.draining; }); }
+
+  function pick(S, ci) {
+    var p = pool(S);
+    if (!p.length) return null;
+    if (S.algo === 'rr') { var s = p[S.rr % p.length]; S.rr++; return s; }
+    if (S.algo === 'ip') return p[CLIENTS[ci].hash % p.length];
+    if (S.algo === 'p2') {
+      // Two "random" picks (fixed list so Prev replays the same way); keep the less busy one.
+      var pr = P2_PAIRS[S.p2++ % P2_PAIRS.length];
+      var a = p[pr[0] % p.length], b = p[pr[1] % p.length];
+      S.lastPair = a.id + ' vs ' + b.id;
+      return b.active < a.active ? b : a;
+    }
+    // least connections; ties broken by rotating start
+    var best = null;
+    for (var k = 0; k < p.length; k++) {
+      var c = p[(S.lcStart + k) % p.length];
+      if (!best || c.active < best.active) best = c;
+    }
+    S.lcStart = (p.indexOf(best) + 1) % p.length;
+    return best;
+  }
+
+  // Send one request. slow = it stays in flight.
+  function send(ctx, ci, slow) {
+    var S = ctx.state;
+    var s = pick(S, ci);
+    var c = CLIENTS[ci];
+    if (!s) {
+      ctx.log(c.id + ' → no healthy server: 503', 'bad');
+      return ctx.packet([[150, c.y + 28], [LB.x, LB.y + LB.h / 2]], { ms: 400, cls: 'bad' });
+    }
+    s.active++; s.total++;
+    if (slow) s.slow++;
+    render(ctx, s);
+    var how = S.algo === 'ip' ? 'hash ' + c.hash + ' % ' + pool(S).length : S.algo === 'p2' ? 'picked ' + S.lastPair : ALGO_NAME[S.algo];
+    ctx.log(c.id + ' → ' + s.id + (slow ? ' (slow)' : '') + '  [' + how + ']', slow ? 'warn' : 'info');
+    return ctx.packet(pathTo(ci, s.idx), { ms: 700, cls: slow ? 'bad' : '' }).then(function () {
+      if (ctx.state !== S) return;
+      ctx.flash(s.v.g);
+      if (!slow) { s.active--; render(ctx, s); }
+    });
+  }
+
+  // Send a list of [clientIndex, slow] with a stagger.
+  function burst(ctx, list, gap) {
+    var S = ctx.state;
+    var all = [];
+    return list.reduce(function (p, item, i) {
+      return p.then(function () {
+        if (ctx.state !== S) return;
+        all.push(send(ctx, item[0], item[1]));
+        return ctx.wait(gap || 160);
+      });
+    }, Promise.resolve()).then(function () { return Promise.all(all); });
+  }
+
+  function finishSlow(ctx, s) {
+    s.active -= s.slow; s.slow = 0;
+    render(ctx, s);
+  }
+
+  function healthCheck(ctx, failIds) {
+    var S = ctx.state;
+    return Promise.all(S.servers.map(function (s) {
+      var bad = failIds.indexOf(s.id) >= 0;
+      return ctx.packet(lbToServer(s.idx), { ms: 450, r: 5, cls: 'accent' }).then(function () {
+        if (ctx.state !== S) return;
+        return ctx.packet(lbToServer(s.idx).reverse(), { ms: 450, r: 5, cls: bad ? 'bad' : 'ok' });
+      });
+    }));
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three clients, four servers',
+      say: 'Each server shows how many requests are <b>in flight</b> now and how many it has <b>served</b>. We try three algorithms, then break a server and drain another. Use the "Try it" row at any time.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.algo = 'rr'; S.rr = 0; S.lcStart = 0; S.p2 = 0;
+      S.servers = ['S1', 'S2', 'S3', 'S4'].map(function (id, i) {
+        return { id: id, idx: i, active: 0, total: 0, slow: 0, healthy: true, draining: false };
+      });
+      CLIENTS.forEach(function (c) {
+        ctx.el('polyline', { points: [[150, c.y + 28], [LB.x, LB.y + LB.h / 2]].join(' '), class: 'wire' });
+        ctx.el('rect', { x: 16, y: c.y, width: 134, height: 56, rx: 8, class: 'box' });
+        ctx.el('text', { x: 30, y: c.y + 23, class: 'title', text: c.id });
+        ctx.el('text', { x: 30, y: c.y + 42, class: 'mono small muted', text: c.ip });
+      });
+      S.servers.forEach(function (s) {
+        var y = sy(s.idx);
+        var wire = ctx.el('polyline', { points: lbToServer(s.idx).join(' '), class: 'wire' });
+        var g = ctx.group();
+        var rect = ctx.el('rect', { x: SX, y: y, width: SW, height: SH, rx: 8, class: 'box' }, g);
+        ctx.el('text', { x: SX + 14, y: y + 22, class: 'title', text: s.id }, g);
+        var dot = ctx.el('circle', { cx: SX + 52, cy: y + 17, r: 5, class: 'dot ok' }, g);
+        var status = ctx.el('text', { x: SX + SW - 12, y: y + 21, 'text-anchor': 'end', class: 'mono small fill-ok', text: 'healthy' }, g);
+        var inflight = ctx.el('text', { x: SX + 14, y: y + 42, class: 'mono small', text: '' }, g);
+        var served = ctx.el('text', { x: SX + 110, y: y + 42, class: 'mono small muted', text: '' }, g);
+        var bar = ctx.el('rect', { x: SX + 14, y: y + 52, width: 0, height: 9, rx: 2, class: 'fill-accent' }, g);
+        s.v = { g: g, rect: rect, dot: dot, status: status, inflight: inflight, served: served, bar: bar, wire: wire };
+        render(ctx, s);
+      });
+      ctx.el('rect', { x: LB.x, y: LB.y, width: LB.w, height: LB.h, rx: 10, class: 'box accent' });
+      ctx.el('text', { x: LB.x + LB.w / 2, y: LB.y + 32, 'text-anchor': 'middle', class: 'title', text: 'Load balancer' });
+      S.lbSub = ctx.el('text', { x: LB.x + LB.w / 2, y: LB.y + 54, 'text-anchor': 'middle', class: 'mono small muted', text: '' });
+      setAlgo(ctx, 'rr');
+      updateToggle(S);
+    },
+    steps: [
+      {
+        title: 'Round robin: everyone takes a turn',
+        say: 'The LB sends request 1 to S1, request 2 to S2, and so on, then starts again. It needs no state about the servers. If all requests cost about the same, the load is even.',
+        run: function (ctx) {
+          setAlgo(ctx, 'rr');
+          return burst(ctx, [[0], [1], [2], [0], [1], [2], [0], [1]]);
+        },
+      },
+      {
+        title: 'Slow requests break round robin',
+        say: 'Some requests are slow, like a report export. Round robin does not look at load, so it keeps giving S2 its turn even while S2 is busy. The in-flight bar on S2 grows while the others are idle.',
+        run: function (ctx) {
+          setAlgo(ctx, 'rr');
+          ctx.state.rr = 1;
+          return burst(ctx, [[0, true], [1], [2], [0], [1, true], [2], [0], [1], [2, true]], 140);
+        },
+      },
+      {
+        title: 'Least connections: send to the least busy',
+        say: 'Now the LB counts in-flight connections per server and picks the smallest. S2 is busy with slow work, so new requests go to S1, S3 and S4. This fits uneven requests and long connections like WebSockets.',
+        run: function (ctx) {
+          setAlgo(ctx, 'lc');
+          return burst(ctx, [[0], [1], [2], [0], [1], [2]]);
+        },
+      },
+      {
+        title: 'Power of two choices: sample two, pick the less busy',
+        say: 'Big fleets have many LB nodes, each with only a partial view. If all of them send to "the least busy server" they herd onto it together. Instead, each LB picks two servers at random and sends to the less busy one. Almost as good as least connections, with almost no shared state.',
+        run: function (ctx) {
+          setAlgo(ctx, 'p2');
+          return burst(ctx, [[0], [1], [2], [0], [1], [2]]);
+        },
+      },
+      {
+        title: 'IP hash: the same client sticks to one server',
+        say: 'The LB computes <code>hash(client IP) % 4</code>. C1 always lands on S4, C2 on S2, C3 on S3. This helps in-memory sessions or local caches. But load follows clients, so one heavy client makes one hot server.',
+        run: function (ctx) {
+          var S = ctx.state;
+          S.servers.forEach(function (s) { finishSlow(ctx, s); });
+          ctx.log('Slow requests finished', 'ok');
+          setAlgo(ctx, 'ip');
+          return burst(ctx, [[0], [1], [2], [0], [1], [2]]);
+        },
+      },
+      {
+        title: 'Health check fails: S3 is removed',
+        say: 'Every few seconds the LB calls <code>GET /health</code> on each server. S3 fails 3 checks in a row (the unhealthy threshold), so the LB takes it out of the pool. Users stop seeing errors from S3 within seconds.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var s3 = S.servers[2];
+          return seq(ctx, [
+            function () { return healthCheck(ctx, ['S3']); },
+            function () { ctx.log('S3 health check failed (1/3)', 'warn'); return healthCheck(ctx, ['S3']); },
+            function () { ctx.log('S3 health check failed (2/3)', 'warn'); return healthCheck(ctx, ['S3']); },
+            function () { s3.healthy = false; render(ctx, s3); updateToggle(S); ctx.log('S3 failed 3/3: removed from pool', 'bad'); },
+          ]);
+        },
+      },
+      {
+        title: 'Traffic moves to the healthy servers',
+        say: 'With round robin, requests now cycle over S1, S2 and S4 only. Note the IP-hash problem: with <code>% 3</code> instead of <code>% 4</code>, most clients would map to a new server and lose their session. Consistent hashing avoids that.',
+        run: function (ctx) {
+          setAlgo(ctx, 'rr');
+          ctx.state.rr = 0;
+          return burst(ctx, [[0], [1], [2], [0], [1], [2]]);
+        },
+      },
+      {
+        title: 'Draining S4 for a deploy',
+        say: 'We want to deploy S4. We mark it <b>draining</b>: it gets no new requests, but its 2 in-flight slow requests may finish. Killing it now would drop them. New traffic goes to S1 and S2.',
+        run: function (ctx) {
+          var S = ctx.state;
+          var s4 = S.servers[3];
+          s4.active += 2; s4.slow += 2;
+          s4.draining = true;
+          render(ctx, s4);
+          ctx.log('S4 draining (deregistration delay 30 s), 2 in flight', 'warn');
+          return burst(ctx, [[0], [1], [2], [0]]);
+        },
+      },
+      {
+        title: 'In-flight work finishes, then S4 leaves',
+        say: 'The slow requests on S4 complete and the in-flight count reaches 0. Only now is S4 removed and restarted with the new version. No user saw an error. Repeat one server at a time for a rolling deploy.',
+        run: function (ctx) {
+          var s4 = ctx.state.servers[3];
+          return seq(ctx, [
+            function () { return ctx.packet(lbToServer(3).reverse(), { ms: 500, cls: 'ok', label: 'done' }); },
+            function () { finishSlow(ctx, s4); ctx.log('S4 in flight: 0. Safe to stop and deploy', 'ok'); return ctx.wait(300); },
+          ]);
+        },
+      },
+      {
+        title: 'Both servers rejoin the pool',
+        say: 'S3 passes 2 health checks in a row (the healthy threshold), so it rejoins. S4 is ready after the deploy and rejoins too. The pool has four servers again. Thresholds stop a flapping server from going in and out every few seconds.',
+        run: function (ctx) {
+          var S = ctx.state;
+          return seq(ctx, [
+            function () { S.servers[2].healthy = true; S.servers[3].draining = false; return healthCheck(ctx, []); },
+            function () { ctx.log('S3 and S4 health checks passed (1/2)', 'info'); return healthCheck(ctx, []); },
+            function () {
+              S.servers.forEach(function (s) { render(ctx, s); });
+              updateToggle(S);
+              ctx.log('S3 and S4 back in the pool', 'ok');
+              return burst(ctx, [[0], [1], [2], [0]]);
+            },
+          ]);
+        },
+      },
+    ],
+  });
+
+  // ---- "Try it" controls: always act on the current ctx.state ----
+  var ctx = lab.ctx;
+  var nextClient = 0;
+  function updateToggle(S) {
+    var b = document.getElementById('toggleS3');
+    if (b && S.servers) b.textContent = S.servers[2].healthy ? 'Fail S3' : 'Heal S3';
+  }
+  document.getElementById('algo').addEventListener('change', function (e) {
+    setAlgo(ctx, e.target.value);
+    ctx.log('Algorithm set to ' + ALGO_NAME[e.target.value], 'info');
+  });
+  document.getElementById('send1').addEventListener('click', function () {
+    send(ctx, nextClient, false); nextClient = (nextClient + 1) % 3;
+  });
+  document.getElementById('sendSlow').addEventListener('click', function () {
+    send(ctx, nextClient, true); nextClient = (nextClient + 1) % 3;
+  });
+  document.getElementById('toggleS3').addEventListener('click', function () {
+    var S = ctx.state;
+    var s3 = S.servers[2];
+    s3.healthy = !s3.healthy;
+    if (!s3.healthy) { s3.active = 0; s3.slow = 0; }
+    render(ctx, s3);
+    updateToggle(S);
+    ctx.log(s3.healthy ? 'S3 healthy again: back in pool' : 'S3 failed health checks: removed', s3.healthy ? 'ok' : 'bad');
+  });
+  // The select keeps its value across Reset; resync it with the scene.
+  document.getElementById('kit-reset').addEventListener('click', function () { updateToggle(ctx.state); });
+})();
+</script>
+</body>
+</html>

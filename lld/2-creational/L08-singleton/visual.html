@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L08 Singleton</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .ref { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 3 4; stroke-linecap: round; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L08 · Creational</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Singleton</h1>
+    <p class="lede">One instance per process, one way to get it. Watch three modules open three DB pools, then share one. Then see the two traps: an async race on first use, and "one per process" turning into "one per pod".</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 460" role="img" aria-label="Modules sharing one database pool instance"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try" id="try">
+        <b>Try it</b>
+        <button class="btn" type="button" id="try-get">get() from another module</button>
+        <button class="btn" type="button" id="try-new">new AppDb()</button>
+        <span id="try-out">Run to step 4 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Call</span>
+        <span><i style="background: var(--accent)"></i>Reference to the one instance</span>
+        <span><i style="background: var(--ok)"></i>Shared / fixed</span>
+        <span><i style="background: var(--bad)"></i>Duplicate / error</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">class AppDb {</span><span class="ln" data-l="2">  private static instance?: AppDb;</span><span class="ln" data-l="3">  private constructor() { /* open 10 conns */ }</span><span class="ln" data-l="4">  static get(): AppDb {</span><span class="ln" data-l="5">    return (AppDb.instance ??= new AppDb());</span><span class="ln" data-l="6">  }</span><span class="ln" data-l="7">}</span><span class="ln" data-l="8">// async init: cache the PROMISE, not the result</span><span class="ln" data-l="9">let p: Promise&lt;Db&gt; | undefined;</span><span class="ln" data-l="10">export const getDb = () =&gt; (p ??= connect());</span><span class="ln" data-l="11">// Node modules are cached: this is a singleton too</span><span class="ln" data-l="12">export const db = new DbPool();</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"I need one DB pool and one logger per process. In Node the simplest singleton is a module-level export, because modules are evaluated once and cached. If you want the classic pattern, it is a private constructor plus a static <code>get()</code>. I still pass the instance into services through the constructor, so tests can use a fake. And it is one per process: anything that must be shared across pods goes to Redis or the database."</p>
+    </div>
+    <div class="note wide">
+      <h3>Ways to get "only one"</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Classic class</th><th>Module export</th><th>DI container (NestJS default scope)</th><th>Shared store (Redis)</th></tr></thead>
+          <tbody>
+            <tr><td>How</td><td><code>private constructor</code> + <code>static get()</code></td><td><code>export const db = new DbPool()</code></td><td>Provider created once, injected everywhere</td><td>State lives outside the process</td></tr>
+            <tr><td>Scope</td><td>One per process</td><td>One per process (per module copy)</td><td>One per app container</td><td>One per cluster</td></tr>
+            <tr><td>Testable?</td><td>Poor: hidden global, needs reset hacks</td><td>OK with <code>vi.mock</code> / <code>vi.resetModules</code></td><td>Good: pass a fake</td><td>Good: use a test instance</td></tr>
+            <tr><td>Use for</td><td>When the interviewer asks for the pattern</td><td>Config, logger, Prisma client</td><td>Real services</td><td>Counters, locks, sessions across pods</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Is <code>if (!instance) instance = new X()</code> thread-safe in Node?</summary><div>Yes, if the creation is synchronous: the check and the assignment run in one turn of the event loop. If creation is async (<code>await connect()</code>), two callers can both see <code>undefined</code>. Cache the promise: <code>p ??= connect()</code>.</div></details>
+      <details class="qa"><summary>Your app runs 4 pods, each with an in-memory singleton rate counter. Limit is 25/min. What is the real limit?</summary><div>About 100/min, because each pod counts alone. Move the counter to Redis (<code>INCR</code> + <code>EXPIRE</code>) so all pods share one count.</div></details>
+      <details class="qa"><summary>Why do people call Singleton an anti-pattern?</summary><div>It is global mutable state with a nice name. It hides dependencies, ties code to one concrete class, and leaks state between tests. One instance created in the composition root and injected gives the same "only one" without those problems.</div></details>
+      <details class="qa"><summary>How can a Node app end up with two "singletons"?</summary><div>Two copies of the same package in <code>node_modules</code> (different versions), worker threads, or the cluster module. Each module copy and each process has its own instance.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var MODS = [
+    { id: 'orders', name: 'orders.ts', y: 50 },
+    { id: 'payments', name: 'payments.ts', y: 120 },
+    { id: 'reports', name: 'reports.ts', y: 190 },
+  ];
+  var MX = 20, MW = 150, MH = 46;
+  var CX = 250, CW = 220, CY = 50, CH = 120;
+  var IX = 545, IW = 195;
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+
+  function box(ctx, parent, x, y, w, h, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: x + 10, y: y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: x + 10, y: y + 38 + i * 17, class: 'mono', text: l }, g);
+    });
+    return g;
+  }
+
+  function clearPanel(ctx) {
+    var p = ctx.state.panel;
+    while (p.firstChild) p.removeChild(p.firstChild);
+  }
+
+  function mid(m) { return m.y + MH / 2; }
+
+  var ROUTES = {
+    orders: 'M170,73 C210,73 210,34 250,34 L470,34 C510,34 510,95 545,95',
+    payments: 'M170,143 C210,143 210,186 250,186 L470,186 C510,186 510,112 545,112',
+    reports: 'M170,213 L470,213 C515,213 515,130 545,130',
+  };
+  function addRef(ctx, m) {
+    var path = ctx.el('path', { d: ROUTES[m.id], class: 'ref', opacity: 0 }, ctx.state.refs);
+    return ctx.fade(path, 1, 300);
+  }
+
+  function getCall(ctx, m) {
+    var y = mid(m), s = ctx.state;
+    ctx.log(m.name + ': AppDb.get()', 'info');
+    return ctx.packet([[MX + MW, y], [CX, y]], { ms: 450, label: 'get()' }).then(function () {
+      ctx.flash(s.cls.r);
+      if (!s.created) {
+        s.created = true;
+        s.cls.lines[0].textContent = '- static instance = AppDb#1';
+        s.cls.lines[0].setAttribute('class', 'mono fill-ok');
+        ctx.log('instance is undefined → new AppDb() (lazy, first call only)', 'warn');
+        return ctx.packet([[CX + CW, 110], [IX, 110]], { ms: 400, cls: 'accent', label: 'new' }).then(function () {
+          s.conns = 10; s.counter.textContent = 'DB connections: 10 / max 25';
+          s.counter.setAttribute('class', 'mono fill-ok');
+          return ctx.fade(s.inst, 1, 300);
+        });
+      }
+      ctx.log('instance exists → return AppDb#1', 'ok');
+    }).then(function () {
+      s.calls++;
+      s.inst.lines[1].textContent = 'get() calls: ' + s.calls;
+      return ctx.packet([[CX, y + 8], [MX + MW, y + 8]], { ms: 350, cls: 'accent' });
+    }).then(function () { return addRef(ctx, m); });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Three modules need a database',
+      say: '<code>orders.ts</code>, <code>payments.ts</code> and <code>reports.ts</code> all talk to Postgres. Each pool opens 10 connections. The DB allows 25.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      s.calls = 0; s.created = false; s.conns = 0; s.extra = 0;
+      s.refs = ctx.group();
+      s.mods = {};
+      MODS.forEach(function (m) {
+        s.mods[m.id] = box(ctx, null, MX, m.y, MW, MH, m.name, ['needs a DB pool'], 'signal');
+      });
+      s.cls = box(ctx, ctx.group({ opacity: 0 }), CX, CY, CW, CH, 'class AppDb', ['- static instance = undefined', '- constructor()   (private)', '+ static get(): AppDb'], 'accent');
+      s.clsG = s.cls.parentNode;
+      s.pools = MODS.map(function (m, i) {
+        var g = ctx.group({ opacity: 0 });
+        box(ctx, g, IX, m.y, IW, MH, 'DbPool#' + (i + 1), ['10 connections'], 'bad');
+        return g;
+      });
+      s.inst = box(ctx, null, IX, 75, IW, 70, 'AppDb#1  (the one)', ['pool: 10 connections', 'get() calls: 0'], 'ok');
+      s.inst.setAttribute('opacity', 0);
+      s.counter = ctx.el('text', { x: IX, y: 262, class: 'mono muted', text: 'DB connections: 0 / max 25' });
+      ctx.el('line', { x1: 10, y1: 282, x2: 750, y2: 282, class: 'divider' });
+      s.panel = ctx.group();
+    },
+    steps: [
+      {
+        title: 'Before: everyone calls new',
+        say: 'Each module writes <code>new DbPool()</code>. Three pools, 30 connections, and the DB only allows 25. The third pool fails to connect, and the pools do not share limits.',
+        run: function (ctx) {
+          var s = ctx.state, chain = Promise.resolve();
+          MODS.forEach(function (m, i) {
+            chain = chain.then(function () {
+              ctx.log(m.name + ': new DbPool()', 'info');
+              return ctx.packet([[MX + MW, mid(m)], [IX, mid(m)]], { ms: 500, label: 'new' });
+            }).then(function () {
+              s.conns += 10;
+              s.counter.textContent = 'DB connections: ' + s.conns + ' / max 25';
+              s.counter.setAttribute('class', 'mono ' + (s.conns > 25 ? 'fill-bad' : 'fill-warn'));
+              return ctx.fade(s.pools[i], 1, 250);
+            });
+          });
+          return chain.then(function () { ctx.log('30 connections > 25: "too many clients" error', 'bad'); });
+        },
+      },
+      {
+        title: 'Make the constructor private',
+        say: 'Move creation into the class. <code>private constructor</code> means no other file can call <code>new AppDb()</code>. The compiler rejects it, so <code>get()</code> is the only way in.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([2, 3]);
+          s.conns = 0;
+          s.counter.textContent = 'DB connections: 0 / max 25';
+          s.counter.setAttribute('class', 'mono muted');
+          return Promise.all(s.pools.map(function (p) { return ctx.fade(p, 0, 300); }))
+            .then(function () { return ctx.fade(s.clsG, 1, 400); })
+            .then(function () {
+              ctx.log('orders.ts: new AppDb()', 'info');
+              return ctx.packet([[MX + MW, mid(MODS[0])], [CX, mid(MODS[0])], [MX + MW, mid(MODS[0])]], { ms: 800, cls: 'bad', label: 'new' });
+            })
+            .then(function () { ctx.flash(s.cls.r); ctx.log("TS2673: Constructor of class 'AppDb' is private", 'bad'); });
+        },
+      },
+      {
+        title: 'The first get() creates it (lazy)',
+        say: '<code>orders.ts</code> calls <code>AppDb.get()</code>. The static field is empty, so the class creates the one instance now and stores it. Nothing is created until someone needs it.',
+        run: function (ctx) { hl([4, 5]); return getCall(ctx, MODS[0]); },
+      },
+      {
+        title: 'Every later call gets the same object',
+        say: '<code>payments.ts</code> and <code>reports.ts</code> call <code>get()</code> too. The field is set, so they get <b>AppDb#1</b>. Three modules, one pool, 10 connections.',
+        run: function (ctx) {
+          hl([5]);
+          return getCall(ctx, MODS[1]).then(function () { return getCall(ctx, MODS[2]); })
+            .then(function () { ctx.log('get() === get() === get(): true', 'ok'); ctx.state.ready = true; });
+        },
+      },
+      {
+        title: 'The Node way: the module cache',
+        say: 'Node evaluates a module once and caches it. <code>export const db = new DbPool()</code> runs one time; every <code>import</code> gets the same object. This is what real Node code does.',
+        run: function (ctx) {
+          var s = ctx.state, p = s.panel;
+          hl([11, 12]);
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 306, class: 'title', text: 'import { db } from "./db"' }, p);
+          ['orders.ts', 'payments.ts', 'reports.ts'].forEach(function (n, i) {
+            box(ctx, p, 20, 322 + i * 44, 130, 34, n, [], 'signal');
+          });
+          var cache = box(ctx, p, 250, 330, 230, 90, 'module cache', ['"./db.ts" → evaluated: yes', 'exports.db = DbPool#1'], 'accent');
+          var dbx = box(ctx, p, IX, 350, IW, 50, 'DbPool#1', ['10 connections'], 'ok');
+          var chain = ctx.packet([[150, 339], [250, 360]], { ms: 450, label: 'import' }).then(function () {
+            ctx.log('first import: run db.ts once → new DbPool()', 'warn');
+            return ctx.packet([[480, 375], [IX, 375]], { ms: 350, cls: 'accent' });
+          }).then(function () { ctx.flash(dbx.r); });
+          [383, 427].forEach(function (y, i) {
+            chain = chain.then(function () { return ctx.packet([[150, y], [250, 380]], { ms: 400, label: 'import' }); })
+              .then(function () { ctx.flash(cache.r); ctx.log((i ? 'reports' : 'payments') + '.ts import: cache hit → same db', 'ok'); });
+          });
+          return chain;
+        },
+      },
+      {
+        title: 'Trap 1: async init races',
+        say: 'Connecting is async. Two requests arrive at startup and both call <code>getDb()</code>. Both see <code>inst === undefined</code> before the first <code>await</code> finishes, so two pools open.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([]);
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 306, class: 'title', text: 'Naive: if (!inst) inst = await connect()' }, p);
+          box(ctx, p, 20, 330, 130, 34, 'request A', [], 'signal');
+          box(ctx, p, 20, 390, 130, 34, 'request B', [], 'signal');
+          var fn = box(ctx, p, 250, 330, 230, 94, 'getDb()', ['inst: undefined', 'A: !inst → connect()', 'B: !inst → connect()'], '');
+          fn.lines[1].setAttribute('opacity', 0); fn.lines[2].setAttribute('opacity', 0);
+          var a = box(ctx, p, IX, 322, IW, 40, 'DbPool#1', [], 'bad');
+          var b = box(ctx, p, IX, 392, IW, 40, 'DbPool#2', [], 'bad');
+          a.setAttribute('opacity', 0); b.setAttribute('opacity', 0);
+          return Promise.all([
+            ctx.packet([[150, 347], [250, 360]], { ms: 450, label: 'A' }),
+            ctx.packet([[150, 407], [250, 400]], { ms: 450, label: 'B' }),
+          ]).then(function () {
+            fn.lines[1].setAttribute('opacity', 1); fn.lines[2].setAttribute('opacity', 1);
+            ctx.log('A: inst undefined → await connect()', 'warn');
+            ctx.log('B: inst still undefined → await connect()', 'warn');
+            return Promise.all([
+              ctx.packet([[480, 360], [IX, 342]], { ms: 450, cls: 'bad' }),
+              ctx.packet([[480, 400], [IX, 412]], { ms: 450, cls: 'bad' }),
+            ]);
+          }).then(function () {
+            return Promise.all([ctx.fade(a, 1, 250), ctx.fade(b, 1, 250)]);
+          }).then(function () { ctx.log('two pools opened; one leaks', 'bad'); });
+        },
+      },
+      {
+        title: 'Fix: cache the promise',
+        say: 'Store the <b>promise</b> on the first call: <code>p ??= connect()</code>. The assignment is synchronous, so request B finds it set and awaits the same promise. One connect, one pool.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([9, 10]);
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 306, class: 'title', text: 'Fixed: return (p ??= connect())' }, p);
+          box(ctx, p, 20, 330, 130, 34, 'request A', [], 'signal');
+          box(ctx, p, 20, 390, 130, 34, 'request B', [], 'signal');
+          var fn = box(ctx, p, 250, 330, 230, 94, 'getDb()', ['p: undefined', '', ''], 'accent');
+          var a = box(ctx, p, IX, 357, IW, 40, 'DbPool#1 (shared)', [], 'ok');
+          a.setAttribute('opacity', 0);
+          return ctx.packet([[150, 347], [250, 360]], { ms: 450, label: 'A' }).then(function () {
+            fn.lines[0].textContent = 'p: Promise#1 (set sync)';
+            fn.lines[0].setAttribute('class', 'mono fill-ok');
+            fn.lines[1].textContent = 'A: p = connect()';
+            ctx.log('A: p is undefined → p = connect() (sync assignment)', 'info');
+            return Promise.all([
+              ctx.packet([[480, 377], [IX, 377]], { ms: 500, cls: 'accent' }),
+              ctx.packet([[150, 407], [250, 400]], { ms: 450, label: 'B' }),
+            ]);
+          }).then(function () {
+            fn.lines[2].textContent = 'B: p set → same promise';
+            ctx.log('B: p already set → await Promise#1', 'ok');
+            return ctx.fade(a, 1, 250);
+          }).then(function () { ctx.log('one pool for both requests', 'ok'); });
+        },
+      },
+      {
+        title: 'Trap 2: one per process, not per cluster',
+        say: 'You deploy 4 pods. Each pod has its own "singleton" rate counter, so each allows 25 req/min and the real limit is 100. Shared state must live outside the process, for example in Redis.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          hl([]);
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 306, class: 'title', text: 'Limit: 25 req/min per user' }, p);
+          var pods = [0, 1, 2, 3].map(function (i) {
+            return box(ctx, p, 20 + i * 135, 322, 120, 52, 'pod ' + (i + 1), ['count: 0'], '');
+          });
+          var total = ctx.el('text', { x: 570, y: 352, class: 'mono', text: 'allowed: 0' }, p);
+          var redis = box(ctx, p, 200, 400, 200, 46, 'Redis', ['INCR rate:user42'], 'accent');
+          redis.setAttribute('opacity', 0);
+          return ctx.tween(900, function (t) {
+            var n = Math.round(25 * t);
+            pods.forEach(function (pd) { pd.lines[0].textContent = 'count: ' + n; });
+            total.textContent = 'allowed: ' + n * 4;
+          }).then(function () {
+            pods.forEach(function (pd) { pd.r.setAttribute('class', 'box bad'); });
+            total.setAttribute('class', 'mono fill-bad');
+            ctx.log('each pod allowed 25 → user got 100 req/min', 'bad');
+            return ctx.fade(redis, 1, 300);
+          }).then(function () {
+            return Promise.all(pods.map(function (pd, i) { return ctx.packet([[80 + i * 135, 374], [300, 400]], { ms: 500, cls: 'accent' }); }));
+          }).then(function () {
+            pods.forEach(function (pd) { pd.r.setAttribute('class', 'box ok'); pd.lines[0].textContent = 'asks Redis'; });
+            total.textContent = 'allowed: 25';
+            total.setAttribute('class', 'mono fill-ok');
+            ctx.log('counter in Redis: one count for all pods → 25', 'ok');
+          });
+        },
+      },
+      {
+        title: 'Better: create once, inject it',
+        say: 'The composition root (<code>main.ts</code>) creates one <code>AppDb</code> and passes it to each service constructor. Still one instance, but dependencies are visible and a test can pass a fake.',
+        run: function (ctx) {
+          var p = ctx.state.panel;
+          clearPanel(ctx);
+          ctx.el('text', { x: 20, y: 306, class: 'title', text: 'Dependency injection: still one instance' }, p);
+          var main = box(ctx, p, 20, 330, 200, 60, 'main.ts', ['const db = new AppDb()'], 'accent');
+          var svc = [
+            box(ctx, p, 300, 318, 210, 36, 'new OrderService(db)', [], 'ok'),
+            box(ctx, p, 300, 364, 210, 36, 'new PaymentService(db)', [], 'ok'),
+          ];
+          var test = box(ctx, p, 545, 336, 195, 60, 'orders.test.ts', ['new OrderService(fakeDb)'], 'signal');
+          test.setAttribute('opacity', 0);
+          ctx.flash(main.r);
+          ctx.log('main.ts: one AppDb, created at startup', 'info');
+          return Promise.all([
+            ctx.packet([[220, 350], [300, 336]], { ms: 450, cls: 'accent', label: 'db' }),
+            ctx.packet([[220, 370], [300, 382]], { ms: 450, cls: 'accent', label: 'db' }),
+          ]).then(function () {
+            ctx.log('services receive db in the constructor', 'ok');
+            return ctx.fade(test, 1, 350);
+          }).then(function () { ctx.log('test: pass a fake, no global state to reset', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  // ---- Try it: talk to the live scene ----
+  var out = document.getElementById('try-out');
+  document.getElementById('try-get').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.ready) { out.textContent = 'Run to step 4 first (the instance must exist).'; return; }
+    s.extra++;
+    ctx.log('module' + (s.extra + 3) + '.ts: AppDb.get()', 'info');
+    ctx.packet([[CX + CW / 2, 255], [CX + CW / 2, CY + CH]], { ms: 400, label: 'get()' }).then(function () {
+      ctx.flash(s.cls.r);
+      s.calls++;
+      s.inst.lines[1].textContent = 'get() calls: ' + s.calls;
+      ctx.log('same AppDb#1 returned; still 10 connections', 'ok');
+      out.textContent = s.calls + ' get() calls, 1 instance, 10 connections.';
+    });
+  });
+  document.getElementById('try-new').addEventListener('click', function () {
+    var ctx = lab.ctx, s = ctx.state;
+    if (!s.clsG || s.clsG.getAttribute('opacity') === '0') { out.textContent = 'Run to step 2 first.'; return; }
+    ctx.packet([[MX + MW, 250], [CX, 160], [MX + MW, 250]], { ms: 700, cls: 'bad', label: 'new' }).then(function () {
+      ctx.log("new AppDb() → TS2673: constructor is private", 'bad');
+      out.textContent = 'Blocked at compile time. get() is the only way in.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

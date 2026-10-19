@@ -1,71 +1,70 @@
 # Week 21 · Final rounds
 
-> Mon 8 Mar – Sun 14 Mar · Phase 4: Offers and sharpness · ~8 h this week
-> **Goal:** Short daily sprints keep every problem fresh. Real interviews and mocks are the main practice now.
+> Mon 8 Mar – Sun 14 Mar · Phase 4: Offers and sharpness · ~10 h this week
+> **Goal:** Stay sharp with short redo sprints while you close offers. Never let the knowledge go cold.
 
 [← Week 20](week-20.md) · [All weeks](README.md) · [Week 22 →](week-22.md)
 
-## Mon 8 Mar · Day 141 · 45 min
+## Mon 8 Mar · Day 141 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Ride Sharing  
-  [17-ride-sharing](../../lld/problems/17-ride-sharing/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Distributed Cache from memory  
-  [17-distributed-cache](../../hld/problems/17-distributed-cache/README.md) · [17-distributed-cache/my-design](../../hld/problems/17-distributed-cache/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Refresh: L29 + L30  
+  [demo.ts](../../lld/4-behavioral/L29-visitor/demo.ts) · [demo.ts](../../lld/5-machine-coding/L30-machine-coding-framework/demo.ts)  
+  _Write both patterns from memory (10 min each), then diff against demo.ts._
+- [ ] **HLD · 35 min**: Refresh: H31 + H32  
+  [H31-security-auth/README.md](../../hld/5-reliability/H31-security-auth/README.md) · [visual](../../hld/5-reliability/H31-security-auth/visual.html) · [H32-blob-storage/README.md](../../hld/6-building-blocks/H32-blob-storage/README.md) · [visual](../../hld/6-building-blocks/H32-blob-storage/visual.html)  
+  _Self-test only. Answer every question on both READMEs from memory, replay the visuals, then re-read only what you got wrong._
 
-## Tue 9 Mar · Day 142 · 45 min
+## Tue 9 Mar · Day 142 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Cart with Coupons  
-  [20-ecommerce-cart-coupons](../../lld/problems/20-ecommerce-cart-coupons/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo KV Store from memory  
-  [04-key-value-store](../../hld/problems/04-key-value-store/README.md) · [04-key-value-store/my-design](../../hld/problems/04-key-value-store/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Redo sprint: LRU / LFU Cache  
+  [02-lru-cache/README.md](../../lld/problems/02-lru-cache/README.md)  
+  _Empty file, 25 min. Rebuild the core classes and the main method from memory. Spaced repetition: this is what makes it stick._
+- [ ] **HLD · 35 min**: Advanced: Cluster health monitoring (outline)  
+  [advanced-37.md](../../hld/case-studies/advanced-37.md) · [_template/my-design.md](../../hld/case-studies/_template/my-design.md)  
+  _Copy the template to hld/case-studies/advanced/<name>.md. 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md._
 
-## Wed 10 Mar · Day 143 · 45 min
+## Wed 10 Mar · Day 143 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Vending Machine  
-  [06-vending-machine](../../lld/problems/06-vending-machine/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Autocomplete from memory  
-  [12-search-autocomplete](../../hld/problems/12-search-autocomplete/README.md) · [12-search-autocomplete/my-design](../../hld/problems/12-search-autocomplete/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Debrief fix  
+  _Fix the weakest topic from this week's real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored concept._
+- [ ] **HLD · 35 min**: Refresh: H33 + H34  
+  [H33-search-typeahead/README.md](../../hld/6-building-blocks/H33-search-typeahead/README.md) · [visual](../../hld/6-building-blocks/H33-search-typeahead/visual.html) · [H34-geospatial/README.md](../../hld/6-building-blocks/H34-geospatial/README.md) · [visual](../../hld/6-building-blocks/H34-geospatial/visual.html)  
+  _Self-test only. Answer every question on both READMEs from memory, replay the visuals, then re-read only what you got wrong._
 
-## Thu 11 Mar · Day 144 · 45 min
+## Thu 11 Mar · Day 144 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Pub-Sub Queue  
-  [15-pub-sub-queue](../../lld/problems/15-pub-sub-queue/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo File Storage from memory  
-  [15-file-storage](../../hld/problems/15-file-storage/README.md) · [15-file-storage/my-design](../../hld/problems/15-file-storage/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Pub-Sub Queue: requirements + class diagram  
+  [15-pub-sub-queue/README.md](../../lld/problems/15-pub-sub-queue/README.md) · [L30-machine-coding-framework/README.md](../../lld/5-machine-coding/L30-machine-coding-framework/README.md)  
+  _Steps 1–3 on paper: clarify, list entities, draw the class diagram, name the patterns. No code yet._
+- [ ] **HLD · 35 min**: Redo from memory: Video Streaming  
+  [14-video-streaming/README.md](../../hld/case-studies/14-video-streaming/README.md) · [14-video-streaming/my-design.md](../../hld/case-studies/14-video-streaming/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
-## Fri 12 Mar · Day 145 · 45 min
+## Fri 12 Mar · Day 145 · 60 min
 
-- [ ] **LLD · 20 min**: Sprint: Meeting Rooms  
-  [21-meeting-room-scheduler](../../lld/problems/21-meeting-room-scheduler/README.md)  
-  _Rebuild the core classes from memory in 20 min. No reference._
-- [ ] **HLD · 25 min**: Redo Video Streaming from memory  
-  [14-video-streaming](../../hld/problems/14-video-streaming/README.md) · [14-video-streaming/my-design](../../hld/problems/14-video-streaming/my-design.md)  
-  _Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes._
+- [ ] **LLD · 25 min**: Pub-Sub Queue: build the core  
+  [15-pub-sub-queue/README.md](../../lld/problems/15-pub-sub-queue/README.md)  
+  _Code the main flow in starter.ts. Run `npx vitest run lld/problems/15-pub-sub-queue` and get the first tests green._
+- [ ] **HLD · 35 min**: Redo from memory: Digital Wallet / UPI  
+  [28-digital-wallet/README.md](../../hld/case-studies/28-digital-wallet/README.md) · [28-digital-wallet/my-design.md](../../hld/case-studies/28-digital-wallet/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
 ## Sat 13 Mar · Day 146 · 150 min
 
-- [ ] **MOCK · 90 min**: Mock machine-coding round  
-  [concepts/04-lld-interview-framework](../../lld/concepts/04-lld-interview-framework.md)  
-  _Someone else (your brother, a friend, Pramp) picks any finished LLD problem and plays the interviewer. 90 min, full round. Write a debrief._
-- [ ] **MOCK · 60 min**: Mock HLD round  
-  [concepts/01-how-to-approach-hld](../../hld/concepts/01-how-to-approach-hld.md)  
-  _Ask a friend, or use Pramp / interviewing.io peers. Pick a problem you have not designed in the last 2 weeks. 45 min + feedback. Write a debrief._
+- [ ] **LLD · 90 min**: Pub-Sub Queue: finish + timed redo  
+  [15-pub-sub-queue/README.md](../../lld/problems/15-pub-sub-queue/README.md)  
+  _Finish starter.ts until all tests pass (40 min). Then answer the extension questions out loud. Only now open reference.ts and write down 3 differences._
+- [ ] **HLD · 60 min**: Redo from memory: URL Shortener  
+  [01-url-shortener/README.md](../../hld/case-studies/01-url-shortener/README.md) · [01-url-shortener/my-design.md](../../hld/case-studies/01-url-shortener/my-design.md)  
+  _Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md._
 
-## Sun 14 Mar · Day 147 · 80 min
+## Sun 14 Mar · Day 147 · 120 min
 
-- [ ] **HLD · 35 min**: Refresh: Replication + Sharding  
-  [concepts/12-replication](../../hld/concepts/12-replication.md) · [concepts/13-partitioning-sharding](../../hld/concepts/13-partitioning-sharding.md)  
-  _Self-test only. Answer every question on both cards from memory, then re-read only what you got wrong._
+- [ ] **HLD · 75 min**: Advanced: Weather app backend (full round)  
+  [advanced-37.md](../../hld/case-studies/advanced-37.md) · [_template/my-design.md](../../hld/case-studies/_template/my-design.md) · [H01-approach-hld-round/README.md](../../hld/1-basics/H01-approach-hld-round/README.md)  
+  _Copy the template to hld/case-studies/advanced/<name>.md and run it like a real 45-min round, out loud. Then 30 min on what you missed._
 - [ ] **REV · 45 min**: Weekly review  
-  _Debrief this week's interviews. Prepare company-specific questions for next week. Then run /daily week._
+  _Score yourself 1–5 on each concept module. Redo the self-test of the two lowest, and update your weak list in plan/notes.md. Then run /daily week._
 
 ## Notes
 

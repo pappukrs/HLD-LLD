@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>H29 Consensus and locks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .try { border-top: 1px solid var(--line); }
+  .try .label { font: 600 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag hld">H29 · Reliability</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Consensus, Leader Election and Fencing</h1>
+    <p class="lede">Raft keeps five servers agreeing on one leader and one log, as long as a majority is alive. On top of it, etcd hands out locks as leases with a growing number. The number matters: a paused worker can wake up after its lease ended, and only a fencing token stops its stale write.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 600" role="img" aria-label="Five Raft servers with their logs, and below a lock service, two workers and a storage that checks fencing tokens"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="controls try" id="try">
+        <span class="label">Try it</span>
+        <label for="fence"><input type="checkbox" id="fence" checked> Storage checks tokens</label>
+        <button class="btn" type="button" id="wa">A writes (token 33)</button>
+        <button class="btn" type="button" id="wb">B writes (token 34)</button>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Candidate / pending entry</span>
+        <span><i style="background: var(--accent)"></i>Leader / heartbeat</span>
+        <span><i style="background: var(--ok)"></i>Vote yes / committed</span>
+        <span><i style="background: var(--bad)"></i>Vote no / rejected</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The scheduler instances elect a leader through an etcd lease. etcd is a 5-node Raft cluster, so it survives 2 failures and a minority partition can never elect a second leader. Each payout run carries the lease revision as a fencing token, and the payouts table rejects lower tokens, so a paused old leader cannot pay twice. The payout is idempotent by batch id as a second guard."</p>
+    </div>
+    <div class="note">
+      <h3>Raft rules on one card</h3>
+      <ul>
+        <li>One vote per node per term.</li>
+        <li>Vote only for a log at least as new as yours.</li>
+        <li>Commit when a majority stores the entry.</li>
+        <li>See a higher term → become a follower.</li>
+        <li>Random election timeouts avoid split votes.</li>
+      </ul>
+    </div>
+    <div class="note wide">
+      <h3>Which lock for which job</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Tool</th><th>Safe for correctness?</th><th>Fencing token</th><th>Good for</th></tr></thead>
+          <tbody>
+            <tr><td>etcd / ZooKeeper lease</td><td>Yes, with fencing</td><td>Revision / zxid</td><td>Leader election, payouts, schedulers</td></tr>
+            <tr><td>DB conditional update / unique key</td><td>Yes</td><td>Not needed (atomic in one DB)</td><td>Seat holds, "run once per day"</td></tr>
+            <tr><td>Single Redis <code>SET NX PX</code></td><td>No (failover can lose it)</td><td>No</td><td>Efficiency: avoid duplicate cache refresh</td></tr>
+            <tr><td>Redlock (5 Redis masters)</td><td>Debated</td><td>No</td><td>Efficiency, if you already run it</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>5 nodes tolerate how many failures? 6 nodes?</summary><div>Both tolerate 2. Majority of 5 is 3; majority of 6 is 4. Use odd sizes.</div></details>
+      <details class="qa"><summary>Why did S5 lose the election in step 4?</summary><div>Its log ended at term 1, but S1 and S2 had a committed entry from term 2. Nodes vote only for logs at least as new as theirs, so a node missing committed data can never become leader.</div></details>
+      <details class="qa"><summary>Why not just choose a longer lock TTL?</summary><div>A pause (GC, VM freeze, network stall) can be longer than any TTL. Only the resource checking the token can tell a stale holder from the current one.</div></details>
+      <details class="qa"><summary>Can an old leader still serve reads?</summary><div>Yes, briefly, and they may be stale. Linearizable reads use ReadIndex (confirm leadership with a heartbeat round) or go through the log.</div></details>
+    </div>
+  </section>
+
+  <nav class="next">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var NODES = [
+    { id: 'S1', x: 200, y: 66 },
+    { id: 'S2', x: 318, y: 140 },
+    { id: 'S3', x: 274, y: 254 },
+    { id: 'S4', x: 126, y: 254 },
+    { id: 'S5', x: 82, y: 140 },
+  ];
+  var BYID = {};
+  NODES.forEach(function (n) { BYID[n.id] = n; });
+  var LX = 410, CELL_W = 96, CELL_X = LX + 34, ROW0 = 52, ROWH = 38;
+  // fencing scene
+  var WA = { x: 20, y: 400, w: 170, h: 74 }, LOCK = { x: 296, y: 388, w: 168, h: 70 }, WB = { x: 570, y: 400, w: 170, h: 74 };
+  var STORE = { x: 280, y: 506, w: 200, h: 70 };
+
+  function node(ctx, id) { return ctx.state.nodes[id]; }
+
+  function setRole(ctx, id, role) {
+    var n = node(ctx, id);
+    n.role = role;
+    var cls = { follower: 'box', candidate: 'box signal', leader: 'box accent', down: 'box dim' }[role];
+    n.circle.setAttribute('class', cls);
+    n.circle.setAttribute('style', role === 'candidate' || role === 'leader' ? 'stroke-width: 3' : '');
+    n.roleT.textContent = role === 'down' ? 'crashed' : role;
+    n.roleT.setAttribute('class', 'mono small' + (role === 'down' ? ' fill-bad' : role === 'leader' ? ' fill-accent' : role === 'candidate' ? ' fill-signal' : ' muted'));
+    n.g.setAttribute('opacity', role === 'down' ? 0.45 : 1);
+  }
+  function setTerm(ctx, id, term) { var n = node(ctx, id); n.term = term; n.termT.textContent = 'term ' + term; }
+  function header(ctx, term, leader) { ctx.state.head.textContent = 'Raft cluster · term ' + term + ' · leader: ' + (leader || 'none'); }
+
+  function addCell(ctx, id, index, term, cmd, status) {
+    var n = node(ctx, id);
+    var row = NODES.indexOf(BYID[id]);
+    var y = ROW0 + row * ROWH;
+    var g = ctx.group({ opacity: 0 });
+    var x = CELL_X + (index - 1) * (CELL_W + 6);
+    var r = ctx.el('rect', { x: x, y: y, width: CELL_W, height: 26, rx: 5 }, g);
+    ctx.el('text', { x: x + CELL_W / 2, y: y + 17, 'text-anchor': 'middle', class: 'mono small', text: index + ': t' + term + ' ' + cmd }, g);
+    n.cells[index] = { g: g, rect: r };
+    setCell(ctx, id, index, status);
+    return ctx.fade(g, 1, 300);
+  }
+  function setCell(ctx, id, index, status) {
+    var c = node(ctx, id).cells[index];
+    c.rect.setAttribute('class', status === 'committed' ? 'box ok' : 'box signal');
+    c.rect.setAttribute('style', status === 'committed' ? '' : 'stroke-dasharray: 5 4');
+  }
+
+  function line(a, b) { return [[BYID[a].x, BYID[a].y], [BYID[b].x, BYID[b].y]]; }
+  function half(a, b) { var A = BYID[a], B = BYID[b]; return [[A.x, A.y], [(A.x + B.x) / 2, (A.y + B.y) / 2]]; }
+  function send(ctx, from, tos, cls, ms) {
+    return Promise.all(tos.map(function (to) { return ctx.packet(line(from, to), { cls: cls, ms: ms || 650, r: 6 }); }));
+  }
+  function replies(ctx, froms, to, clsOf) {
+    return Promise.all(froms.map(function (f) { return ctx.packet(line(f, to), { cls: clsOf(f), ms: 650, r: 6 }); }));
+  }
+  function runTimers(ctx, timeouts, winner, ms) {
+    var ids = Object.keys(timeouts);
+    ids.forEach(function (id) { node(ctx, id).bar.setAttribute('width', 52); });
+    var T = timeouts[winner];
+    return ctx.tween(ms || 1200, function (t) {
+      ids.forEach(function (id) { node(ctx, id).bar.setAttribute('width', 52 * Math.max(0, 1 - (t * T) / timeouts[id])); });
+    });
+  }
+  function refill(ctx, ids) { return Promise.all(ids.map(function (id) { return ctx.animate(node(ctx, id).bar, { width: 52 }, 250); })); }
+  function votes(ctx, text, cls) { ctx.state.votesT.textContent = text; ctx.state.votesT.setAttribute('class', 'mono small ' + (cls || '')); }
+  function commit(ctx, text) { ctx.state.commitT.textContent = text; }
+
+  // ---- fencing helpers ----
+  function fbox(ctx, b, title, cls) {
+    var g = ctx.group();
+    var r = ctx.el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 8, class: 'box ' + (cls || '') }, g);
+    ctx.el('text', { x: b.x + 12, y: b.y + 22, class: 'title', text: title }, g);
+    var s1 = ctx.el('text', { x: b.x + 12, y: b.y + 42, class: 'mono small muted', text: '' }, g);
+    var s2 = ctx.el('text', { x: b.x + 12, y: b.y + 60, class: 'mono small muted', text: '' }, g);
+    return { g: g, r: r, s1: s1, s2: s2 };
+  }
+  function setT(t, text, cls) { t.textContent = text; t.setAttribute('class', 'mono small ' + (cls || 'muted')); }
+  var A2L = [[WA.x + WA.w, 430], [LOCK.x, 430]], B2L = [[WB.x, 430], [LOCK.x + LOCK.w, 430]];
+  var A2S = [[WA.x + WA.w / 2, WA.y + WA.h], [WA.x + WA.w / 2, 541], [STORE.x, 541]];
+  var B2S = [[WB.x + WB.w / 2, WB.y + WB.h], [WB.x + WB.w / 2, 541], [STORE.x + STORE.w, 541]];
+
+  function storeWrite(ctx, who, token) {
+    var S = ctx.state, F = S.f;
+    var path = who === 'A' ? A2S : B2S;
+    return ctx.packet(path, { ms: 700, cls: 'accent', label: 'pay batch 19 · t' + token }).then(function () {
+      var fenced = S.fencing;
+      var ok = !fenced || token >= F.maxToken;
+      ctx.flash(F.store.r);
+      if (ok) {
+        F.maxToken = Math.max(F.maxToken, token);
+        F.writes.push(who);
+        setT(F.store.s1, 'max token seen: ' + F.maxToken, '');
+        setT(F.store.s2, 'payout writes: ' + F.writes.join(', '), F.writes.length > 1 ? 'fill-bad' : 'fill-ok');
+        F.store.r.setAttribute('class', 'box ' + (F.writes.length > 1 ? 'bad' : 'ok'));
+      }
+      return ctx.packet(path.slice().reverse(), { ms: 500, cls: ok ? 'ok' : 'bad', label: ok ? 'OK' : 'REJECTED' }).then(function () { return ok; });
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'Five servers, one log',
+      say: 'Every server starts as a follower in term 1, with an election timer (the bar under it). Every log holds one committed entry, <code>x=1</code>. Below: a lock service built on this cluster, two workers and a payouts table.',
+    },
+    setup: function (ctx) {
+      var S = ctx.state;
+      S.nodes = {};
+      S.fencing = document.getElementById('fence').checked;
+      S.head = ctx.el('text', { x: 16, y: 22, class: 'title', text: '' });
+      header(ctx, 1, null);
+      NODES.forEach(function (a, i) {
+        NODES.slice(i + 1).forEach(function (b) { ctx.el('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'wire', opacity: 0.3 }); });
+      });
+      NODES.forEach(function (n) {
+        var g = ctx.group();
+        var circle = ctx.el('circle', { r: 26, class: 'box' }, g);
+        ctx.el('text', { y: -2, 'text-anchor': 'middle', class: 'title', text: n.id }, g);
+        var termT = ctx.el('text', { y: 13, 'text-anchor': 'middle', class: 'mono small muted', text: 'term 1' }, g);
+        var roleT = ctx.el('text', { y: 40, 'text-anchor': 'middle', class: 'mono small muted', text: 'follower' }, g);
+        ctx.el('rect', { x: -26, y: 46, width: 52, height: 4, rx: 2, class: 'fill-muted', opacity: 0.25 }, g);
+        var bar = ctx.el('rect', { x: -26, y: 46, width: 52, height: 4, rx: 2, class: 'fill-accent' }, g);
+        ctx.place(g, n.x, n.y);
+        S.nodes[n.id] = { g: g, circle: circle, termT: termT, roleT: roleT, bar: bar, term: 1, role: 'follower', cells: {} };
+      });
+      ctx.el('text', { x: LX, y: 40, class: 'title', text: 'Logs' });
+      ctx.el('text', { x: LX + 44, y: 40, class: 'mono small muted', text: 'index: term + command' });
+      NODES.forEach(function (n, row) {
+        var y = ROW0 + row * ROWH;
+        ctx.el('text', { x: LX, y: y + 17, class: 'mono', text: n.id });
+        var g = ctx.group();
+        var r = ctx.el('rect', { x: CELL_X, y: y, width: CELL_W, height: 26, rx: 5, class: 'box ok' }, g);
+        ctx.el('text', { x: CELL_X + CELL_W / 2, y: y + 17, 'text-anchor': 'middle', class: 'mono small', text: '1: t1 x=1' }, g);
+        S.nodes[n.id].cells[1] = { g: g, rect: r };
+      });
+      S.commitT = ctx.el('text', { x: LX, y: 260, class: 'mono small', text: 'commitIndex = 1' });
+      S.votesT = ctx.el('text', { x: LX, y: 280, class: 'mono small', text: '' });
+      ctx.el('text', { x: LX, y: 306, class: 'mono small muted', text: 'majority of 5 = 3' });
+
+      // fencing scene
+      ctx.el('line', { x1: 0, y1: 336, x2: 760, y2: 336, class: 'wire' });
+      ctx.el('text', { x: 16, y: 362, class: 'title', text: 'A lock built on it: lease + fencing token' });
+      ctx.el('polyline', { points: A2L.join(' '), class: 'wire dashed' });
+      ctx.el('polyline', { points: B2L.join(' '), class: 'wire dashed' });
+      ctx.el('polyline', { points: A2S.join(' '), class: 'wire dashed' });
+      ctx.el('polyline', { points: B2S.join(' '), class: 'wire dashed' });
+      S.f = { maxToken: 0, writes: [] };
+      S.f.a = fbox(ctx, WA, 'Worker A');
+      S.f.b = fbox(ctx, WB, 'Worker B');
+      S.f.lock = fbox(ctx, LOCK, 'Lock (etcd)', 'accent');
+      S.f.store = fbox(ctx, STORE, 'Payouts table');
+      setT(S.f.a.s1, 'scheduler pod');
+      setT(S.f.b.s1, 'scheduler pod');
+      setT(S.f.lock.s1, 'holder: none');
+      setT(S.f.lock.s2, 'next token: 33');
+      setT(S.f.store.s1, 'max token seen: none');
+      setT(S.f.store.s2, S.fencing ? 'rejects lower tokens' : 'token check OFF');
+      S.f.leaseBg = ctx.el('rect', { x: WA.x + 12, y: WA.y + WA.h - 8, width: 146, height: 4, rx: 2, class: 'fill-muted', opacity: 0 });
+      S.f.lease = ctx.el('rect', { x: WA.x + 12, y: WA.y + WA.h - 8, width: 0, height: 4, rx: 2, class: 'fill-accent' });
+    },
+    steps: [
+      {
+        title: 'No leader yet: timers run down',
+        say: 'No heartbeats arrive, so every follower\'s timer runs down. Each picked a <b>random</b> timeout (150–300 ms). S3 picked the shortest, so it wakes first. Randomness stops everyone from starting an election at the same moment.',
+        run: function (ctx) {
+          ctx.log('Timers: S3 160 ms, S5 200, S2 230, S1 260, S4 280', 'info');
+          return runTimers(ctx, { S1: 260, S2: 230, S3: 160, S4: 280, S5: 200 }, 'S3', 1300);
+        },
+      },
+      {
+        title: 'S3 runs for term 2 and wins a majority',
+        say: 'S3 moves to term 2, votes for itself and sends <code>RequestVote</code>. No one has voted in term 2 and S3\'s log is as new as theirs, so they all say yes. 3 of 5 is enough: S3 is the <b>leader</b>. Its heartbeats now reset everyone\'s timer.',
+        run: function (ctx) {
+          var others = ['S1', 'S2', 'S4', 'S5'];
+          setTerm(ctx, 'S3', 2); setRole(ctx, 'S3', 'candidate'); header(ctx, 2, null);
+          votes(ctx, 'Votes for S3: 1 of 5 (need 3)');
+          ctx.log('S3 → candidate, term 2, votes for itself', 'warn');
+          return send(ctx, 'S3', others, '', 650).then(function () {
+            others.forEach(function (id) { setTerm(ctx, id, 2); });
+            return replies(ctx, others, 'S3', function () { return 'ok'; });
+          }).then(function () {
+            votes(ctx, 'Votes for S3: 5 of 5 → leader', 'fill-ok');
+            setRole(ctx, 'S3', 'leader'); node(ctx, 'S3').bar.setAttribute('width', 0); header(ctx, 2, 'S3');
+            ctx.flash(node(ctx, 'S3').g);
+            ctx.log('S3 is leader of term 2', 'ok');
+            return send(ctx, 'S3', others, 'accent', 550);
+          }).then(function () { refill(ctx, others); ctx.log('Heartbeat (empty AppendEntries) → timers reset', 'info'); });
+        },
+      },
+      {
+        title: 'A write is committed once a majority stores it',
+        say: 'A client sends <code>x=5</code> to the leader. S3 appends it (dashed = not committed) and replicates. S1 and S2 store it; the messages to S4 and S5 are lost. S3 + S1 + S2 = <b>3 of 5</b>, so the entry is committed and the client gets OK.',
+        run: function (ctx) {
+          votes(ctx, '');
+          return addCell(ctx, 'S3', 2, 2, 'x=5', 'pending').then(function () {
+            ctx.log('Leader S3 appends #2 (t2 x=5)', 'info');
+            return Promise.all([
+              send(ctx, 'S3', ['S1', 'S2'], 'accent', 650),
+              ctx.packet(half('S3', 'S4'), { cls: 'bad', ms: 450, r: 6 }),
+              ctx.packet(half('S3', 'S5'), { cls: 'bad', ms: 500, r: 6 }),
+            ]);
+          }).then(function () {
+            ctx.log('S4, S5: message lost', 'bad');
+            return Promise.all([addCell(ctx, 'S1', 2, 2, 'x=5', 'pending'), addCell(ctx, 'S2', 2, 2, 'x=5', 'pending')]);
+          }).then(function () {
+            return replies(ctx, ['S1', 'S2'], 'S3', function () { return 'ok'; });
+          }).then(function () {
+            ['S3', 'S1', 'S2'].forEach(function (id) { setCell(ctx, id, 2, 'committed'); });
+            commit(ctx, 'commitIndex = 2 (on S1, S2, S3)');
+            ctx.log('3 of 5 stored #2 → committed, client gets OK', 'ok');
+          });
+        },
+      },
+      {
+        title: 'The leader crashes; a stale node cannot win',
+        say: 'S3 dies. S5 times out first and runs for term 3, but its log ends at t1 #1. S1 and S2 hold the committed t2 #2, which is newer, so they vote <b>no</b>. Only S4 says yes: 2 of 5, no majority. This vote rule is why committed data survives.',
+        run: function (ctx) {
+          setRole(ctx, 'S3', 'down'); node(ctx, 'S3').bar.setAttribute('width', 0); header(ctx, 2, 'none (S3 down)');
+          ctx.log('S3 crashed. No heartbeats.', 'bad');
+          return runTimers(ctx, { S1: 260, S2: 230, S4: 280, S5: 200 }, 'S5', 1000).then(function () {
+            setTerm(ctx, 'S5', 3); setRole(ctx, 'S5', 'candidate'); header(ctx, 3, null);
+            votes(ctx, 'Votes for S5: 1 of 5 (need 3)');
+            ctx.log('S5 → candidate, term 3, last log t1 #1', 'warn');
+            return Promise.all([send(ctx, 'S5', ['S1', 'S2', 'S4'], '', 650), ctx.packet(half('S5', 'S3'), { cls: 'bad', ms: 650, r: 6 })]);
+          }).then(function () {
+            ['S1', 'S2', 'S4'].forEach(function (id) { setTerm(ctx, id, 3); });
+            return replies(ctx, ['S1', 'S2', 'S4'], 'S5', function (f) { return f === 'S4' ? 'ok' : 'bad'; });
+          }).then(function () {
+            ctx.log('S1, S2: no (my log t2 #2 is newer). S4: yes.', 'bad');
+            votes(ctx, 'Votes for S5: 2 of 5 → lost', 'fill-bad');
+            setRole(ctx, 'S5', 'follower');
+          });
+        },
+      },
+      {
+        title: 'S1 wins term 4 and repairs the logs',
+        say: 'New random timeouts. S1 wakes first, runs for term 4 with last log t2 #2, and wins. It appends a no-op and sends AppendEntries; S4 and S5 get the missing #2. When S3 restarts it sees term 4 and stays a follower. The committed <code>x=5</code> survived.',
+        run: function (ctx) {
+          return runTimers(ctx, { S1: 170, S2: 250, S4: 290, S5: 270 }, 'S1', 900).then(function () {
+            setTerm(ctx, 'S1', 4); setRole(ctx, 'S1', 'candidate'); header(ctx, 4, null);
+            ctx.log('S1 → candidate, term 4, last log t2 #2', 'warn');
+            return send(ctx, 'S1', ['S2', 'S4', 'S5'], '', 600);
+          }).then(function () {
+            ['S2', 'S4', 'S5'].forEach(function (id) { setTerm(ctx, id, 4); });
+            return replies(ctx, ['S2', 'S4', 'S5'], 'S1', function () { return 'ok'; });
+          }).then(function () {
+            setRole(ctx, 'S1', 'leader'); header(ctx, 4, 'S1'); votes(ctx, 'Votes for S1: 4 of 5 → leader', 'fill-ok');
+            ctx.log('S1 is leader of term 4', 'ok');
+            setRole(ctx, 'S3', 'follower'); setTerm(ctx, 'S3', 4);
+            return addCell(ctx, 'S1', 3, 4, 'noop', 'pending');
+          }).then(function () {
+            return send(ctx, 'S1', ['S2', 'S3', 'S4', 'S5'], 'accent', 650);
+          }).then(function () {
+            return Promise.all([
+              addCell(ctx, 'S4', 2, 2, 'x=5', 'pending'), addCell(ctx, 'S5', 2, 2, 'x=5', 'pending'),
+              addCell(ctx, 'S2', 3, 4, 'noop', 'pending'), addCell(ctx, 'S3', 3, 4, 'noop', 'pending'),
+            ]);
+          }).then(function () {
+            return Promise.all([addCell(ctx, 'S4', 3, 4, 'noop', 'pending'), addCell(ctx, 'S5', 3, 4, 'noop', 'pending')]);
+          }).then(function () {
+            NODES.forEach(function (n) { [2, 3].forEach(function (i) { if (node(ctx, n.id).cells[i]) setCell(ctx, n.id, i, 'committed'); }); });
+            commit(ctx, 'commitIndex = 3 on all 5 nodes');
+            refill(ctx, ['S2', 'S3', 'S4', 'S5']); node(ctx, 'S1').bar.setAttribute('width', 0);
+            votes(ctx, '');
+            ctx.log('Logs repaired: #1, #2, #3 everywhere', 'ok');
+          });
+        },
+      },
+      {
+        title: 'A lock is a lease with a number',
+        say: 'etcd (this Raft cluster) offers locks. Worker A asks for the payout lock and gets it as a <b>lease</b>: valid 10 s unless renewed, with <b>token 33</b>. The token is the key\'s revision, so it only ever grows.',
+        run: function (ctx) {
+          var F = ctx.state.f;
+          return ctx.packet(A2L, { ms: 600, label: 'acquire' }).then(function () {
+            setT(F.lock.s1, 'holder: A · lease 10 s', '');
+            setT(F.lock.s2, 'next token: 34');
+            ctx.flash(F.lock.r);
+            return ctx.packet(A2L.slice().reverse(), { ms: 600, cls: 'ok', label: 'token 33' });
+          }).then(function () {
+            setT(F.a.s1, 'holds lock · token 33', 'fill-ok');
+            F.a.r.setAttribute('class', 'box ok');
+            F.leaseBg.setAttribute('opacity', 1);
+            ctx.log('A holds the lock, token 33, lease 10 s', 'ok');
+            return ctx.animate(F.lease, { width: 146 }, 500);
+          });
+        },
+      },
+      {
+        title: 'A freezes; its lease runs out',
+        say: 'Worker A hits a 15 s garbage-collection pause just before writing. It cannot renew the lease, so etcd expires it. A does not know: from its point of view no time has passed.',
+        run: function (ctx) {
+          var F = ctx.state.f;
+          setT(F.a.s1, 'GC pause · thinks t33', 'fill-signal');
+          F.a.r.setAttribute('class', 'box dim');
+          ctx.log('A: stop-the-world GC pause, 15 s', 'warn');
+          return ctx.animate(F.lease, { width: 0 }, 1300).then(function () {
+            setT(F.lock.s1, 'holder: none (expired)', 'fill-bad');
+            ctx.flash(F.lock.r);
+            ctx.log('etcd: A\'s lease expired after 10 s', 'bad');
+          });
+        },
+      },
+      {
+        title: 'B takes the lock and pays the batch',
+        say: 'Worker B asks for the lock and gets it with <b>token 34</b>. It writes "pay batch 19" with token 34. The payouts table records 34 as the highest token it has seen.',
+        run: function (ctx) {
+          var F = ctx.state.f;
+          return ctx.packet(B2L, { ms: 600, label: 'acquire' }).then(function () {
+            setT(F.lock.s1, 'holder: B · lease 10 s', '');
+            setT(F.lock.s2, 'next token: 35');
+            return ctx.packet(B2L.slice().reverse(), { ms: 600, cls: 'ok', label: 'token 34' });
+          }).then(function () {
+            setT(F.b.s1, 'holds lock · token 34', 'fill-ok');
+            F.b.r.setAttribute('class', 'box ok');
+            ctx.log('B holds the lock, token 34', 'ok');
+            return storeWrite(ctx, 'B', 34);
+          }).then(function () { ctx.log('Payouts table: batch 19 paid by B, max token = 34', 'ok'); });
+        },
+      },
+      {
+        title: 'A wakes up and writes anyway: rejected',
+        say: 'A\'s pause ends. It still believes it holds the lock and sends its write with <b>token 33</b>. The table has already seen 34, so 33 is stale: <b>rejected</b>. Without this check, batch 19 would be paid twice. No TTL value can prevent this; only the token can.',
+        run: function (ctx) {
+          var F = ctx.state.f;
+          setT(F.a.s1, 'awake · sends t33', 'fill-signal');
+          F.a.r.setAttribute('class', 'box signal');
+          ctx.log('A resumes and writes with token 33', 'warn');
+          return storeWrite(ctx, 'A', 33).then(function (ok) {
+            if (ok) ctx.log('Token check OFF: A\'s write accepted → batch 19 paid TWICE', 'bad');
+            else ctx.log('33 < 34 → REJECTED. Batch paid exactly once.', 'ok');
+            setT(F.a.s1, ok ? 'accepted: paid twice!' : 'rejected → steps down', ok ? 'fill-bad' : 'fill-bad');
+          });
+        },
+      },
+    ],
+  });
+
+  // ---------- Try it ----------
+  var fence = document.getElementById('fence');
+  fence.addEventListener('change', function () {
+    var S = lab.ctx.state;
+    S.fencing = fence.checked;
+    if (S.f) setT(S.f.store.s2, S.f.writes.length ? 'payout writes: ' + S.f.writes.join(', ') : (S.fencing ? 'rejects lower tokens' : 'token check OFF'), S.f.writes.length > 1 ? 'fill-bad' : '');
+    lab.ctx.log('You: storage token check ' + (fence.checked ? 'ON' : 'OFF') + ' (replay steps 8–9 to compare)', 'info');
+  });
+  document.getElementById('wa').addEventListener('click', function () {
+    var ctx = lab.ctx;
+    storeWrite(ctx, 'A', 33).then(function (ok) { ctx.log('You: A writes with 33 → ' + (ok ? 'accepted' : 'rejected'), ok ? 'warn' : 'bad'); });
+  });
+  document.getElementById('wb').addEventListener('click', function () {
+    var ctx = lab.ctx;
+    storeWrite(ctx, 'B', 34).then(function (ok) { ctx.log('You: B writes with 34 → ' + (ok ? 'accepted' : 'rejected'), ok ? 'ok' : 'bad'); });
+  });
+})();
+</script>
+</body>
+</html>

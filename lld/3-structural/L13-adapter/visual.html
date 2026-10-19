@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>L13 Adapter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .divider { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .plug { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 5 4; }
+  pre.code .ln { display: block; border-left: 3px solid transparent; padding-left: 6px; margin-left: -9px; }
+  pre.code .ln.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .try b { color: var(--ink); font-weight: 600; }
+  .try select { font: 13px var(--font-body); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L13 · Structural</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Adapter</h1>
+    <p class="lede">Three payment SDKs, three shapes: one returns a promise and wants rupees, one uses callbacks and numeric error codes, one never throws and hides failure in a status field. Each adapter translates names, units and errors so the service sees one interface.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 470" role="img" aria-label="A payment service calling three SDKs through adapters"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+      <div class="try">
+        <b>Try it</b>
+        <label for="t-p">provider</label>
+        <select id="t-p"><option value="0">GatewayA</option><option value="1">GatewayB</option><option value="2">GatewayC</option></select>
+        <label for="t-o">outcome</label>
+        <select id="t-o"><option value="ok">success</option><option value="bad">declined</option></select>
+        <button class="btn" type="button" id="t-go">charge()</button>
+        <span id="try-out">Run to step 2 first.</span>
+      </div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--signal)"></i>Your request shape</span>
+        <span><i style="background: var(--warn)"></i>SDK's shape</span>
+        <span><i style="background: var(--ok)"></i>Mapped result</span>
+        <span><i style="background: var(--bad)"></i>Error (mapped to yours)</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>The key lines (highlighted per step)</h3>
+<pre class="code" id="code"><span class="ln" data-l="1">interface PaymentProvider { charge(r: ChargeReq): Promise&lt;ChargeResult&gt; }</span><span class="ln" data-l="2">class GatewayAAdapter implements PaymentProvider {</span><span class="ln" data-l="3">  constructor(private sdk: GatewayASdk) {}</span><span class="ln" data-l="4">  async charge(r: ChargeReq) {</span><span class="ln" data-l="5">    try {</span><span class="ln" data-l="6">      const o = await this.sdk.orders.create({ amount: (r.paise / 100).toFixed(2), receipt: r.orderId });</span><span class="ln" data-l="7">      return { ref: o.id, status: 'PENDING' };</span><span class="ln" data-l="8">    } catch (e) { throw mapGatewayAError(e); } // → PaymentDeclinedError</span><span class="ln" data-l="9">  }</span><span class="ln" data-l="10">}</span><span class="ln" data-l="11">class GatewayBAdapter implements PaymentProvider {</span><span class="ln" data-l="12">  charge(r: ChargeReq) {</span><span class="ln" data-l="13">    return new Promise&lt;ChargeResult&gt;((ok, fail) =&gt;</span><span class="ln" data-l="14">      this.sdk.pay(r.paise, (code, id) =&gt; code === 0</span><span class="ln" data-l="15">        ? ok({ ref: id, status: 'CAPTURED' })</span><span class="ln" data-l="16">        : fail(new PaymentDeclinedError(B_CODES[code]))));</span><span class="ln" data-l="17">  }</span><span class="ln" data-l="18">}</span></pre>
+    </div>
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The service depends on my <code>PaymentProvider</code> interface, not on any SDK. Each provider gets one adapter that converts the request, the units (paise vs rupees), the response and the error codes into my types. Adding or replacing a provider is one new class, and the domain code and tests don't change. Because every adapter has the same interface, a fallback router is easy: try A, then B."</p>
+    </div>
+    <div class="note wide">
+      <h3>Adapter vs Facade vs Decorator vs Proxy</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Adapter</th><th>Facade (L15)</th><th>Decorator (L14)</th><th>Proxy (L16)</th></tr></thead>
+          <tbody>
+            <tr><td>Interface</td><td><b>Changes</b> it to the one the client expects</td><td>New, simpler interface over many classes</td><td>Same as the wrapped object</td><td>Same as the wrapped object</td></tr>
+            <tr><td>Wraps</td><td>One adaptee</td><td>A whole subsystem</td><td>One object, stackable</td><td>One object</td></tr>
+            <tr><td>Intent</td><td>Make incompatible things fit</td><td>Hide complexity</td><td>Add behaviour</td><td>Control access (lazy, cache, auth)</td></tr>
+            <tr><td>Node example</td><td><code>util.promisify</code>, ORM dialects</td><td><code>checkout()</code> calling cart, stock, payment</td><td><code>withRetry(fn)</code></td><td>Lazy DB client, cache proxy</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note wide">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Gateway A uses rupees as strings, B uses integer paise. Where do you convert?</summary><div>Inside each adapter. The domain uses one unit everywhere (integer paise), so no money math happens in floats outside the edge.</div></details>
+      <details class="qa"><summary>The SDK throws <code>{ code: 'CARD_DECLINED' }</code>. What should your adapter throw?</summary><div>Your own error type, for example <code>PaymentDeclinedError('CARD_DECLINED')</code>, so the service never checks provider-specific codes and can treat all providers the same.</div></details>
+      <details class="qa"><summary>Object adapter vs class adapter?</summary><div>An object adapter holds the adaptee as a field (composition). A class adapter extends it (inheritance). In TS use the object adapter: it works with any instance, and you cannot extend two classes anyway.</div></details>
+      <details class="qa"><summary>How do you test adapters?</summary><div>A shared contract test suite that runs against every <code>PaymentProvider</code> implementation with the SDK stubbed, plus a few integration tests against each provider's sandbox.</div></details>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var AX = 262, AW = 215, SX = 548, SW = 192, H = 78;
+  var P = [
+    { name: 'GatewayAAdapter', sdk: 'GatewayA SDK', sdkLines: ['orders.create({ amount })', 'rupees string; throws'], y: 30,
+      inShape: "orders.create({ amount: '499.00', receipt: 'ord_81' })", okOut: "{ id: 'order_Qx1', status: 'created' }", okMap: "{ ref: 'order_Qx1', status: 'PENDING' }",
+      badOut: "throws { error: { code: 'BAD_REQUEST_ERROR', reason: 'card_declined' } }", badMap: "PaymentDeclinedError('CARD_DECLINED')", hlOk: [4, 6, 7], hlBad: [5, 8] },
+    { name: 'GatewayBAdapter', sdk: 'GatewayB SDK', sdkLines: ['pay(paise, cb(code, id))', 'callback; 51 = no funds'], y: 144,
+      inShape: 'pay(49900, (code, id) => …)   // paise, callback', okOut: "cb(0, 'B-778812')", okMap: "{ ref: 'B-778812', status: 'CAPTURED' }",
+      badOut: 'cb(51, null)   // numeric code', badMap: "PaymentDeclinedError('INSUFFICIENT_FUNDS')", hlOk: [12, 13, 14, 15], hlBad: [13, 14, 16] },
+    { name: 'GatewayCAdapter', sdk: 'GatewayC SDK', sdkLines: ['charge({ cents, ccy })', 'never throws: status'], y: 258,
+      inShape: "charge({ cents: 49900, ccy: 'inr' })", okOut: "{ status: 'SUCCESS', txn: 'C9-12' }", okMap: "{ ref: 'C9-12', status: 'CAPTURED' }",
+      badOut: "{ status: 'FAILED', reason: 'DO_NOT_HONOR' }   // HTTP 200!", badMap: "PaymentDeclinedError('CARD_DECLINED')", hlOk: [1], hlBad: [1] },
+  ];
+  var SVC = { x: 15, y: 120, w: 205, h: 120 };
+
+  function hl(lines) {
+    var on = {};
+    (lines || []).forEach(function (l) { on[l] = true; });
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (n) {
+      n.classList.toggle('on', !!on[n.getAttribute('data-l')]);
+    });
+  }
+
+  function box(ctx, parent, x, y, w, h, title, lines, cls) {
+    var g = ctx.group({}, parent);
+    g.r = ctx.el('rect', { x: x, y: y, width: w, height: h, rx: 7, class: 'box ' + (cls || '') }, g);
+    g.t = ctx.el('text', { x: x + 10, y: y + 19, class: 'b', text: title }, g);
+    g.lines = (lines || []).map(function (l, i) {
+      return ctx.el('text', { x: x + 10, y: y + 37 + i * 16, class: 'mono small', text: l }, g);
+    });
+    return g;
+  }
+
+  function strip(ctx, rows) {
+    var s = ctx.state;
+    s.strip.forEach(function (t, i) {
+      var r = rows[i] || ['', ''];
+      t.k.textContent = r[0]; t.v.textContent = r[1];
+      t.v.setAttribute('class', 'mono small ' + (r[2] || ''));
+    });
+  }
+
+  // One call through adapter i. outcome 'ok' | 'bad'
+  function call(ctx, i, outcome) {
+    var s = ctx.state, p = P[i], my = p.y + H / 2, sy = SVC.y + SVC.h / 2;
+    var ok = outcome === 'ok';
+    hl(ok ? p.hlOk : p.hlBad);
+    strip(ctx, [['your request', "provider.charge({ orderId: 'ord_81', paise: 49900 })", 'fill-signal']]);
+    ctx.log(p.name + '.charge({ orderId, paise: 49900 })', 'info');
+    return ctx.packet([[SVC.x + SVC.w, sy], [AX, my]], { ms: 450, label: 'charge()' }).then(function () {
+      ctx.flash(s.ad[i].r);
+      strip(ctx, [['your request', "provider.charge({ orderId: 'ord_81', paise: 49900 })", 'fill-signal'], ['adapter sends', p.inShape, 'fill-warn']]);
+      ctx.log('adapter translates → ' + p.inShape, 'warn');
+      return ctx.packet([[AX + AW, my - 8], [SX, my - 8]], { ms: 450, cls: 'warn' });
+    }).then(function () {
+      ctx.flash(s.sdk[i].r);
+      return ctx.packet([[SX, my + 8], [AX + AW, my + 8]], { ms: 450, cls: ok ? 'warn' : 'bad' });
+    }).then(function () {
+      var out = ok ? p.okOut : p.badOut, mapped = ok ? p.okMap : p.badMap;
+      strip(ctx, [
+        ['your request', "provider.charge({ orderId: 'ord_81', paise: 49900 })", 'fill-signal'],
+        ['adapter sends', p.inShape, 'fill-warn'],
+        ['SDK returns', out, ok ? 'fill-warn' : 'fill-bad'],
+        ['you get', mapped, ok ? 'fill-ok' : 'fill-bad'],
+      ]);
+      ctx.log('SDK: ' + out, ok ? 'warn' : 'bad');
+      ctx.log('adapter maps → ' + mapped, ok ? 'ok' : 'bad');
+      return ctx.packet([[AX, my], [SVC.x + SVC.w, sy]], { ms: 450, cls: ok ? 'ok' : 'bad' });
+    }).then(function () {
+      ctx.flash(s.svc.r);
+      s.svc.lines[3].textContent = ok ? 'result: ' + (i === 0 ? 'PENDING' : 'CAPTURED') : 'catch PaymentDeclined';
+      s.svc.lines[3].setAttribute('class', 'mono small ' + (ok ? 'fill-ok' : 'fill-bad'));
+      return ok;
+    });
+  }
+
+  var lab = Kit.lab({
+    stage: '#stage',
+    intro: {
+      title: 'One service, three SDKs',
+      say: 'The payment service must charge through any of three gateways. Their SDKs differ in method names, units, async style and how they report failure.',
+    },
+    setup: function (ctx) {
+      var s = ctx.state;
+      hl([]);
+      s.svc = box(ctx, null, SVC.x, SVC.y, SVC.w, SVC.h, 'PaymentService', ["if (gw === 'A') sdkA.orders…", "else if ('B') sdkB.pay(cb)", "else sdkC.charge(…)", ''], 'signal');
+      s.ifaceG = ctx.group({ opacity: 0 });
+      ctx.el('text', { x: AX, y: 20, class: 'mono small fill-accent', text: '«interface» PaymentProvider.charge(req)' }, s.ifaceG);
+      s.ad = P.map(function (p) {
+        var g = box(ctx, s.ifaceG, AX, p.y, AW, H, p.name, ['implements PaymentProvider', 'maps units, shape, errors'], 'accent');
+        return g;
+      });
+      s.sdk = P.map(function (p) { return box(ctx, null, SX, p.y, SW, H, p.sdk, p.sdkLines, ''); });
+      s.direct = ctx.group();
+      P.forEach(function (p) {
+        ctx.el('path', { d: 'M' + (SVC.x + SVC.w) + ',' + (SVC.y + 60) + ' L' + SX + ',' + (p.y + H / 2), class: 'wire bad' }, s.direct);
+      });
+      ctx.el('line', { x1: 10, y1: 350, x2: 750, y2: 350, class: 'divider' });
+      ctx.el('text', { x: 20, y: 372, class: 'mono small muted', text: 'translation at the edge' });
+      s.strip = [0, 1, 2, 3].map(function (i) {
+        return {
+          k: ctx.el('text', { x: 20, y: 394 + i * 19, class: 'mono small muted', text: '' }),
+          v: ctx.el('text', { x: 130, y: 394 + i * 19, class: 'mono small', text: '' }),
+        };
+      });
+    },
+    steps: [
+      {
+        title: 'Before: the service speaks every SDK',
+        say: 'The service imports all three SDKs and branches on the gateway. Rupees vs paise, callbacks vs promises and three error formats all live inside business code. A fourth gateway means editing it again.',
+        run: function (ctx) {
+          var s = ctx.state;
+          return ctx.tween(500, function () {}).then(function () {
+            ctx.flash(s.svc.r);
+            s.svc.r.setAttribute('class', 'box bad');
+            ctx.log('PaymentService imports 3 SDK types', 'bad');
+            ctx.log("checks err.error.code, numeric code 51, and status === 'FAILED'", 'bad');
+          });
+        },
+      },
+      {
+        title: 'Define YOUR interface (the target)',
+        say: 'Write the interface the service wants: <code>charge({ orderId, paise })</code> returning <code>{ ref, status }</code>, and one error type, <code>PaymentDeclinedError</code>. The service depends only on this.',
+        run: function (ctx) {
+          var s = ctx.state;
+          hl([1]);
+          s.svc.r.setAttribute('class', 'box signal');
+          s.svc.lines[0].textContent = 'p: PaymentProvider';
+          s.svc.lines[1].textContent = 'await p.charge(req)';
+          s.svc.lines[2].textContent = 'catch PaymentDeclined…';
+          s.ready = true;
+          return ctx.fade(s.direct, 0, 400).then(function () { return ctx.fade(s.ifaceG, 1, 450); })
+            .then(function () { ctx.log('service imports: PaymentProvider, PaymentDeclinedError only', 'ok'); });
+        },
+      },
+      {
+        title: 'Adapter A: rename fields, convert units',
+        say: 'The service sends paise. Gateway A wants rupees as a string and calls it <code>amount</code>, with <code>receipt</code> for the order id. The adapter converts going in and maps <code>{ id, status: \'created\' }</code> coming out.',
+        run: function (ctx) { return call(ctx, 0, 'ok'); },
+      },
+      {
+        title: 'Adapter B: callback to promise',
+        say: 'Gateway B is an old callback SDK. The adapter wraps it in a Promise, exactly what <code>util.promisify</code> does, and maps <code>cb(0, id)</code> to a result.',
+        run: function (ctx) { return call(ctx, 1, 'ok'); },
+      },
+      {
+        title: 'Errors: provider codes become your error',
+        say: 'Gateway B answers <code>cb(51)</code>, its code for insufficient funds. The adapter throws <code>PaymentDeclinedError(\'INSUFFICIENT_FUNDS\')</code>. The service never sees the number 51.',
+        run: function (ctx) { return call(ctx, 1, 'bad'); },
+      },
+      {
+        title: 'Adapter C: a failure hidden in a 200',
+        say: 'Gateway C never throws. A decline comes back as HTTP 200 with <code>status: \'FAILED\'</code>. Without the adapter, someone forgets to check it and ships the order. The adapter turns it into the same error.',
+        run: function (ctx) { return call(ctx, 2, 'bad'); },
+      },
+      {
+        title: 'Same interface → easy fallback',
+        say: 'Because every adapter is a <code>PaymentProvider</code>, a router can try them in order. Gateway A times out, so the router calls Gateway C. The service code is unchanged.',
+        run: function (ctx) {
+          var s = ctx.state, sy = SVC.y + SVC.h / 2;
+          hl([1]);
+          strip(ctx, [['router', 'for (const p of [gwA, gwC]) try { return await p.charge(req) } catch …', 'fill-signal']]);
+          ctx.log('FallbackProvider([A, C]).charge(req)', 'info');
+          return ctx.packet([[SVC.x + SVC.w, sy], [AX, P[0].y + 39], [SX, P[0].y + 39]], { ms: 600, label: 'A' })
+            .then(function () {
+              ctx.flash(s.sdk[0].r);
+              s.sdk[0].r.setAttribute('class', 'box bad');
+              ctx.log('GatewayA: timeout after 3s → ProviderUnavailableError', 'bad');
+              return ctx.packet([[SX, P[0].y + 50], [AX, P[0].y + 50]], { ms: 400, cls: 'bad' });
+            })
+            .then(function () { return call(ctx, 2, 'ok'); })
+            .then(function () { s.sdk[0].r.setAttribute('class', 'box'); ctx.log('fallback succeeded on GatewayC', 'ok'); });
+        },
+      },
+    ],
+  });
+
+  var out = document.getElementById('try-out');
+  document.getElementById('t-go').addEventListener('click', function () {
+    var ctx = lab.ctx;
+    if (!ctx.state.ready) { out.textContent = 'Run to step 2 first (adapters must exist).'; return; }
+    var i = parseInt(document.getElementById('t-p').value, 10);
+    var o = document.getElementById('t-o').value;
+    call(ctx, i, o).then(function (ok) {
+      out.textContent = ok ? 'Mapped to { ref, status }.' : 'Mapped to PaymentDeclinedError. Same catch for every gateway.';
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,13 +1,22 @@
-// The day-wise system design plan: the single source of truth.
-// Edit this file, then run `npm run plan` to regenerate plan/weeks/*.md and visuals/plan-data.js.
+// The day-wise system design plan, built from plan/concepts.ts.
+// Edit this file, then run `npm run plan` to regenerate plan/weeks/*.md, plan-data.js and CATALOG.md.
 //
 // Budget (fits the career plan in ~/career-agent/plan.md, DSA is separate):
-//   Weekdays: 60 min after work = LLD 25 min + HLD 35 min
-//   Saturday: 150 min = LLD machine-coding 90 min + HLD 60 min
-//   Sunday:   150 min = HLD full design 75 min + weekly review 45 min (+ /daily week)
+//   Mon–Fri:  60 min = LLD 25 + HLD 35
+//   Saturday: 150 min = LLD timed machine-coding 90 + HLD lab 60
+//   Sunday:   120 min = HLD full design 75 + weekly review 45 (+ /daily week)
+//
+// Shape (matches the career plan's phases):
+//   Phase 1 (wk 1–3):   one LLD + one HLD concept every weekday. First 3 LLD problems, first 3 HLD designs.
+//   Phase 2 (wk 4–10):  concepts Mon–Wed, an LLD problem Thu–Sat, an HLD case study Thu–Fri + one on Sunday.
+//   Phase 3 (wk 11–18): last concepts, hard designs, advanced problems, interview debrief fixes.
+//   Phase 4 (wk 19–26): spaced redo sprints, mocks, offers.
+
+import { CONCEPTS, MODULES, conceptDir, type Concept } from './concepts';
 
 export const START = '2026-10-19'; // Monday, day 1
 export const END = '2027-04-18'; // Sunday, day 182
+const WEEK_COUNT = 26;
 
 export type Track = 'LLD' | 'HLD' | 'REV' | 'MOCK';
 
@@ -17,6 +26,7 @@ export interface Task {
   title: string;
   todo: string;
   links: string[]; // repo-root-relative paths
+  concept?: string; // concept id, when the task is a concept day
 }
 
 export interface Day {
@@ -39,332 +49,222 @@ export const PHASES = {
   4: { name: 'Offers and sharpness', range: 'Weeks 19–26' },
 } as const;
 
-// ---------- link helpers ----------
-const lc = (s: string) => `lld/concepts/${s}.md`;
-const pat = (s: string) => `lld/concepts/patterns/${s}.md`;
-const patTs = (s: string) => `lld/concepts/patterns/${s}.ts`;
-const lp = (s: string) => `lld/problems/${s}/README.md`;
-const hc = (s: string) => `hld/concepts/${s}.md`;
-const hp = (s: string) => `hld/problems/${s}/README.md`;
-const hpMine = (s: string) => `hld/problems/${s}/my-design.md`;
-const code = (s: string) => `hld/code/${s}/README.md`;
-const vis = (s: string) => `visuals/${s}.html`;
-const ADV = 'hld/problems/advanced-37.md';
-const TEMPLATE = 'hld/problems/_template/my-design.md';
+const phaseOf = (w: number): Week['phase'] => (w <= 3 ? 1 : w <= 10 ? 2 : w <= 18 ? 3 : 4);
 
-// ---------- task builders ----------
-const t = (track: Track, minutes: number, title: string, todo: string, links: string[]): Task => ({ track, minutes, title, todo, links });
+// ---------- what gets practised, in order ----------
 
-const READ_LLD = 'Read the card, run the .ts file, then close it and write the pattern from memory. Answer the self-test.';
-const READ_HLD = 'Read the card. Play the visual if there is one. Answer the self-test without peeking, then say the "what to say" part out loud.';
+// LLD problems, one a week, ordered so the patterns they need are already learned.
+const LLD_PROBLEMS: [string, string][] = [
+  ['07-tic-tac-toe', 'Tic-Tac-Toe'], ['01-parking-lot', 'Parking Lot'], ['08-snake-ladder', 'Snake and Ladder'],
+  ['24-file-system', 'In-memory File System'], ['02-lru-cache', 'LRU / LFU Cache'], ['06-vending-machine', 'Vending Machine'],
+  ['03-logger', 'Logger framework'], ['05-notification-service', 'Notification Service'], ['13-bookmyshow', 'BookMyShow (seat locking)'],
+  ['04-rate-limiter', 'Rate Limiter'], ['09-splitwise', 'Splitwise'], ['22-text-editor', 'Text Editor (undo/redo)'],
+  ['10-elevator', 'Elevator System'], ['11-atm', 'ATM'], ['19-payment-wallet', 'Payment Wallet'],
+  ['14-kv-store', 'KV Store (TTL + transactions)'], ['20-ecommerce-cart-coupons', 'Cart with Coupons'], ['12-library-management', 'Library Management'],
+  ['21-meeting-room-scheduler', 'Meeting Room Scheduler'], ['16-task-scheduler', 'Task Scheduler'], ['15-pub-sub-queue', 'Pub-Sub Queue'],
+  ['17-ride-sharing', 'Ride Sharing'], ['18-food-delivery', 'Food Delivery'], ['23-chess', 'Chess'],
+];
+// The ones asked most, used for redo sprints and the last weeks.
+const LLD_HOT = ['01-parking-lot', '13-bookmyshow', '02-lru-cache', '06-vending-machine', '09-splitwise', '10-elevator', '04-rate-limiter', '19-payment-wallet', '03-logger', '22-text-editor'];
 
-const lldCard = (slug: string, title: string, extra: string[] = [], min = 25) =>
-  t('LLD', min, title, 'Read the card. Write its key idea in 3 lines in your own words. Answer the self-test.', [lc(slug), ...extra]);
-const patterns = (a: [string, string], b?: [string, string], extra: string[] = []) =>
-  t('LLD', 25, b ? `${a[1]} + ${b[1]}` : a[1], READ_LLD, [pat(a[0]), patTs(a[0]), ...(b ? [pat(b[0]), patTs(b[0])] : []), ...extra]);
-const hldCard = (slug: string, title: string, extra: string[] = [], min = 35) => t('HLD', min, title, READ_HLD, [hc(slug), ...extra]);
+// HLD case studies, in the order they're designed (two a week from week 4).
+const CASE_STUDIES: [string, string][] = [
+  ['01-url-shortener', 'URL Shortener'], ['03-unique-id-generator', 'Unique ID Generator'], ['02-rate-limiter', 'Distributed Rate Limiter'],
+  ['04-key-value-store', 'Distributed KV Store'], ['17-distributed-cache', 'Distributed Cache'],
+  ['05-notification-system', 'Notification System'], ['06-chat-system', 'Chat System (WhatsApp)'],
+  ['07-news-feed', 'News Feed'], ['08-payment-system', 'Payment System'],
+  ['09-ticket-booking', 'Ticket Booking (BookMyShow)'], ['12-search-autocomplete', 'Search Autocomplete'],
+  ['11-food-delivery', 'Food Delivery'], ['10-ride-hailing', 'Ride Hailing (Uber)'],
+  ['13-web-crawler', 'Web Crawler'], ['16-photo-sharing', 'Photo Sharing (Instagram)'],
+  ['21-leaderboard', 'Real-time Leaderboard'], ['22-proximity-service', 'Proximity Service'],
+  ['18-distributed-message-queue', 'Distributed Message Queue'], ['15-file-storage', 'File Storage (Dropbox)'],
+  ['20-ad-click-aggregation', 'Ad Click Aggregation'], ['19-metrics-monitoring', 'Metrics and Monitoring'],
+  ['27-live-comments', 'Live Comments'], ['25-collaborative-editor', 'Collaborative Editor'],
+  ['23-hotel-booking', 'Hotel Reservation'], ['14-video-streaming', 'Video Streaming'],
+  ['28-digital-wallet', 'Digital Wallet / UPI'], ['26-stock-exchange', 'Stock Exchange'],
+  ['24-job-scheduler', 'Distributed Job Scheduler'],
+];
+const HLD_HOT = ['01-url-shortener', '06-chat-system', '07-news-feed', '08-payment-system', '09-ticket-booking', '10-ride-hailing', '05-notification-system', '02-rate-limiter', '12-search-autocomplete', '15-file-storage', '14-video-streaming', '28-digital-wallet'];
 
-const lldDesign = (slug: string, title: string, v1 = false) =>
-  t('LLD', 25, `${title}: requirements + class diagram`, `${v1 ? 'Read "Your v1 attempt: what to fix" first. ' : ''}Do Step 1 and Step 3 on paper: entities, relationships, patterns. Don't code yet.`, [lp(slug)]);
-const lldBuild = (slug: string, title: string) =>
-  t('LLD', 25, `${title}: implement the core`, 'Code the main flow in starter.ts. Run the tests and get the first half green.', [lp(slug)]);
-const lldFinish = (slug: string, title: string) =>
-  t('LLD', 25, `${title}: finish + extensions`, 'Make all tests green. Then answer the Step 5 extensions out loud. Only now compare with reference.ts.', [lp(slug)]);
-const lldTimed = (slug: string, title: string, min = 90) =>
-  t('LLD', min, `${title}: timed machine-coding`, `Full round, ${min} min on a timer: 10 min clarify, 10 min design, the rest code + tests. Then compare with reference.ts and note 3 differences.`, [lp(slug)]);
-const lldSprint = (slug: string, title: string) =>
-  t('LLD', 25, `Redo ${title} from scratch (core only)`, 'Empty file, 25 min. Rebuild the core classes from memory. Spaced repetition: this is what makes it stick.', [lp(slug)]);
-
-const hldHalf1 = (slug: string, title: string) =>
-  t('HLD', 35, `${title}: part 1 (steps 1–5)`, 'In my-design.md: requirements, estimates, API, data model, diagram. Don\'t open the hints.', [hp(slug), hpMine(slug)]);
-const hldHalf2 = (slug: string, title: string) =>
-  t('HLD', 35, `${title}: part 2 (deep dives + compare)`, 'Write the 2–3 deep dives. Then open every hint, compare, and fill in the Review section.', [hp(slug), hpMine(slug)]);
-const hldFull = (slug: string, title: string, min = 75) =>
-  t('HLD', min, `${title}: full design`, '45 min on a timer in my-design.md, talking out loud as if to an interviewer. Then 30 min comparing with the hints and filling in the Review.', [hp(slug), hpMine(slug)]);
-const hldRedo = (slug: string, title: string, min = 35) =>
-  t('HLD', min, `Redo ${title} from memory`, 'Blank page. Draw the diagram and list the deep dives in 25 min. Check against your old my-design.md Review notes.', [hp(slug), hpMine(slug)]);
-const advOutline = (name: string, min = 35) =>
-  t('HLD', min, `Advanced: ${name} (outline)`, 'Copy the template to hld/problems/advanced/<name>.md. Outline it in 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md.', [ADV, TEMPLATE]);
-const advFull = (name: string) =>
-  t('HLD', 35, `Advanced: ${name}`, 'Part 1 today, part 2 tomorrow. Copy the template to hld/problems/advanced/<name>.md and run it like a real round.', [ADV, TEMPLATE]);
-
-const review = (focus: string, links: string[] = []) =>
-  t('REV', 45, 'Weekly review', `${focus} Then run /daily week.`, links);
-const refresh = (a: [string, string], b: [string, string]) =>
-  t('HLD', 35, `Refresh: ${a[1]} + ${b[1]}`, 'Self-test only. Answer every question on both cards from memory, then re-read only what you got wrong.', [hc(a[0]), hc(b[0])]);
-const debrief = (track: Track) =>
-  t(track, track === 'LLD' ? 25 : 35, 'Debrief fix', 'Fix the weakest topic from this week\'s real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored card.', []);
-const mockLld = t('MOCK', 90, 'Mock machine-coding round', 'Someone else (your brother, a friend, Pramp) picks any finished LLD problem and plays the interviewer. 90 min, full round. Write a debrief.', ['lld/concepts/04-lld-interview-framework.md']);
-const mockHld = (min = 60) =>
-  t('MOCK', min, 'Mock HLD round', 'Ask a friend, or use Pramp / interviewing.io peers. Pick a problem you have not designed in the last 2 weeks. 45 min + feedback. Write a debrief.', ['hld/concepts/01-how-to-approach-hld.md']);
-
-// ---------- the 26 weeks ----------
-export const WEEKS: Week[] = [
-  // ===== Phase 1: Foundations =====
-  {
-    phase: 1,
-    theme: 'How systems talk + OOP in TypeScript',
-    goal: 'Know the interview frameworks for both rounds. Write clean TS classes. Finish your first full LLD and HLD.',
-    days: [
-      { tasks: [lldCard('01-oop-pillars', 'OOP pillars in TypeScript', ['archive/practice-v1/oop-basics/']), hldCard('01-how-to-approach-hld', 'How to approach an HLD round', [vis('v01-request-lifecycle')])] },
-      { tasks: [lldCard('05-ts-for-lld', 'TypeScript features for LLD'), hldCard('03-networking-basics', 'Networking basics')] },
-      { tasks: [lldCard('02-solid', 'SOLID part 1: S, O, L', [vis('v21-solid-refactor')]), hldCard('02-back-of-envelope', 'Back-of-the-envelope estimation', [vis('v19-estimation-calculator')])] },
-      { tasks: [lldCard('02-solid', 'SOLID part 2: I, D'), hldCard('04-api-design', 'API design')] },
-      { tasks: [lldCard('03-uml-relationships', 'UML relationships', [vis('v22-uml-relationships')]), hldCard('06-scaling-basics', 'Scaling basics and stateless services')] },
-      { tasks: [t('LLD', 90, 'Machine-coding framework + Parking Lot', 'Read the framework card (20 min). Then do Parking Lot on a 70-min timer.', [lc('04-lld-interview-framework'), lp('01-parking-lot')]), hldCard('07-load-balancing', 'Load balancing', [vis('v02-load-balancing')], 60)] },
-      { tasks: [hldFull('01-url-shortener', 'URL Shortener'), review('Answer the self-test of every card from this week. Write 5 flashcards for what you got wrong.')] },
-    ],
-  },
-  {
-    phase: 1,
-    theme: 'Creational and structural patterns · caching and databases',
-    goal: 'Pick the right cache pattern and database for a requirement, and explain why.',
-    days: [
-      { tasks: [patterns(['p01-singleton', 'Singleton'], ['p02-factory', 'Factory']), hldCard('08-caching', 'Caching', [vis('v03-caching-patterns')])] },
-      { tasks: [patterns(['p03-builder', 'Builder'], ['p04-prototype', 'Prototype']), hldCard('09-cdn', 'CDN and edge')] },
-      { tasks: [patterns(['p05-adapter', 'Adapter'], ['p07-facade', 'Facade']), hldCard('10-sql-deep-dive', 'SQL part 1: indexes and EXPLAIN')] },
-      { tasks: [patterns(['p06-decorator', 'Decorator'], undefined, [vis('v26-decorator-chain')]), hldCard('10-sql-deep-dive', 'SQL part 2: transactions, isolation, locking', [vis('v20-isolation-levels')])] },
-      { tasks: [patterns(['p08-proxy', 'Proxy'], ['p09-composite', 'Composite']), hldCard('11-nosql-types', 'NoSQL types and choosing a database')] },
-      { tasks: [lldTimed('02-lru-cache', 'LRU / LFU Cache'), hldCard('12-replication', 'Replication', [vis('v05-replication')], 60)], stretch: t('HLD', 30, 'Code: Snowflake IDs', 'Implement it and make the tests pass.', [code('04-snowflake-id')]) },
-      { tasks: [t('HLD', 75, 'Unique ID Generator: concept + design', 'Read the unique-ID card (25 min), then design the problem in 50 min.', [hc('25-unique-id-generation'), hp('03-unique-id-generator'), hpMine('03-unique-id-generator')]), review('Self-test all cards from this week. Redo the LRU cache get/put from memory in 10 min.')], stretch: t('HLD', 30, 'Code: base62 + ID ranges', 'Implement it and make the tests pass.', [code('05-base62-shortener')]) },
-    ],
-  },
-  {
-    phase: 1,
-    theme: 'Behavioural patterns · spreading data across machines',
-    goal: 'Explain sharding, consistent hashing, CAP and quorums with a drawing. Use Strategy/Observer/State without thinking.',
-    days: [
-      { tasks: [patterns(['p10-strategy', 'Strategy'], undefined, [vis('v23-strategy-factory')]), hldCard('13-partitioning-sharding', 'Partitioning and sharding', [vis('v06-sharding')])] },
-      { tasks: [patterns(['p11-observer', 'Observer'], undefined, [vis('v24-observer-pubsub')]), hldCard('14-consistent-hashing', 'Consistent hashing', [vis('v04-consistent-hashing')])], stretch: t('HLD', 40, 'Code: consistent hash ring', 'Implement it with virtual nodes.', [code('01-consistent-hashing')]) },
-      { tasks: [patterns(['p12-state', 'State'], undefined, [vis('v25-state-machine')]), hldCard('15-cap-pacelc-consistency', 'CAP, PACELC, consistency models', [vis('v07-cap-partition')])] },
-      { tasks: [patterns(['p13-command', 'Command + Memento'], undefined, [vis('v27-command-undo-redo')]), hldCard('16-quorum-leaderless', 'Quorums and leaderless replication', [vis('v08-quorum')])], stretch: t('HLD', 40, 'Code: quorum KV', 'Simulate N/R/W with node failures.', [code('08-quorum-kv')]) },
-      { tasks: [patterns(['p14-chain-of-responsibility', 'Chain of Responsibility']), hldCard('23-rate-limiting', 'Rate limiting', [vis('v09-rate-limiting')])], stretch: t('HLD', 40, 'Code: rate limiter algorithms', 'Token bucket and sliding window.', [code('02-rate-limiter-algorithms')]) },
-      { tasks: [lldTimed('04-rate-limiter', 'Rate Limiter (rewrite your v1)'), t('HLD', 60, 'Distributed Rate Limiter: design', 'Design it in my-design.md in 45 min, then compare.', [hp('02-rate-limiter'), hpMine('02-rate-limiter')])] },
-      { tasks: [hldFull('04-key-value-store', 'Distributed Key-Value Store'), review('Phase 1 gate (see below). Explain 10 concepts out loud, 2 min each. Record yourself once.')] },
-    ],
-    gate: [
-      'You can run the 45-minute HLD framework without notes.',
-      'You can explain caching patterns, replication, sharding, consistent hashing and CAP with a drawing, in 2 minutes each.',
-      'Parking Lot, LRU Cache and Rate Limiter are green in your own starter.ts.',
-      'You can name the pattern for: choosing an algorithm at runtime, reacting to events, objects with lifecycle states, undo.',
-    ],
-  },
-
-  // ===== Phase 2: Core problems =====
-  {
-    phase: 2,
-    theme: 'Async systems: queues, Kafka, idempotency',
-    goal: 'Design anything that sends messages. Know at-least-once + idempotency by heart.',
-    days: [
-      { tasks: [patterns(['p15-template-method', 'Template Method'], ['p16-iterator', 'Iterator']), hldCard('17-message-queues', 'Message queues')] },
-      { tasks: [patterns(['p17-mediator', 'Mediator'], ['p18-repository-di', 'Repository + DI']), hldCard('18-kafka-deep-dive', 'Kafka deep dive', [vis('v10-kafka-consumer-groups')])] },
-      { tasks: [lldDesign('05-notification-service', 'Notification Service', true), hldCard('19-idempotency-delivery-semantics', 'Idempotency and delivery semantics', [vis('v11-delivery-semantics')])] },
-      { tasks: [lldBuild('05-notification-service', 'Notification Service'), hldHalf1('05-notification-system', 'Notification System')] },
-      { tasks: [lldFinish('05-notification-service', 'Notification Service'), hldHalf2('05-notification-system', 'Notification System')] },
-      { tasks: [lldTimed('06-vending-machine', 'Vending Machine'), hldCard('05-realtime-communication', 'Real-time: polling, SSE, WebSockets', [vis('v14-realtime-transport')], 60)] },
-      { tasks: [hldFull('06-chat-system', 'Chat System (WhatsApp)'), review('Self-test this week\'s cards. Redo the vending machine state diagram from memory.')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Money and transactions (your strongest area: make it shine)',
-    goal: 'Design a payment system that a Razorpay interviewer would accept. Know Saga and Outbox cold.',
-    days: [
-      { tasks: [lldCard('06-concurrency-in-node', 'Concurrency and race conditions in Node', [vis('v30-node-event-loop')]), hldCard('20-distributed-transactions', 'Distributed transactions: 2PC, Saga, Outbox', [vis('v12-saga-outbox')])] },
-      { tasks: [lldDesign('07-tic-tac-toe', 'Tic-Tac-Toe'), hldCard('21-event-driven-cqrs', 'Event-driven, CQRS, event sourcing')] },
-      { tasks: [lldFinish('07-tic-tac-toe', 'Tic-Tac-Toe'), hldCard('35-payments-domain', 'Payments domain')] },
-      { tasks: [lldSprint('08-snake-ladder', 'Snake and Ladder'), hldHalf1('08-payment-system', 'Payment System')] },
-      { tasks: [lldDesign('09-splitwise', 'Splitwise'), hldHalf2('08-payment-system', 'Payment System')] },
-      { tasks: [lldTimed('09-splitwise', 'Splitwise'), hldCard('34-data-modeling-at-scale', 'Data modelling at scale', [vis('v15-feed-fanout')], 60)] },
-      { tasks: [hldFull('07-news-feed', 'News Feed'), review('Explain your payment design to your brother in 10 minutes. If he gets lost, simplify.')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Coordination and bookings',
-    goal: 'Never double-book a seat. Explain locks, leases and leader election.',
-    days: [
-      { tasks: [lldDesign('10-elevator', 'Elevator System'), hldCard('24-resilience-patterns', 'Resilience: timeouts, retries, circuit breakers', [vis('v13-circuit-breaker')])], stretch: t('HLD', 40, 'Code: circuit breaker + retry', 'With an injected clock and jitter.', [code('09-circuit-breaker')]) },
-      { tasks: [lldBuild('10-elevator', 'Elevator System'), hldCard('30-consensus-coordination', 'Consensus, leader election, locks', [vis('v18-raft-leader-election')])] },
-      { tasks: [lldFinish('10-elevator', 'Elevator System'), hldCard('22-microservices', 'Microservices, API gateway, discovery')] },
-      { tasks: [lldDesign('11-atm', 'ATM', true), hldHalf1('09-ticket-booking', 'Ticket Booking (BookMyShow)')] },
-      { tasks: [lldBuild('11-atm', 'ATM'), hldHalf2('09-ticket-booking', 'Ticket Booking (BookMyShow)')] },
-      { tasks: [lldTimed('13-bookmyshow', 'BookMyShow seat locking'), hldCard('28-geospatial', 'Geospatial indexing', [vis('v17-geohash-quadtree'), vis('v28-seat-locking')], 60)], stretch: t('HLD', 30, 'Code: geohash', 'Encode, decode, neighbours.', [code('06-geohash')]) },
-      { tasks: [hldFull('10-ride-hailing', 'Ride Hailing (Uber/Ola)'), review('Finish the ATM tests if they are still red. Self-test this week\'s cards.')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Search, storage and observability',
-    goal: 'Handle search, big files and "how do you know it works in production?".',
-    days: [
-      { tasks: [lldDesign('12-library-management', 'Library Management'), hldCard('27-search-indexing', 'Search and typeahead')], stretch: t('HLD', 40, 'Code: trie autocomplete', 'Top-k by prefix.', [code('07-trie-autocomplete')]) },
-      { tasks: [lldBuild('12-library-management', 'Library Management'), hldCard('29-probabilistic-data-structures', 'Bloom filter, HLL, Count-Min', [vis('v16-bloom-filter')])], stretch: t('HLD', 40, 'Code: Bloom filter + Count-Min', 'Both, with their tests.', [code('03-bloom-filter'), code('10-count-min-sketch')]) },
-      { tasks: [lldFinish('12-library-management', 'Library Management'), hldCard('26-blob-storage', 'Blob storage and large files')] },
-      { tasks: [lldDesign('14-kv-store', 'In-memory KV Store'), hldHalf1('11-food-delivery', 'Food Delivery (Swiggy)')] },
-      { tasks: [lldBuild('14-kv-store', 'In-memory KV Store'), hldHalf2('11-food-delivery', 'Food Delivery (Swiggy)')] },
-      { tasks: [lldTimed('14-kv-store', 'KV Store with transactions', 60), hldCard('31-observability', 'Observability and SLOs', [], 60)] },
-      { tasks: [hldFull('12-search-autocomplete', 'Search Autocomplete'), review('Self-test this week\'s cards. Redo the URL shortener diagram in 10 min (first spaced repeat).')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Pipelines, security and deployment',
-    goal: 'Cover the "platform" questions: batch vs stream, auth, multi-region.',
-    days: [
-      { tasks: [lldDesign('15-pub-sub-queue', 'Pub-Sub Queue (Kafka-lite)'), hldCard('33-batch-stream-processing', 'Batch and stream processing')] },
-      { tasks: [lldBuild('15-pub-sub-queue', 'Pub-Sub Queue'), hldCard('32-security-auth', 'Security and auth')] },
-      { tasks: [lldFinish('15-pub-sub-queue', 'Pub-Sub Queue'), hldCard('36-deployment-multi-region', 'Deployment and multi-region')] },
-      { tasks: [lldDesign('16-task-scheduler', 'Task Scheduler'), hldHalf1('13-web-crawler', 'Web Crawler')] },
-      { tasks: [lldBuild('16-task-scheduler', 'Task Scheduler'), hldHalf2('13-web-crawler', 'Web Crawler')] },
-      { tasks: [lldTimed('16-task-scheduler', 'Task Scheduler', 60), t('HLD', 60, 'Spaced repeat: URL Shortener + Rate Limiter', 'Redo both from memory, 25 min each. Compare with your Review notes.', [hp('01-url-shortener'), hp('02-rate-limiter')])] },
-      { tasks: [hldFull('14-video-streaming', 'Video Streaming (YouTube)'), review('Self-test this week\'s cards. List your 3 weakest concepts so far in the plan notes.')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Rewrite your v1 attempts · storage-heavy systems',
-    goal: 'Your old ride-sharing and food-delivery code becomes interview-grade. Design Dropbox and Instagram.',
-    days: [
-      { tasks: [lldDesign('17-ride-sharing', 'Ride Sharing', true), hldHalf1('15-file-storage', 'File Storage (Dropbox)')] },
-      { tasks: [lldBuild('17-ride-sharing', 'Ride Sharing'), hldHalf2('15-file-storage', 'File Storage (Dropbox)')] },
-      { tasks: [lldFinish('17-ride-sharing', 'Ride Sharing'), hldRedo('05-notification-system', 'Notification System')] },
-      { tasks: [lldDesign('18-food-delivery', 'Food Delivery', true), hldHalf1('16-photo-sharing', 'Photo Sharing (Instagram)')] },
-      { tasks: [lldBuild('18-food-delivery', 'Food Delivery'), hldHalf2('16-photo-sharing', 'Photo Sharing (Instagram)')] },
-      { tasks: [lldTimed('19-payment-wallet', 'Payment Wallet (ledger + idempotency)'), t('HLD', 60, 'Distributed Cache: design', 'Design it in 45 min, then compare.', [hp('17-distributed-cache'), hpMine('17-distributed-cache')])] },
-      { tasks: [hldFull('28-digital-wallet', 'Digital Wallet / UPI'), review('Finish Food Delivery tests. Self-test this week\'s cards.')] },
-    ],
-  },
-  {
-    phase: 2,
-    theme: 'Readiness gate: mocks',
-    goal: 'Prove you are interview-ready before real loops start next week.',
-    days: [
-      { tasks: [lldDesign('20-ecommerce-cart-coupons', 'Cart with Coupons'), hldRedo('06-chat-system', 'Chat System')] },
-      { tasks: [lldBuild('20-ecommerce-cart-coupons', 'Cart with Coupons'), hldRedo('08-payment-system', 'Payment System')] },
-      { tasks: [lldFinish('20-ecommerce-cart-coupons', 'Cart with Coupons'), t('HLD', 35, 'Leaderboard: fast design', 'A 30-min design: this is a medium problem, keep it tight.', [hp('21-leaderboard'), hpMine('21-leaderboard')])] },
-      { tasks: [lldSprint('01-parking-lot', 'Parking Lot'), t('HLD', 35, 'Proximity Service: fast design', 'A 30-min design. Reuse what you learned for Uber.', [hp('22-proximity-service'), hpMine('22-proximity-service')])] },
-      { tasks: [lldSprint('13-bookmyshow', 'BookMyShow'), hldRedo('09-ticket-booking', 'Ticket Booking')] },
-      { tasks: [t('MOCK', 90, 'Mock machine-coding: Meeting Room Scheduler', 'An unseen problem. Someone reads you the README prompt only. 90 min. Then compare with reference.ts.', [lp('21-meeting-room-scheduler')]), t('MOCK', 60, 'Mock HLD: Distributed Message Queue', 'An unseen problem, 45 min, ideally with a peer. Then compare with the hints.', [hp('18-distributed-message-queue'), hpMine('18-distributed-message-queue')])] },
-      { tasks: [t('REV', 75, 'Phase 2 gate review', 'Score yourself on the gate below. Write your weak list in plan/notes.md. Those topics go first in the Phase 3 debrief slots.', []), review('Plan the Phase 3 interview schedule with your pipeline.')] },
-    ],
-    gate: [
-      'You have done 14+ HLD designs with a filled Review section, and 2+ redos from memory.',
-      'You have 15+ LLD problems green in your own code.',
-      'In a 45-min mock you reach the deep dives by minute 25.',
-      'In a 90-min machine-coding mock you have working code + tests by minute 75.',
-      'You can explain Kafka consumer groups, the outbox pattern, idempotency keys and seat locking without notes.',
-    ],
-  },
-
-  // ===== Phase 3: Interview loop =====
-  ...phase3([
-    { theme: 'Observability-heavy systems', lld: ['22-text-editor', 'Text Editor (undo/redo)'], sprint: ['02-lru-cache', 'LRU Cache'], hldA: ['19-metrics-monitoring', 'Metrics and Monitoring'], adv: 'Distributed tracing system', sun: hldFull('23-hotel-booking', 'Hotel Reservation'), cards: [['08-caching', 'Caching'], ['12-replication', 'Replication']] },
-    { theme: 'Data pipelines at scale', lld: ['23-chess', 'Chess'], sprint: ['06-vending-machine', 'Vending Machine'], hldA: ['20-ad-click-aggregation', 'Ad Click Aggregation'], adv: 'Price alert system', sun: hldFull('24-job-scheduler', 'Distributed Job Scheduler'), cards: [['13-partitioning-sharding', 'Sharding'], ['17-message-queues', 'Message queues']] },
-    { theme: 'Real-time collaboration', lld: ['24-file-system', 'In-memory File System'], sprint: ['09-splitwise', 'Splitwise'], hldA: ['25-collaborative-editor', 'Collaborative Editor'], adv: 'Surge pricing engine', sun: hldFull('27-live-comments', 'Live Comments and Viewer Count'), cards: [['18-kafka-deep-dive', 'Kafka'], ['19-idempotency-delivery-semantics', 'Idempotency']] },
-    { theme: 'Low latency and location', lld: ['14-kv-store', 'KV Store (full redo)'], sprint: ['11-atm', 'ATM'], hldA: ['26-stock-exchange', 'Stock Exchange'], adv: 'ETA and live location sharing', sun: hldRedo('10-ride-hailing', 'Ride Hailing', 75), cards: [['20-distributed-transactions', 'Distributed transactions'], ['30-consensus-coordination', 'Consensus']] },
-    { theme: 'Fintech week (Razorpay / Juspay / PhonePe prep)', lld: ['19-payment-wallet', 'Payment Wallet (full redo)'], sprint: ['15-pub-sub-queue', 'Pub-Sub Queue'], hldA: null, advA: 'Credit card processing engine', adv: 'Wire transfer API between banks', sun: hldRedo('08-payment-system', 'Payment System', 75), cards: [['15-cap-pacelc-consistency', 'CAP and consistency'], ['16-quorum-leaderless', 'Quorums']] },
-    { theme: 'Platform and auth', lld: ['16-task-scheduler', 'Task Scheduler (full redo)'], sprint: ['10-elevator', 'Elevator'], hldA: null, advA: 'Login and authentication system', adv: 'A/B testing platform', sun: hldRedo('07-news-feed', 'News Feed', 75), cards: [['21-event-driven-cqrs', 'Event-driven and CQRS'], ['22-microservices', 'Microservices']] },
-    { theme: 'Consumer products', lld: ['18-food-delivery', 'Food Delivery (full redo)'], sprint: ['20-ecommerce-cart-coupons', 'Cart with Coupons'], hldA: null, advA: 'Calendar application', adv: 'Distributed file transfer (BitTorrent)', sun: hldRedo('14-video-streaming', 'Video Streaming', 75), cards: [['23-rate-limiting', 'Rate limiting'], ['24-resilience-patterns', 'Resilience']] },
-    { theme: 'Hot keys and incidents', lld: ['13-bookmyshow', 'BookMyShow (full redo)'], sprint: ['17-ride-sharing', 'Ride Sharing'], hldA: null, advA: 'Counting and broadcasting likes for very high traffic users', adv: 'On-call escalation system', sun: hldRedo('15-file-storage', 'File Storage', 75), cards: [['34-data-modeling-at-scale', 'Data modelling'], ['35-payments-domain', 'Payments']] },
-  ]),
-
-  // ===== Phase 4: Offers and sharpness =====
-  ...phase4(),
+const ADVANCED = [
+  'Distributed tracing system', 'Surge pricing engine', 'ETA and live location sharing', 'Login and authentication system',
+  'Credit card processing engine', 'Wire transfer API between banks', 'Price alert system', 'A/B testing platform',
+  'Ads serving for a social feed', 'User analytics pipeline', 'Calendar (Google Calendar)', 'Counting likes for celebrity posts',
+  'On-call escalation system', 'Rider matching', 'Reliable file downloader library', 'Bulk data migration to cloud',
+  'Distributed sort of huge datasets', 'Control plane for a distributed database', 'Marketplace inside a social app',
+  'Parts compatibility for e-commerce', 'Cluster health monitoring', 'Weather app backend', 'BitTorrent-style file transfer',
 ];
 
-interface P3 {
-  theme: string;
-  lld: [string, string];
-  sprint: [string, string];
-  hldA: [string, string] | null;
-  advA?: string;
-  adv: string;
-  sun: Task;
-  cards: [[string, string], [string, string]];
-}
+// ---------- link helpers ----------
+const lp = (s: string) => `lld/problems/${s}/README.md`;
+const hp = (s: string) => `hld/case-studies/${s}/README.md`;
+const hpMine = (s: string) => `hld/case-studies/${s}/my-design.md`;
+const ADV = 'hld/case-studies/advanced-37.md';
+const TEMPLATE = 'hld/case-studies/_template/my-design.md';
+const readme = (x: Concept) => `${conceptDir(x)}/README.md`;
+const visual = (x: Concept) => `${conceptDir(x)}/visual.html`;
+const demo = (x: Concept) => `${conceptDir(x)}/demo.ts`;
+const byId = (id: string) => CONCEPTS.find((x) => x.id === id)!;
+const FRAMEWORK_LLD = readme(byId('L30'));
+const FRAMEWORK_HLD = readme(byId('H01'));
 
-function phase3(specs: P3[]): Week[] {
-  return specs.map((s, i) => {
-    const a1 = s.hldA ? hldHalf1(s.hldA[0], s.hldA[1]) : advFull(s.advA!);
-    const a2 = s.hldA ? hldHalf2(s.hldA[0], s.hldA[1]) : t('HLD', 35, `Advanced: ${s.advA} (part 2)`, 'Deep dives, failure cases, then the Review section.', [ADV]);
-    const week: Week = {
-      phase: 3,
-      theme: s.theme,
-      goal: 'Keep the skills warm while real interviews run. Friday is reserved for fixing what interviews exposed.',
-      days: [
-        { tasks: [lldDesign(s.lld[0], s.lld[1]), refresh(s.cards[0], s.cards[1])] },
-        { tasks: [lldBuild(s.lld[0], s.lld[1]), a1] },
-        { tasks: [lldFinish(s.lld[0], s.lld[1]), a2] },
-        { tasks: [lldSprint(s.sprint[0], s.sprint[1]), advOutline(s.adv)] },
-        { tasks: [debrief('LLD'), debrief('HLD')] },
-        { tasks: [mockLld, mockHld()] },
-        { tasks: [s.sun, review('Update the pipeline. Turn every debrief gap into a task for next Friday.')] },
-      ],
-    };
-    if (i === specs.length - 1) {
-      week.gate = [
-        '3+ interview loops completed or running (career plan target).',
-        'Every interview has a debrief, and every gap has been fixed on a Friday.',
-        'All 28 HLD problems designed at least once; the top 10 designed twice.',
-        'All 24 LLD problems green in your own code.',
-      ];
-    }
-    return week;
-  });
-}
+const t = (track: Track, minutes: number, title: string, todo: string, links: string[], concept?: string): Task =>
+  concept ? { track, minutes, title, todo, links, concept } : { track, minutes, title, todo, links };
 
-// Phase 4: maintenance. Short daily redo sprints that rotate through everything, plus mocks.
-function phase4(): Week[] {
-  const lldAll: [string, string][] = [
-    ['01-parking-lot', 'Parking Lot'], ['13-bookmyshow', 'BookMyShow'], ['02-lru-cache', 'LRU Cache'], ['19-payment-wallet', 'Payment Wallet'],
-    ['09-splitwise', 'Splitwise'], ['04-rate-limiter', 'Rate Limiter'], ['10-elevator', 'Elevator'], ['14-kv-store', 'KV Store'],
-    ['05-notification-service', 'Notification Service'], ['16-task-scheduler', 'Task Scheduler'], ['17-ride-sharing', 'Ride Sharing'], ['20-ecommerce-cart-coupons', 'Cart with Coupons'],
-    ['06-vending-machine', 'Vending Machine'], ['15-pub-sub-queue', 'Pub-Sub Queue'], ['21-meeting-room-scheduler', 'Meeting Rooms'], ['03-logger', 'Logger'],
-    ['22-text-editor', 'Text Editor'], ['11-atm', 'ATM'], ['18-food-delivery', 'Food Delivery'], ['24-file-system', 'File System'],
-    ['12-library-management', 'Library'], ['07-tic-tac-toe', 'Tic-Tac-Toe'], ['23-chess', 'Chess'], ['08-snake-ladder', 'Snake and Ladder'],
-  ];
-  const hldAll: [string, string][] = [
-    ['08-payment-system', 'Payment System'], ['06-chat-system', 'Chat System'], ['07-news-feed', 'News Feed'], ['09-ticket-booking', 'Ticket Booking'],
-    ['10-ride-hailing', 'Ride Hailing'], ['05-notification-system', 'Notification System'], ['01-url-shortener', 'URL Shortener'], ['02-rate-limiter', 'Rate Limiter'],
-    ['11-food-delivery', 'Food Delivery'], ['28-digital-wallet', 'Digital Wallet'], ['17-distributed-cache', 'Distributed Cache'], ['04-key-value-store', 'KV Store'],
-    ['12-search-autocomplete', 'Autocomplete'], ['15-file-storage', 'File Storage'], ['14-video-streaming', 'Video Streaming'], ['16-photo-sharing', 'Photo Sharing'],
-    ['18-distributed-message-queue', 'Message Queue'], ['24-job-scheduler', 'Job Scheduler'], ['21-leaderboard', 'Leaderboard'], ['22-proximity-service', 'Proximity Service'],
-    ['19-metrics-monitoring', 'Metrics'], ['20-ad-click-aggregation', 'Ad Clicks'], ['23-hotel-booking', 'Hotel Booking'], ['13-web-crawler', 'Web Crawler'],
-    ['27-live-comments', 'Live Comments'], ['25-collaborative-editor', 'Collaborative Editor'], ['26-stock-exchange', 'Stock Exchange'], ['03-unique-id-generator', 'Unique IDs'],
-  ];
-  const cards: [string, string][] = [
-    ['01-how-to-approach-hld', 'HLD framework'], ['02-back-of-envelope', 'Estimation'], ['08-caching', 'Caching'], ['10-sql-deep-dive', 'SQL'],
-    ['12-replication', 'Replication'], ['13-partitioning-sharding', 'Sharding'], ['17-message-queues', 'Queues'], ['18-kafka-deep-dive', 'Kafka'],
-    ['19-idempotency-delivery-semantics', 'Idempotency'], ['20-distributed-transactions', 'Distributed transactions'], ['23-rate-limiting', 'Rate limiting'], ['24-resilience-patterns', 'Resilience'],
-    ['30-consensus-coordination', 'Consensus'], ['34-data-modeling-at-scale', 'Data modelling'], ['35-payments-domain', 'Payments'], ['36-deployment-multi-region', 'Multi-region'],
-  ];
-  const themes = [
-    'Offers start: keep sharp', 'Negotiation weeks', 'Final rounds', 'Final rounds', 'Close offers', 'Close offers', 'Notice period: stay sharp', 'Last week',
-  ];
-  const weeks: Week[] = [];
-  let li = 0, hi = 0, ci = 0;
-  for (let w = 0; w < 8; w++) {
-    const days: Day[] = [];
-    for (let d = 0; d < 5; d++) {
-      const l = lldAll[li++ % lldAll.length];
-      const h = hldAll[hi++ % hldAll.length];
-      days.push({
-        tasks: [
-          t('LLD', 20, `Sprint: ${l[1]}`, 'Rebuild the core classes from memory in 20 min. No reference.', [lp(l[0])]),
-          hldRedo(h[0], h[1], 25),
-        ],
-      });
+// ---------- task builders ----------
+const conceptTask = (x: Concept, min?: number): Task =>
+  x.id.startsWith('L')
+    ? t('LLD', min ?? 25, `${x.id} ${x.title}`, 'Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test.', [readme(x), visual(x), demo(x)], x.id)
+    : t('HLD', min ?? 35, `${x.id} ${x.title}`, 'Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud.', [readme(x), visual(x), demo(x)], x.id);
+
+const lldDesign = ([s, n]: [string, string]) => t('LLD', 25, `${n}: requirements + class diagram`, 'Steps 1–3 on paper: clarify, list entities, draw the class diagram, name the patterns. No code yet.', [lp(s), FRAMEWORK_LLD]);
+const lldBuild = ([s, n]: [string, string]) => t('LLD', 25, `${n}: build the core`, 'Code the main flow in starter.ts. Run `npx vitest run lld/problems/' + s + '` and get the first tests green.', [lp(s)]);
+const lldFinishTimed = ([s, n]: [string, string]) => t('LLD', 90, `${n}: finish + timed redo`, 'Finish starter.ts until all tests pass (40 min). Then answer the extension questions out loud. Only now open reference.ts and write down 3 differences.', [lp(s)]);
+const lldTimed = ([s, n]: [string, string]) => t('LLD', 90, `${n}: timed machine-coding round`, '90 min on a timer: 10 clarify, 10 design, 60 code + tests, 10 demo it out loud. Then compare with reference.ts and note 3 differences.', [lp(s), FRAMEWORK_LLD]);
+const lldSprint = (s: string) => t('LLD', 25, `Redo sprint: ${LLD_PROBLEMS.find((p) => p[0] === s)?.[1] ?? s}`, 'Empty file, 25 min. Rebuild the core classes and the main method from memory. Spaced repetition: this is what makes it stick.', [lp(s)]);
+
+const hldPart1 = ([s, n]: [string, string]) => t('HLD', 35, `${n}: part 1 (requirements → diagram)`, 'In my-design.md: requirements, estimates, API, data model, high-level diagram. Don\'t open the hints.', [hp(s), hpMine(s)]);
+const hldPart2 = ([s, n]: [string, string]) => t('HLD', 35, `${n}: part 2 (deep dives + compare)`, 'Write 2–3 deep dives and the trade-offs. Then open every hint, compare, and fill in the Review section.', [hp(s), hpMine(s)]);
+const hldFull = ([s, n]: [string, string]) => t('HLD', 75, `${n}: full design`, '45 min on a timer in my-design.md, talking out loud as if to an interviewer (do it as a mock if someone is free). Then 30 min comparing with the hints and filling in the Review.', [hp(s), hpMine(s), FRAMEWORK_HLD]);
+const hldRedo = (s: string, min = 35) => t('HLD', min, `Redo from memory: ${CASE_STUDIES.find((c) => c[0] === s)?.[1] ?? s}`, 'Blank page, 25 min: diagram + the top 3 deep dives. Then check against your old Review notes in my-design.md.', [hp(s), hpMine(s)]);
+const advOutline = (name: string) => t('HLD', 35, `Advanced: ${name} (outline)`, 'Copy the template to hld/case-studies/advanced/<name>.md. 30 min: requirements, diagram, top 2 deep dives. Use the mapping table in advanced-37.md.', [ADV, TEMPLATE]);
+const advFull = (name: string) => t('HLD', 75, `Advanced: ${name} (full round)`, 'Copy the template to hld/case-studies/advanced/<name>.md and run it like a real 45-min round, out loud. Then 30 min on what you missed.', [ADV, TEMPLATE, FRAMEWORK_HLD]);
+const refresh = (a: Concept, b: Concept, min = 35) => t('HLD', min, `Refresh: ${a.id} + ${b.id}`, 'Self-test only. Answer every question on both READMEs from memory, replay the visuals, then re-read only what you got wrong.', [readme(a), visual(a), readme(b), visual(b)]);
+const lldRefresh = (a: Concept, b: Concept) => t('LLD', 25, `Refresh: ${a.id} + ${b.id}`, 'Write both patterns from memory (10 min each), then diff against demo.ts.', [demo(a), demo(b)]);
+const debrief = (track: 'LLD' | 'HLD') => t(track, track === 'LLD' ? 25 : 35, 'Debrief fix', 'Fix the weakest topic from this week\'s real interviews (see ~/career-agent/debriefs/). No interview this week? Redo the self-test of your lowest-scored concept.', []);
+const lab = (x: Concept, l: string) => t('HLD', 60, `Lab: ${x.id} ${l.replace('lab-', '')}`, 'Implement starter.ts until `npx vitest run ' + `${conceptDir(x)}/${l}` + '` passes. Then compare with reference.ts.', [`${conceptDir(x)}/${l}/README.md`, readme(x)]);
+const handsOn = (x: Concept) => t('HLD', 60, `Hands-on: ${x.id} ${x.title}`, 'Pick one folder in hands-on/, run it with Docker or Node, and watch the behaviour the README describes. Write 3 lines on what you saw.', [`${conceptDir(x)}/hands-on/README.md`, readme(x)]);
+const mockHld = () => t('MOCK', 60, 'Mock HLD round', 'Ask a friend, or use Pramp / interviewing.io peers. Pick a case study you haven\'t done in 2 weeks. 45 min + feedback. Write a debrief.', [FRAMEWORK_HLD]);
+const mockLld = () => t('MOCK', 90, 'Mock machine-coding round', 'Someone else (your brother, a friend, Pramp) picks any finished LLD problem and plays the interviewer. 90 min, full round. Write a debrief.', [FRAMEWORK_LLD]);
+const review = (todo: string, links: string[] = []) => t('REV', 45, 'Weekly review', `${todo} Then run /daily week.`, links);
+
+// ---------- build the weeks ----------
+const lldQueue = CONCEPTS.filter((x) => x.id.startsWith('L'));
+const hldQueue = CONCEPTS.filter((x) => x.id.startsWith('H'));
+const problems = [...LLD_PROBLEMS];
+const cases = [...CASE_STUDIES];
+const advanced = [...ADVANCED];
+const covered: Concept[] = []; // in the order they were learned
+const conceptWeek = new Map<string, number>();
+const labQueue: { needs: string; task: () => Task }[] = CONCEPTS.flatMap((x) => [
+  ...(x.labs ?? []).map((l) => ({ needs: x.id, task: () => lab(x, l) })),
+  ...(x.handsOn ? [{ needs: x.id, task: () => handsOn(x) }] : []),
+]);
+let sprintI = 0;
+let hldRedoI = 0;
+let refreshI = 0;
+
+const take = <T>(q: T[]): T | undefined => q.shift();
+const learn = (x: Concept, w: number) => { covered.push(x); conceptWeek.set(x.id, w); return conceptTask(x); };
+const nextLld = (w: number): Task => { const x = take(lldQueue); return x ? learn(x, w) : lldSprint(LLD_HOT[sprintI++ % LLD_HOT.length]); };
+const nextHldConcept = (w: number): Task | undefined => { const x = take(hldQueue); return x ? learn(x, w) : undefined; };
+const nextRefresh = (track: 'LLD' | 'HLD', min?: number): Task => {
+  const pool = covered.filter((x) => x.id[0] === track[0]);
+  const a = pool[refreshI++ % pool.length], b = pool[refreshI++ % pool.length];
+  return track === 'LLD' ? lldRefresh(a, b) : refresh(a, b, min);
+};
+// Phase 1 Saturdays without a lab: explain this week's HLD concepts from their visuals.
+const explainDrill = (week: Concept[]): Task =>
+  t('HLD', 60, 'Explain-it drill', 'For each HLD concept from this week: replay the visual and explain it out loud, 5 min each, as if teaching your brother. Then redo the self-tests you missed.', week.filter((x) => x.id.startsWith('H')).flatMap((x) => [visual(x), readme(x)]));
+const nextLab = (): Task | undefined => {
+  const i = labQueue.findIndex((l) => conceptWeek.has(l.needs));
+  return i === -1 ? undefined : labQueue.splice(i, 1)[0].task();
+};
+const nextHldRedo = (min?: number) => hldRedo(HLD_HOT[hldRedoI++ % HLD_HOT.length], min);
+const nextHotCase = (): [string, string] => {
+  const id = HLD_HOT[hldRedoI++ % HLD_HOT.length];
+  return CASE_STUDIES.find((c) => c[0] === id)!;
+};
+
+const THEMES: Record<number, string> = {
+  11: 'Interview loop starts: the last building blocks', 12: 'Data pipelines and analytics', 13: 'Real-time collaboration',
+  14: 'Storage-heavy systems', 15: 'Fintech week (Razorpay / Juspay / PhonePe prep)', 16: 'Schedulers and platforms',
+  17: 'Senior-level problems', 18: 'Hot keys and incidents', 19: 'Offers start: keep sharp', 20: 'Negotiation weeks',
+  21: 'Final rounds', 22: 'Final rounds', 23: 'Close offers', 24: 'Close offers', 25: 'Notice period: stay sharp', 26: 'Last week',
+};
+const GOALS: Record<Week['phase'], string> = {
+  1: 'Learn one LLD and one HLD concept a day: visual, notes, code, self-test. Finish a timed LLD every Saturday and a full HLD every Sunday.',
+  2: 'Finish the concepts and do 2 HLD designs + 1 LLD problem every week. Explain every concept from its visual, out loud.',
+  3: 'Interviews are running. Hard designs, advanced problems, and fix what each interview exposed.',
+  4: 'Stay sharp with short redo sprints while you close offers. Never let the knowledge go cold.',
+};
+const GATES: Record<number, string[]> = {
+  3: [
+    'Explain OOP pillars, SOLID and 8 patterns from memory with a TS example each',
+    'Draw a request from browser to DB and back, naming every hop (DNS, LB, gateway, cache, DB)',
+    'Pick a cache pattern and a database for a requirement and justify both',
+    'Finished 3 timed LLD problems and 3 full HLD designs',
+  ],
+  10: [
+    'All 73 concept self-tests at 80%+ (redo the weak ones first)',
+    'Can whiteboard any of these in 45 min: URL shortener, chat, news feed, payment system, BookMyShow, Uber',
+    'Can finish Parking Lot or BookMyShow with tests in 90 min',
+    '2 mock rounds done with written debriefs',
+  ],
+  18: [
+    'All 28 case studies designed at least once, the 12 hot ones twice',
+    'All 24 LLD problems passing tests at least once',
+    '6+ real interviews done with debriefs; weak list is shrinking',
+  ],
+};
+
+export const WEEKS: Week[] = [];
+for (let w = 1; w <= WEEK_COUNT; w++) {
+  const phase = phaseOf(w);
+  const days: Day[] = [];
+  const thisWeekProblem = take(problems);
+  const firstConcept = covered.length;
+
+  // ---- Mon–Fri ----
+  const pair = phase >= 2 ? take(cases) : undefined;
+  for (let d = 0; d < 5; d++) {
+    let lld: Task;
+    let hld: Task;
+    if (phase === 1) {
+      lld = nextLld(w);
+      hld = nextHldConcept(w)!;
+    } else {
+      // LLD: concepts (or sprints) Mon–Wed, this week's problem Thu–Fri. Phase 3+: Wed is the debrief fix.
+      if (d < 3) lld = phase >= 3 && d === 2 ? debrief('LLD') : lldQueue.length || phase === 2 ? nextLld(w) : d === 0 ? nextRefresh('LLD') : nextLld(w);
+      else if (thisWeekProblem) lld = d === 3 ? lldDesign(thisWeekProblem) : lldBuild(thisWeekProblem);
+      else lld = lldSprint(LLD_HOT[sprintI++ % LLD_HOT.length]);
+      // HLD: concepts Mon–Wed while any remain; then advanced outlines and refreshes. Thu–Fri: a case study in two parts.
+      if (d < 3) {
+        const c = nextHldConcept(w);
+        if (c) hld = c;
+        else if (phase === 3 && d === 2) hld = debrief('HLD');
+        else if (d === 1 || (phase === 3 && d === 0)) hld = advanced.length ? advOutline(take(advanced)!) : nextHldRedo();
+        else hld = nextRefresh('HLD');
+      } else if (pair) hld = d === 3 ? hldPart1(pair) : hldPart2(pair);
+      else hld = nextHldRedo();
     }
-    const c1 = cards[ci++ % cards.length], c2 = cards[ci++ % cards.length];
-    days.push({ tasks: [mockLld, mockHld()] });
-    days.push({ tasks: [refresh(c1, c2), t('REV', 45, 'Weekly review', 'Debrief this week\'s interviews. Prepare company-specific questions for next week. Then run /daily week.', [])] });
-    weeks.push({
-      phase: 4,
-      theme: themes[w],
-      goal: 'Short daily sprints keep every problem fresh. Real interviews and mocks are the main practice now.',
-      days,
-    });
+    days.push({ tasks: [lld, hld] });
   }
-  return weeks;
+
+  // ---- Saturday: timed machine-coding + a lab ----
+  const satLld = thisWeekProblem ? (phase === 1 ? lldTimed(thisWeekProblem) : lldFinishTimed(thisWeekProblem)) : mockLld();
+  const satHld = nextLab() ?? (phase === 3 ? mockHld() : phase === 4 ? nextHldRedo(60) : explainDrill(covered.slice(firstConcept)));
+  const extraLab = phase >= 2 ? nextLab() : undefined;
+  days.push({ tasks: [satLld, satHld], ...(extraLab ? { stretch: { ...extraLab, minutes: 45 } } : {}) });
+
+  // ---- Sunday: full design + weekly review ----
+  const sunCase = take(cases);
+  const sunHld = sunCase ? hldFull(sunCase) : phase >= 4 && w % 2 === 0 ? mockHld() : advanced.length ? advFull(take(advanced)!) : hldFull(nextHotCase());
+  const thisWeek = covered.slice(firstConcept);
+  const spaced = covered.filter((x) => conceptWeek.get(x.id) === w - 3);
+  const reviewTodo = thisWeek.length
+    ? `Self-test every concept from this week (${thisWeek.map((x) => x.id).join(', ')})${spaced.length ? ` and the spaced review from 3 weeks ago (${spaced.map((x) => x.id).join(', ')})` : ''}. Replay any visual you couldn't explain. Write 5 flashcards for what you got wrong.`
+    : 'Score yourself 1–5 on each concept module. Redo the self-test of the two lowest, and update your weak list in plan/notes.md.';
+  days.push({ tasks: [sunHld, review(reviewTodo, [...thisWeek, ...spaced].slice(0, 12).map(readme))] });
+
+  const modules = MODULES.filter((m) => thisWeek.some((x) => x.module === m.dir)).map((m) => m.title.split(':')[0]);
+  const theme = THEMES[w] ?? (modules.length ? modules.join(' · ') : 'Problems and spaced review');
+  WEEKS.push({ phase, theme, goal: GOALS[phase], days, ...(GATES[w] ? { gate: GATES[w] } : {}) });
 }
+
+// Sanity checks: everything must get scheduled.
+const leftover = [...lldQueue, ...hldQueue].map((x) => x.id);
+if (leftover.length) throw new Error(`Concepts not scheduled: ${leftover.join(', ')}`);
+if (problems.length) throw new Error(`LLD problems not scheduled: ${problems.map((p) => p[0]).join(', ')}`);
+if (cases.length) throw new Error(`Case studies not scheduled: ${cases.map((p) => p[0]).join(', ')}`);
+if (labQueue.length) throw new Error(`Labs not scheduled: ${labQueue.map((l) => l.needs).join(', ')}`);

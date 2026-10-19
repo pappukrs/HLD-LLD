@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>L25 Chain of Responsibility</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../../shared/kit.css">
+<style>
+  .stage text { white-space: pre; }
+  .stage text.b { font-weight: 600; }
+  .stage .sep { stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .stage .arrow { fill: var(--muted); }
+  pre.code .ln { display: block; padding: 0 4px; border-radius: 4px; }
+  pre.code .ln.on { background: var(--accent-soft); outline: 1px solid var(--accent); }
+  .try-title { font: 650 18px/1.3 var(--font-display); margin: 0; }
+  .links { display: flex; gap: 16px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <nav class="crumbs">
+      <a href="../../../index.html">System Design Lab</a>
+      <span class="tag lld">L25 · Behavioral</span>
+      <span class="spacer"></span>
+      <button class="theme-btn" id="theme-btn" type="button">Theme</button>
+    </nav>
+    <h1>Chain of Responsibility: who stops the request?</h1>
+    <p class="lede">A payment request walks down a line of handlers: auth, rate limit, amount, fraud, then the charge. Each link either rejects and stops, or calls <code>next()</code>. Then the same idea as GoF objects: an ATM where each note cassette takes what it can and passes the rest.</p>
+  </header>
+
+  <section class="lab">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="stage" viewBox="0 0 760 450" role="img" aria-label="A payment request passing through a chain of handlers, and an ATM cassette chain"></svg>
+      </div>
+      <div class="controls" id="controls"></div>
+    </div>
+    <aside class="narration" id="narration">
+      <div class="legend">
+        <span><i style="background: var(--ok)"></i>Passed: called next()</span>
+        <span><i style="background: var(--bad)"></i>Rejected: chain stops</span>
+        <span><i style="background: var(--signal)"></i>Request in flight</span>
+      </div>
+    </aside>
+  </section>
+
+  <section class="lab" aria-label="Send your own request">
+    <div class="bench">
+      <div class="stage-wrap">
+        <svg class="stage" id="try" viewBox="0 0 760 230" role="img" aria-label="Interactive payment chain"></svg>
+      </div>
+      <div class="controls">
+        <label><input type="checkbox" id="t-token" checked> token</label>
+        <label for="t-user">user <select id="t-user"><option value="pappu">pappu</option><option value="new_42">new_42 (new)</option></select></label>
+        <label for="t-amt">amount <select id="t-amt"><option value="500">₹500</option><option value="5000" selected>₹5,000</option><option value="180000">₹1,80,000</option><option value="500000">₹5,00,000</option></select></label>
+        <label><input type="checkbox" id="t-fraud" checked> fraud link</label>
+        <button class="btn primary" type="button" id="t-send">Send</button>
+        <button class="btn" type="button" id="t-reset">Reset limiter</button>
+      </div>
+    </div>
+    <aside class="narration">
+      <section class="now">
+        <div class="step-no">Try it</div>
+        <h2 class="try-title">Build a request, send it</h2>
+        <p>Rate limit is 2 calls per user. Turn the fraud link off to see how the chain is assembled per endpoint: removing a link changes no other link.</p>
+      </section>
+      <section class="log">
+        <h3>Request log</h3>
+        <ol id="t-log"></ol>
+      </section>
+    </aside>
+  </section>
+
+  <section class="notes">
+    <div class="note">
+      <h3>Say this in the interview</h3>
+      <p class="say">"The checks before a payment are a chain of responsibility. Each link has one job and either rejects with a clear error or calls next. It is the same model as Express middleware and NestJS guards. Each endpoint composes its own chain from the same links, cheap checks first and the slow fraud call last."</p>
+    </div>
+    <div class="note">
+      <h3>The key lines</h3>
+<pre class="code" id="code"><span class="ln" data-k="type">type Middleware = (req, next) =&gt; Promise&lt;Result&gt;;</span><span class="ln" data-k="compose">const run = (i) =&gt; i === mws.length ? final(req)</span><span class="ln" data-k="compose">                                   : mws[i](req, () =&gt; run(i + 1));</span><span class="ln" data-k="auth">auth   = (r, next) =&gt; r.token ? next() : fail(401);</span><span class="ln" data-k="rate">rate   = (r, next) =&gt; hits(r) &lt;= 2 ? next() : fail(429);</span><span class="ln" data-k="amount">amount = (r, next) =&gt; inRange(r) ? next() : fail(400);</span><span class="ln" data-k="fraud">fraud  = (r, next) =&gt; risky(r) ? fail(403) : next();</span><span class="ln" data-k="refund">refund = compose([auth, amount], refundCharge);</span><span class="ln" data-k="atm">n2000.setNext(n500).setNext(n200).setNext(n100);</span><span class="ln" data-k="end">if (left &gt; 0 &amp;&amp; !this.next) throw 'cannot dispense';</span></pre>
+    </div>
+    <div class="note wide">
+      <h3>Chain vs Decorator vs Pipeline</h3>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>Chain of Responsibility</th><th>Decorator (L14)</th><th>Pipeline</th></tr></thead>
+          <tbody>
+            <tr><td>Can a link stop the request?</td><td>Yes, that is the point</td><td>No, always forwards</td><td>Usually no</td></tr>
+            <tr><td>Typical job</td><td>Reject early, or find the one who handles it</td><td>Add behaviour around one call</td><td>Transform data step by step</td></tr>
+            <tr><td>Node example</td><td>Express middleware, NestJS guards, ATM notes</td><td>Retry + logging around a client</td><td>Stream <code>pipe</code>, ETL steps</td></tr>
+            <tr><td>End of the line</td><td>Final handler, default, or error</td><td>The wrapped object</td><td>The sink</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="note">
+      <h3>Check yourself</h3>
+      <details class="qa"><summary>Why put the fraud check last?</summary><div>It costs around 50 ms and a network call. Cheap checks (auth, rate limit, amount) reject most bad requests first, so fraud runs only for requests that might succeed.</div></details>
+      <details class="qa"><summary>What happens in Express if a middleware neither responds nor calls next()?</summary><div>The request hangs until a timeout. Every link must either answer or pass on.</div></details>
+      <details class="qa"><summary>The ATM has notes left for part of ₹1,100 but not all. What should it do?</summary><div>Plan the whole amount first; if any remainder falls off the end of the chain, reject and remove no notes.</div></details>
+      <details class="qa"><summary>How do you test one link?</summary><div>Call it with a fake <code>next</code> and assert whether next was called and what it returned. No need to build the whole chain.</div></details>
+    </div>
+    <div class="note">
+      <h3>Practice</h3>
+      <ul>
+        <li>Build it: <a href="../../problems/11-atm/README.md">11 ATM</a></li>
+        <li>Levels and sinks: <a href="../../problems/03-logger/README.md">03 Logger</a></li>
+        <li>Rules in order: <a href="../../problems/20-ecommerce-cart-coupons/README.md">20 Cart with Coupons</a></li>
+        <li>Compare: <a href="../../3-structural/L14-decorator/README.md">L14 Decorator</a></li>
+      </ul>
+    </div>
+  </section>
+
+  <nav class="links">
+    <a href="README.md">README.md (notes)</a>
+    <a href="demo.ts">demo.ts (code)</a>
+  </nav>
+</div>
+
+<script src="../../../shared/kit.js"></script>
+<script>
+(function () {
+  var LINKS = ['auth', 'rateLimit', 'amount', 'fraud'];
+  var BX = { auth: 110, rateLimit: 235, amount: 360, fraud: 485, final: 610 };
+  var BW = 108, BY = 72, BH = 56, MID = 100;
+  var LIMIT = 2;
+  var NOTES = [2000, 500, 200, 100];
+
+  function fmt(n) { return '₹' + n.toLocaleString('en-IN'); }
+  function cx(name) { return BX[name] + BW / 2; }
+
+  // Each link: returns null to pass on, or an error string to stop.
+  function check(name, req, hits) {
+    if (name === 'auth') return req.token ? null : '401 no token';
+    if (name === 'rateLimit') {
+      var n = (hits[req.user] || 0) + 1; hits[req.user] = n;
+      return n <= LIMIT ? null : '429 limit ' + LIMIT;
+    }
+    if (name === 'amount') return req.amount > 0 && req.amount <= 200000 ? null : '400 range';
+    if (name === 'fraud') return req.amount > 150000 && req.user.indexOf('new') === 0 ? '403 risk 0.93' : null;
+    return null;
+  }
+
+  function drawChain(mk, root, opts) {
+    var v = { box: {}, sub: {}, rej: {} };
+    mk('text', { x: 20, y: 30, class: 'title', text: opts.title }, root);
+    mk('circle', { cx: 46, cy: MID, r: 23, class: 'box accent' }, root);
+    mk('text', { x: 46, y: MID + 4, 'text-anchor': 'middle', class: 'mono small', text: 'client' }, root);
+    mk('line', { x1: 66, y1: MID, x2: BX.final, y2: MID, class: 'wire' }, root);
+    LINKS.concat(['final']).forEach(function (n) {
+      v.box[n] = mk('rect', { x: BX[n], y: BY, width: BW, height: BH, rx: 8, class: 'box' + (n === 'final' ? ' signal' : '') }, root);
+      v.name = v.name || {};
+      v.name[n] = mk('text', { x: cx(n), y: BY + 24, 'text-anchor': 'middle', class: 'b', text: n === 'final' ? 'charge' : n }, root);
+      v.sub[n] = mk('text', { x: cx(n), y: BY + 44, 'text-anchor': 'middle', class: 'mono small muted', text: n === 'final' ? 'final handler' : 'next() or stop' }, root);
+      v.rej[n] = mk('text', { x: cx(n), y: BY + 82, 'text-anchor': 'middle', class: 'mono small fill-bad', text: '' }, root);
+    });
+    v.req = mk('text', { x: 20, y: opts.reqY, class: 'mono small', text: '' }, root);
+    v.res = mk('text', { x: 20, y: opts.reqY + 20, class: 'mono small', text: '' }, root);
+    return v;
+  }
+
+  function clearChain(v, inChain) {
+    LINKS.concat(['final']).forEach(function (n) {
+      var on = inChain.indexOf(n) >= 0 || n === 'final';
+      v.box[n].setAttribute('class', 'box' + (n === 'final' ? ' signal' : '') + (on ? '' : ' dim'));
+      v.rej[n].textContent = '';
+      if (n !== 'final') v.sub[n].textContent = on ? 'next() or stop' : 'not in chain';
+    });
+  }
+
+  function hl(keys) {
+    Array.prototype.forEach.call(document.querySelectorAll('#code .ln'), function (l) {
+      l.classList.toggle('on', keys.indexOf(l.getAttribute('data-k')) >= 0);
+    });
+  }
+
+  // ---------- guided lab ----------
+  function send(ctx, req, chain, finalName) {
+    var v = ctx.state.v, hits = ctx.state.hits;
+    clearChain(v, chain);
+    v.name.final.textContent = finalName;
+    v.req.textContent = 'request: user=' + req.user + ' token=' + (req.token ? 'yes' : 'no') + ' amount=' + fmt(req.amount);
+    v.res.textContent = '';
+    ctx.log('→ ' + finalName + ' ' + fmt(req.amount) + ' by ' + req.user, 'info');
+    var x = 66, i = 0;
+    function hop() {
+      if (i === chain.length) {
+        return ctx.packet([[x, MID], [cx('final'), MID]], { ms: 450 }).then(function () {
+          v.box.final.setAttribute('class', 'box ok'); ctx.flash(v.box.final);
+          v.res.textContent = 'response: 200 ' + finalName + ' done';
+          v.res.setAttribute('class', 'mono small fill-ok');
+          ctx.log('  ' + finalName + ' runs → 200 OK', 'ok');
+          return ctx.packet([[cx('final'), MID + 46], [46, MID + 46], [46, MID + 20]], { cls: 'ok', ms: 700 });
+        });
+      }
+      var n = chain[i++];
+      var skipped = LINKS.slice(LINKS.indexOf(chain[i - 2] || 'auth') + 1, LINKS.indexOf(n)).length > 0 && i > 1;
+      var pts = skipped ? [[x, MID], [x + 8, 50], [cx(n), 50], [cx(n), MID]] : [[x, MID], [cx(n), MID]];
+      return ctx.packet(pts, { ms: 500 }).then(function () {
+        var err = check(n, req, hits);
+        if (n === 'rateLimit') v.sub[n].textContent = 'hits ' + hits[req.user] + '/' + LIMIT;
+        if (err) {
+          v.box[n].setAttribute('class', 'box bad'); ctx.flash(v.box[n]);
+          v.rej[n].textContent = '✕ ' + err;
+          v.res.textContent = 'response: ' + err + ' (stopped at ' + n + ')';
+          v.res.setAttribute('class', 'mono small fill-bad');
+          ctx.log('  ' + n + ': STOP ' + err, 'bad');
+          return ctx.packet([[cx(n), MID + 46], [46, MID + 46], [46, MID + 20]], { cls: 'bad', ms: 600 });
+        }
+        v.box[n].setAttribute('class', 'box ok');
+        if (n !== 'rateLimit') v.sub[n].textContent = 'next()';
+        ctx.log('  ' + n + ': ok, next()', 'ok');
+        x = cx(n);
+        return hop();
+      });
+    }
+    return hop();
+  }
+
+  function drawAtm(ctx) {
+    var mk = function (t, a, p) { return ctx.el(t, a, p); };
+    var a = { box: {}, cnt: {}, take: {} };
+    mk('line', { x1: 20, y1: 268, x2: 740, y2: 268, class: 'sep' });
+    mk('text', { x: 20, y: 296, class: 'title', text: 'ATM: GoF object chain (take what you can, pass the rest)' });
+    NOTES.forEach(function (note, i) {
+      var x = 110 + i * 160;
+      a.box[note] = mk('rect', { x: x, y: 318, width: 124, height: 56, rx: 8, class: 'box' });
+      mk('text', { x: x + 62, y: 340, 'text-anchor': 'middle', class: 'b', text: '₹' + note });
+      a.cnt[note] = mk('text', { x: x + 62, y: 362, 'text-anchor': 'middle', class: 'mono small muted', text: '' });
+      a.take[note] = mk('text', { x: x + 62, y: 394, 'text-anchor': 'middle', class: 'mono small', text: '' });
+      if (i < 3) mk('line', { x1: x + 124, y1: 346, x2: x + 160, y2: 346, class: 'wire' });
+    });
+    mk('text', { x: 46, y: 350, 'text-anchor': 'middle', class: 'mono small muted', text: 'amount' });
+    a.out = mk('text', { x: 20, y: 432, class: 'mono small', text: '' });
+    return a;
+  }
+  function atmRender(ctx) {
+    var a = ctx.state.atm, c = ctx.state.cash;
+    NOTES.forEach(function (n) { a.cnt[n].textContent = 'notes left: ' + c[n]; });
+  }
+  function withdraw(ctx, amount) {
+    var a = ctx.state.atm, c = ctx.state.cash, plan = {}, left = amount, i = 0;
+    NOTES.forEach(function (n) { a.box[n].setAttribute('class', 'box'); a.take[n].textContent = ''; });
+    a.out.textContent = '';
+    ctx.log('ATM withdraw ' + fmt(amount), 'info');
+    var x = 46;
+    function hop() {
+      if (left === 0) {
+        NOTES.forEach(function (n) { c[n] -= plan[n] || 0; });
+        atmRender(ctx);
+        a.out.textContent = 'dispensed: ' + NOTES.filter(function (n) { return plan[n]; }).map(function (n) { return plan[n] + ' × ' + n; }).join(' + ');
+        a.out.setAttribute('class', 'mono small fill-ok');
+        ctx.log('  plan complete → commit notes', 'ok');
+        return Promise.resolve();
+      }
+      if (i === NOTES.length) {
+        a.out.textContent = 'cannot dispense ' + fmt(left) + ': fell off the end → reject, no notes removed';
+        a.out.setAttribute('class', 'mono small fill-bad');
+        ctx.log('  end of chain with ' + fmt(left) + ' left → reject, cassettes untouched', 'bad');
+        return ctx.packet([[x, 346], [740, 346]], { cls: 'bad', ms: 400, label: fmt(left) });
+      }
+      var n = NOTES[i++], bx = 110 + (i - 1) * 160 + 62;
+      return ctx.packet([[x, 346], [bx, 346]], { ms: 500, label: fmt(left) }).then(function () {
+        var k = Math.min(Math.floor(left / n), c[n]);
+        if (k > 0) { plan[n] = k; left -= k * n; }
+        a.box[n].setAttribute('class', 'box ' + (k > 0 ? 'ok' : 'dim'));
+        a.take[n].textContent = k > 0 ? 'takes ' + k + ', passes ' + fmt(left) : 'takes 0, passes on';
+        ctx.log('  ₹' + n + ' handler: takes ' + k + ', remaining ' + fmt(left), k > 0 ? 'ok' : '');
+        x = bx;
+        return hop();
+      });
+    }
+    return hop();
+  }
+
+  var FULL = ['auth', 'rateLimit', 'amount', 'fraud'];
+  Kit.lab({
+    stage: '#stage',
+    intro: { title: 'Four links and a final handler', say: 'POST /payments runs through auth, rateLimit, amount and fraud before the charge. Below it, an ATM uses the same pattern with objects.' },
+    setup: function (ctx) {
+      ctx.state.hits = {};
+      ctx.state.cash = { 2000: 2, 500: 3, 200: 5, 100: 0 };
+      ctx.state.v = drawChain(function (t, a, p) { return ctx.el(t, a, p); }, ctx.svg, { title: 'POST /payments: compose([auth, rateLimit, amount, fraud], charge)', reqY: 214 });
+      ctx.state.atm = drawAtm(ctx);
+      atmRender(ctx);
+      hl([]);
+    },
+    steps: [
+      {
+        title: 'Assemble the chain once',
+        say: 'At startup, <code>compose()</code> links the handlers in order. Each link knows only its own rule and how to call <code>next()</code>.',
+        run: function (ctx) {
+          hl(['type', 'compose']);
+          var v = ctx.state.v, chain = Promise.resolve();
+          FULL.concat(['final']).forEach(function (n) {
+            chain = chain.then(function () { v.box[n].setAttribute('class', 'box accent'); ctx.flash(v.box[n]); return ctx.wait(200); });
+          });
+          return chain.then(function () { clearChain(v, FULL); ctx.log('chain built: auth → rateLimit → amount → fraud → charge', 'info'); });
+        },
+      },
+      {
+        title: 'Happy path: every link calls next()',
+        say: 'pappu pays ₹5,000 with a valid token. Each link checks its rule, passes it on, and the final handler charges.',
+        run: function (ctx) { hl(['compose', 'auth', 'rate', 'amount', 'fraud']); return send(ctx, { user: 'pappu', token: true, amount: 5000 }, FULL, 'charge'); },
+      },
+      {
+        title: 'No token: auth stops it',
+        say: 'Auth rejects with 401 and does not call <code>next()</code>. The other links never run, so no rate-limit hit and no fraud call is wasted.',
+        run: function (ctx) { hl(['auth']); return send(ctx, { user: 'pappu', token: false, amount: 5000 }, FULL, 'charge'); },
+      },
+      {
+        title: 'Amount out of range: 400',
+        say: '₹5,00,000 passes auth and rate limit (hit 2 of 2), then the amount link stops it. Fraud and charge stay untouched.',
+        run: function (ctx) { hl(['amount']); return send(ctx, { user: 'pappu', token: true, amount: 500000 }, FULL, 'charge'); },
+      },
+      {
+        title: 'Fraud is last because it is slow',
+        say: 'A new user sends ₹1,80,000. Every cheap check passes, then the 50 ms fraud call returns risk 0.93 and stops it with 403.',
+        run: function (ctx) { hl(['fraud']); return send(ctx, { user: 'new_42', token: true, amount: 180000 }, FULL, 'charge'); },
+      },
+      {
+        title: 'Third call: rate limit stops it',
+        say: 'pappu already used 2 calls. The rate-limit link keeps its own counter and answers 429 without touching the rest.',
+        run: function (ctx) { hl(['rate']); return send(ctx, { user: 'pappu', token: true, amount: 100 }, FULL, 'charge'); },
+      },
+      {
+        title: 'Refund: same links, different chain',
+        say: 'The refund endpoint composes only <code>[auth, amount]</code>. The request jumps over rateLimit and fraud. No link changed; only the assembly did.',
+        run: function (ctx) { hl(['refund']); return send(ctx, { user: 'new_42', token: true, amount: 180000 }, ['auth', 'amount'], 'refund'); },
+      },
+      {
+        title: 'ATM ₹3,700: take what you can, pass the rest',
+        say: 'The ₹2000 handler takes 1 and passes ₹1,700. ₹500 takes 3 and passes ₹200. ₹200 takes 1. Nothing is left, so the plan is committed.',
+        run: function (ctx) { hl(['atm']); return withdraw(ctx, 3700); },
+      },
+      {
+        title: 'ATM ₹1,100: falls off the end',
+        say: 'No ₹500 notes left, ₹2000 is too big, ₹200 can give only 4 notes (₹800) and the ₹100 cassette is empty. ₹300 remains after the last link, so the ATM rejects the whole request and removes no notes. Always define the end of the chain.',
+        run: function (ctx) { hl(['end']); return withdraw(ctx, 1100); },
+      },
+    ],
+  });
+
+  // ---------- try-it panel ----------
+  var svg = document.getElementById('try'), logList = document.getElementById('t-log');
+  var mk = function (t, a, p) { return Kit.el(t, a, p); };
+  var tv = drawChain(mk, svg, { title: 'Your request', reqY: 196 });
+  var thits = {};
+  function tlog(msg, kind) { var li = document.createElement('li'); li.className = kind || ''; li.textContent = msg; logList.appendChild(li); logList.parentNode.scrollTop = logList.parentNode.scrollHeight; }
+  document.getElementById('t-send').addEventListener('click', function () {
+    var req = { user: document.getElementById('t-user').value, token: document.getElementById('t-token').checked, amount: parseInt(document.getElementById('t-amt').value, 10) };
+    var chain = document.getElementById('t-fraud').checked ? FULL : ['auth', 'rateLimit', 'amount'];
+    clearChain(tv, chain);
+    tv.req.textContent = 'request: user=' + req.user + ' token=' + (req.token ? 'yes' : 'no') + ' amount=' + fmt(req.amount);
+    var path = [];
+    for (var i = 0; i < chain.length; i++) {
+      var n = chain[i], err = check(n, req, thits);
+      path.push(n);
+      if (n === 'rateLimit') tv.sub[n].textContent = 'hits ' + thits[req.user] + '/' + LIMIT;
+      if (err) {
+        tv.box[n].setAttribute('class', 'box bad'); tv.rej[n].textContent = '✕ ' + err;
+        tv.res.textContent = 'response: ' + err; tv.res.setAttribute('class', 'mono small fill-bad');
+        tlog(path.join(' → ') + '  STOP ' + err, 'bad');
+        return;
+      }
+      tv.box[n].setAttribute('class', 'box ok');
+    }
+    tv.box.final.setAttribute('class', 'box ok');
+    tv.res.textContent = 'response: 200 charged ' + fmt(req.amount); tv.res.setAttribute('class', 'mono small fill-ok');
+    tlog(path.join(' → ') + ' → charge  200 OK', 'ok');
+  });
+  document.getElementById('t-reset').addEventListener('click', function () { thits = {}; clearChain(tv, FULL); tv.req.textContent = ''; tv.res.textContent = ''; tlog('rate limiter counters cleared', 'info'); });
+  clearChain(tv, FULL);
+  tlog('Pick options and press Send', 'info');
+})();
+</script>
+</body>
+</html>
