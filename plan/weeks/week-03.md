@@ -7,10 +7,10 @@
 
 ## Mon 2 Nov · Day 15 · 60 min
 
-- [ ] **LLD · 25 min**: L11 Builder  
+- [x] **LLD · 25 min**: L11 Builder  
   [L11-builder/README.md](../../lld/2-creational/L11-builder/README.md) · [visual](../../lld/2-creational/L11-builder/visual.html) · [demo.ts](../../lld/2-creational/L11-builder/demo.ts)  
   _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
-- [ ] **HLD · 35 min**: H11 Indexes: B-tree, hash, composite, covering  
+- [x] **HLD · 35 min**: H11 Indexes: B-tree, hash, composite, covering  
   [H11-indexing/README.md](../../hld/3-databases/H11-indexing/README.md) · [visual](../../hld/3-databases/H11-indexing/visual.html) · [demo.ts](../../hld/3-databases/H11-indexing/demo.ts)  
   _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
