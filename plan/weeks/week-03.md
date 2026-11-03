@@ -16,10 +16,10 @@
 
 ## Tue 3 Nov · Day 16 · 60 min
 
-- [ ] **LLD · 25 min**: L12 Prototype  
+- [x] **LLD · 25 min**: L12 Prototype  
   [L12-prototype/README.md](../../lld/2-creational/L12-prototype/README.md) · [visual](../../lld/2-creational/L12-prototype/visual.html) · [demo.ts](../../lld/2-creational/L12-prototype/demo.ts)  
   _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
-- [ ] **HLD · 35 min**: H12 Transactions, isolation levels and locking  
+- [x] **HLD · 35 min**: H12 Transactions, isolation levels and locking  
   [H12-transactions-isolation/README.md](../../hld/3-databases/H12-transactions-isolation/README.md) · [visual](../../hld/3-databases/H12-transactions-isolation/visual.html) · [demo.ts](../../hld/3-databases/H12-transactions-isolation/demo.ts)  
   _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
