@@ -25,10 +25,10 @@
 
 ## Wed 4 Nov · Day 17 · 60 min
 
-- [ ] **LLD · 25 min**: L13 Adapter  
+- [x] **LLD · 25 min**: L13 Adapter  
   [L13-adapter/README.md](../../lld/3-structural/L13-adapter/README.md) · [visual](../../lld/3-structural/L13-adapter/visual.html) · [demo.ts](../../lld/3-structural/L13-adapter/demo.ts)  
   _Play the visual first (5 min). Read the README. Run demo.ts, then close it and rewrite the core classes from memory in a scratch file. Answer the self-test._
-- [ ] **HLD · 35 min**: H13 Data modelling and normalization  
+- [x] **HLD · 35 min**: H13 Data modelling and normalization  
   [H13-data-modeling/README.md](../../hld/3-databases/H13-data-modeling/README.md) · [visual](../../hld/3-databases/H13-data-modeling/visual.html) · [demo.ts](../../hld/3-databases/H13-data-modeling/demo.ts)  
   _Play the visual (5 min). Read the README. Run demo.ts. Answer the self-test without peeking, then say the "Say this in the interview" part out loud._
 
